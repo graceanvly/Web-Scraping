@@ -10,117 +10,93 @@ class ScraperService
 {
     private Client $httpClient;
 
-	public function __construct()
-	{
-		$this->httpClient = new Client([
-			'timeout' => 60,
-			'headers' => [
-				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-				'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-				'Accept-Language' => 'en-US,en;q=0.9',
-				'Accept-Encoding' => 'gzip, deflate, br',
-				'Connection' => 'keep-alive',
-				'Upgrade-Insecure-Requests' => '1',
-				'Sec-Fetch-Dest' => 'document',
-				'Sec-Fetch-Mode' => 'navigate',
-				'Sec-Fetch-Site' => 'none',
-				'Sec-Fetch-User' => '?1',
-				'Cache-Control' => 'max-age=0',
-			],
-			'allow_redirects' => [
-				'max' => 5,
-				'strict' => false,
-				'referer' => true,
-				'protocols' => ['http', 'https'],
-			],
-			'verify' => false,
-			'cookies' => true,
-		]);
-	}
+    public function __construct()
+    {
+        $this->httpClient = new Client([
+            'timeout' => 60,
+            'headers' => [
+                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language' => 'en-US,en;q=0.9',
+                'Connection' => 'keep-alive',
+            ],
+            'allow_redirects' => [
+                'max' => 5,
+                'referer' => true,
+                'protocols' => ['http', 'https'],
+            ],
+            'verify' => false,
+            'cookies' => true,
+        ]);
+    }
 
     public function fetch(string $url): array
     {
         $attempts = [
-            // First attempt: Standard request
             ['headers' => []],
-            // Second attempt: With referer from Google
             ['headers' => [
                 'Referer' => 'https://www.google.com/',
                 'Sec-Fetch-Site' => 'cross-site',
             ]],
         ];
 
-        $lastResponse = null;
         $bestText = '';
         $bestHtml = '';
+        $finalUrl = $url;
 
-        foreach ($attempts as $i => $config) {
+        foreach ($attempts as $config) {
             try {
-                // Avoid sleeping to reduce total execution time
-                
                 $response = $this->httpClient->get($url, $config);
                 $html = (string) $response->getBody();
                 $text = $this->htmlToText($html);
-                
-                // Check if this attempt got better content
-                if (strlen($text) > strlen($bestText) && 
-                    strpos($text, 'Client Challenge') === false && 
-                    strpos($text, 'bot') === false) {
+
+                if ($this->isBetterContent($text, $bestText)) {
                     $bestText = $text;
                     $bestHtml = $html;
-                    $lastResponse = $response;
+                    $finalUrl = (string) $response->getHeaderLine('X-Guzzle-Redirect-History') ?: $url;
                 }
-                
-                // If we got good content, break early
-                if (strlen($text) > 1200 && strpos($text, 'Client Challenge') === false) {
+
+                if (strlen($text) > 1500 && !str_contains($text, 'Client Challenge')) {
                     break;
                 }
-                
             } catch (RequestException $e) {
-                // Continue to next attempt
                 continue;
             }
         }
 
-        // If HTTP attempts failed or content looks blocked, try headless browser render
-        $shouldUseBrowser = (!$lastResponse) || (strlen($bestText) < 800);
-        if ($shouldUseBrowser) {
+        // Fallback to headless browser
+        if (strlen($bestText) < 1000) {
             try {
                 $html = Browsershot::url($url)
                     ->setNodeBinary('node')
-                    ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-                    ->setExtraHttpHeaders([
-                        'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-                        'Accept-Language' => 'en-US,en;q=0.9',
-                        'Referer' => 'https://www.google.com/',
-                    ])
+                    ->timeout(120)
+                    ->setDelay(2000)
                     ->disableSandbox()
-                    // Keep overall timeout strict and avoid waiting indefinitely on network
-                    ->timeout(90)
-                    // Let the DOM load quickly, then give it a short fixed delay
-                    ->setDelay(1500)
+                    ->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
                     ->bodyHtml();
 
                 $text = $this->htmlToText($html);
-                if (strlen($text) > strlen($bestText)) {
+
+                if ($this->isBetterContent($text, $bestText)) {
                     $bestHtml = $html;
                     $bestText = $text;
                 }
             } catch (\Throwable $e) {
-                // Headless render failed; continue with best we have
+                // Return what we have, mark as blocked
+                return [
+                    'final_url' => $finalUrl,
+                    'html' => $bestHtml,
+                    'text' => $bestText,
+                    'blocked' => true,
+                ];
             }
         }
 
-        if (!$lastResponse && empty($bestHtml)) {
-            throw new \Exception('All scraping attempts failed');
-        }
-
-        $finalUrl = $lastResponse ? ((string) $lastResponse->getHeaderLine('X-Guzzle-Redirect-History') ?: $url) : $url;
-
         return [
             'final_url' => $finalUrl,
-            'html' => $bestHtml ?: ($lastResponse ? (string) $lastResponse->getBody() : ''),
-            'text' => $bestText ?: ($lastResponse ? $this->htmlToText((string) $lastResponse->getBody()) : ''),
+            'html' => $bestHtml,
+            'text' => $bestText,
+            'blocked' => false,
         ];
     }
 
@@ -128,22 +104,27 @@ class ScraperService
     {
         libxml_use_internal_errors(true);
         $dom = new \DOMDocument();
-        $loaded = $dom->loadHTML($html);
-
-        if (!$loaded) {
+        if (!$dom->loadHTML($html)) {
             return strip_tags($html);
         }
 
-        // Remove unwanted tags
         $xpath = new \DOMXPath($dom);
-        foreach ($xpath->query('//script|//style|//noscript') as $node) {
+
+        // Drop scripts, styles, navs, and footers
+        foreach ($xpath->query('//script|//style|//noscript|//nav|//footer') as $node) {
             $node->parentNode?->removeChild($node);
         }
 
         $text = $dom->textContent ?? '';
         $text = preg_replace('/\s+/', ' ', $text);
 
-        return trim((string) $text);
+        return trim($text);
+    }
+
+    private function isBetterContent(string $new, string $current): bool
+    {
+        return strlen($new) > strlen($current) &&
+            !str_contains(strtolower($new), 'client challenge') &&
+            !str_contains(strtolower($new), 'captcha');
     }
 }
-

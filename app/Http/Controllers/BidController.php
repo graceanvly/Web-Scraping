@@ -20,9 +20,9 @@ class BidController extends Controller
 
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
-		// Extend execution time for heavy pages (headless browser rendering)
 		@set_time_limit(180);
 		@ini_set('max_execution_time', '180');
+
 		$validated = $request->validate([
 			'url' => ['required', 'url']
 		]);
@@ -33,47 +33,69 @@ class BidController extends Controller
 
 			$rawHtmlToStore = $result['html'];
 			$rawHtmlPath = null;
-			$otherData = is_array($extracted['other_data'] ?? null) ? $extracted['other_data'] : [];
 
-			// Avoid inserting very large HTML into MySQL (can trigger "server has gone away").
-			// If large, store the HTML to storage and only keep a reference path in DB.
-			if (is_string($rawHtmlToStore) && strlen($rawHtmlToStore) > 400000) { // ~400 KB threshold
+			// Handle large HTML
+			if (is_string($rawHtmlToStore) && strlen($rawHtmlToStore) > 400000) {
 				try {
 					$filename = 'bids/' . uniqid('bid_', true) . '.html';
 					Storage::disk('local')->put($filename, $rawHtmlToStore);
 					$rawHtmlPath = storage_path('app/' . $filename);
 					$rawHtmlToStore = null;
-					$otherData['raw_html_path'] = $rawHtmlPath;
-					$otherData['raw_html_note'] = 'Raw HTML stored on disk due to size.';
 				} catch (\Throwable $e) {
-					Log::warning('Failed to persist raw HTML to storage', ['error' => $e->getMessage()]);
-					// As a fallback, truncate to a safe size
 					$rawHtmlToStore = substr($result['html'], 0, 380000);
-					$otherData['raw_html_note'] = 'HTML truncated due to size.';
 				}
 			}
 
-			$bid = new Bid();
-			$bid->url = $validated['url'];
-			$bid->title = $extracted['title'] ?? null;
-			$bid->end_date = $extracted['end_date'] ?? null;
-			$bid->naics_code = $extracted['naics_code'] ?? null;
-			$bid->other_data = $otherData ?: null;
-			$bid->raw_html = $rawHtmlToStore; // May be null if saved to disk
-			$bid->extracted_json = $extracted;
-			$bid->save();
+			// ✅ Filter bids before saving
+			$today = \Carbon\Carbon::today();
+			$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
+				$status = strtolower($bid['other_data']['status'] ?? '');
+				if ($status !== 'open') {
+					return false;
+				}
 
-			$message = 'Bid scraped successfully!';
-			if (isset($extracted['_warning'])) {
-				$message .= ' Note: ' . $extracted['_warning'];
+				if (!empty($bid['end_date'])) {
+					try {
+						$end = \Carbon\Carbon::parse($bid['end_date']);
+						if ($end->lt($today)) {
+							return false; // skip expired bids
+						}
+					} catch (\Exception $e) {
+						return false; // skip invalid dates
+					}
+				}
+
+				return true;
+			})->values()->all();
+
+			$saved = [];
+			foreach ($filteredBids as $bidData) {
+				$bid = new Bid();
+				$bid->url = $validated['url'];
+				$bid->title = $bidData['title'] ?? null;
+				$bid->end_date = $bidData['end_date'] ?? null;
+				$bid->naics_code = $bidData['naics_code'] ?? null;
+				$bid->other_data = $bidData['other_data'] ?? [];
+				$bid->raw_html = $rawHtmlToStore; // shared raw HTML
+				$bid->extracted_json = $bidData;
+				$bid->save();
+
+				$saved[] = $bid->id;
 			}
 
-			return redirect()->route('bids.show', $bid)->with('success', $message);
+			if (empty($saved)) {
+				return back()->withErrors(['url' => 'No open bids found on this page.']);
+			}
+
+			return redirect()->route('bids.index')
+				->with('success', count($saved) . ' bids scraped and saved successfully!');
 		} catch (\Throwable $e) {
 			Log::error('Scrape failed', ['error' => $e->getMessage()]);
-			return back()->withErrors(['url' => 'Failed to scrape this URL. ' . $e->getMessage()])->withInput();
+			return back()->withErrors(['url' => 'Failed to scrape this URL. ' . $e->getMessage()])
+				->withInput();
 		}
 	}
+
 
 	public function show(Bid $bid)
 	{

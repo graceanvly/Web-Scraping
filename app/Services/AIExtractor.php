@@ -13,7 +13,8 @@ class AIExtractor
 	public function __construct()
 	{
 		$this->httpClient = new Client([
-			'timeout' => 30,
+			'timeout' => 90,          // allow longer completion time
+			'connect_timeout' => 30,  // avoid infinite waits on connect
 		]);
 		$this->apiKey = (string) ($_ENV['OPENAI_API_KEY'] ?? '');
 		$this->model = (string) ($_ENV['OPENAI_MODEL'] ?? 'gpt-4o-mini');
@@ -23,32 +24,68 @@ class AIExtractor
 	{
 		if (empty($this->apiKey)) {
 			return [
-				'title' => $this->extractTitleFromUrl($url),
-				'end_date' => null,
-				'naics_code' => null,
-				'other_data' => null,
-				'_warning' => 'OPENAI_API_KEY is not set',
+				'bids' => [
+					[
+						'title' => $this->extractTitleFromUrl($url),
+						'end_date' => '',
+						'naics_code' => '',
+						'other_data' => ['note' => 'OPENAI_API_KEY is not set'],
+					]
+				]
 			];
 		}
 
-		// If content is blocked or minimal, provide basic extraction
 		if (strlen($text) < 500 || strpos($text, 'Client Challenge') !== false) {
 			return [
-				'title' => $this->extractTitleFromUrl($url),
-				'end_date' => null,
-				'naics_code' => null,
-				'other_data' => ['note' => 'Content may be blocked by anti-bot protection'],
-				'_warning' => 'Limited content due to bot detection',
+				'bids' => [
+					[
+						'title' => $this->extractTitleFromUrl($url),
+						'end_date' => '',
+						'naics_code' => '',
+						'other_data' => ['note' => 'Content may be blocked by anti-bot protection'],
+					]
+				]
 			];
 		}
 
-		$promptSystem = 'You are a precise data extraction assistant for government bidding pages. Extract required fields in strict JSON. Look for bid titles, proposal numbers, due dates, and NAICS codes.';
+		$promptSystem = 'You are a precise data extraction assistant for government and procurement web pages.
+			Extract only bids that are explicitly marked as "Open" (active).
+			Ignore all bids marked Closed, Pending, Canceled, or Expired.
+			Also ignore any bid whose due date is already earlier than today.
+			Do not return generic headers or page titles like "Open Bids And Proposals".
+			Always output in strict JSON format.';
+
+
 		$promptUser = [
-			'instructions' => 'Extract the following fields from this bidding/procurement page. Look for bid titles, proposal numbers, due dates, and NAICS codes. Return ISO8601 date for end_date if present. For the title field, prioritize the most complete and descriptive title available - this should include the full project name, any specific locations, school names, or detailed descriptions. Examples of good titles: "Lease-Leaseback Construction Services (Alberta Martone, James Marshall, Catherine Everett and Rose Avenue Elementary Schools Expanded Learning Wellness Center Building and Site Improvements Projects)" or "Professional Engineering Services for Downtown Infrastructure Rehabilitation Phase II". Avoid generic titles like "Construction Services" or "Professional Services" - extract the full descriptive title when available.',
-			'fields' => ['title', 'end_date', 'naics_code', 'other_data'],
-			'url' => $url,
-			'text_excerpt' => mb_substr($text, 0, 6000),
+			'instructions' => 'From the provided bidding/procurement page text, extract only bids that have status "Open" 
+			AND whose due date has not yet passed (>= today).
+			Output strictly as JSON in this structure:
+			{
+			"bids": [
+				{
+				"title": "...",
+				"end_date": "...",
+				"naics_code": "...",
+				"other_data": { ... }
+				}
+			]
+			}
+
+			Rules:
+			- Include only bids where status = "Open" AND due date is today or in the future.
+			- Skip any bid with status Closed, Pending, or Cancelled.
+			- Skip any bid with a due date earlier than today.
+			- title: Use the most descriptive project/bid title.
+			- end_date: ISO8601 (YYYY-MM-DDTHH:MM:SS) or empty string if missing.
+			- naics_code: empty string if not found.
+			- other_data: include solicitation number, type, response method, status, documents, etc.
+			- Never return null — always use empty string or empty object.
+			',
+			'url' => $url ?? '',
+			'text_excerpt' => mb_substr($text ?? '', 0, 20000),
 		];
+
+
 
 		$body = [
 			'model' => $this->model,
@@ -72,36 +109,37 @@ class AIExtractor
 		$content = $json['choices'][0]['message']['content'] ?? '{}';
 		$data = json_decode($content, true);
 
-		return [
-			'title' => $data['title'] ?? $this->extractTitleFromUrl($url),
-			'end_date' => $data['end_date'] ?? null,
-			'naics_code' => $data['naics_code'] ?? null,
-			'other_data' => $data['other_data'] ?? null,
-		];
+		// Ensure structure
+		$bids = $data['bids'] ?? [];
+
+		// Normalize: no nulls
+		$normalized = array_map(function ($bid) use ($url) {
+			return [
+				'title' => $bid['title'] ?? $this->extractTitleFromUrl($url),
+				'end_date' => $bid['end_date'] ?? '',
+				'naics_code' => $bid['naics_code'] ?? '',
+				'other_data' => $bid['other_data'] ?? new \stdClass(),
+			];
+		}, $bids);
+
+		return ['bids' => $normalized];
 	}
 
 	private function extractTitleFromUrl(string $url): string
 	{
 		$path = parse_url($url, PHP_URL_PATH);
 		$segments = explode('/', trim($path, '/'));
-		
-		// Look for segments that might contain descriptive information
-		$descriptiveSegments = array_filter($segments, function($segment) {
+
+		$descriptiveSegments = array_filter($segments, function ($segment) {
 			return strlen($segment) > 5 && !is_numeric($segment);
 		});
-		
-		if (!empty($descriptiveSegments)) {
-			// Use the most descriptive segment
-			$title = end($descriptiveSegments);
-		} else {
-			$title = end($segments);
-		}
-		
-		// Convert URL segment to readable title
+
+		$title = !empty($descriptiveSegments) ? end($descriptiveSegments) : end($segments);
+
 		$title = str_replace(['-', '_', '%20'], ' ', $title);
 		$title = urldecode($title);
 		$title = ucwords(strtolower($title));
-		
+
 		return $title ?: 'Bidding Page';
 	}
 }
