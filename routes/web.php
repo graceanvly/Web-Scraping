@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Route;
 
 use App\Http\Controllers\BidController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BidUrlController;
 
 // Auth
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
@@ -26,4 +27,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/', [BidController::class, 'index'])->name('bids.index');
     Route::post('/bids', [BidController::class, 'store'])->name('bids.store');
     Route::get('/bids/{bid}', [BidController::class, 'show'])->name('bids.show');
+    Route::post('/bidurl/scrape-all', [BidController::class, 'scrapeAll'])->name('bidurl.scrapeAll');
+
+    Route::get('/bidurl/upload', [BidUrlController::class, 'create'])->name('bidurl.create');
+    Route::post('/bidurl/upload', [BidUrlController::class, 'store'])->name('bidurl.store');
+    Route::get('/bidurl', [BidUrlController::class, 'index'])->name('bidurl.index');
+    Route::get('/bidurl/{bidUrl}', [BidUrlController::class, 'show'])->name('bidurl.show');
 });

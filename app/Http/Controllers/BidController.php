@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Bid;
+use App\Models\BidUrl;
 use App\Services\AIExtractor;
 use App\Services\ScraperService;
 use Illuminate\Http\Request;
@@ -100,5 +101,57 @@ class BidController extends Controller
 	public function show(Bid $bid)
 	{
 		return view('bids.show', compact('bid'));
+	}
+	public function scrapeAll(Request $request, ScraperService $scraper, AIExtractor $ai)
+	{
+		$bidUrls = BidUrl::all();
+		$scraped = 0;
+		$errors = [];
+
+		foreach ($bidUrls as $bidUrl) {
+			try {
+				$result = $scraper->fetch($bidUrl->url);
+				$extracted = $ai->extract($bidUrl->url, $result['html'], $result['text']);
+
+				$today = \Carbon\Carbon::today();
+				$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
+					$status = strtolower($bid['other_data']['status'] ?? '');
+					if ($status !== 'open')
+						return false;
+					if (!empty($bid['end_date'])) {
+						try {
+							$end = \Carbon\Carbon::parse($bid['end_date']);
+							if ($end->lt($today))
+								return false;
+						} catch (\Exception $e) {
+							return false;
+						}
+					}
+					return true;
+				})->values()->all();
+
+				foreach ($filteredBids as $bidData) {
+					$bid = new Bid();
+					$bid->url = $bidUrl->url;
+					$bid->title = $bidData['title'] ?? null;
+					$bid->end_date = $bidData['end_date'] ?? null;
+					$bid->naics_code = $bidData['naics_code'] ?? null;
+					$bid->other_data = $bidData['other_data'] ?? [];
+					$bid->raw_html = $result['html'];
+					$bid->extracted_json = $bidData;
+					$bid->save();
+					$scraped++;
+				}
+			} catch (\Throwable $e) {
+				Log::error('Scrape failed for URL: ' . $bidUrl->url, ['error' => $e->getMessage()]);
+				$errors[] = $bidUrl->url;
+			}
+		}
+
+		$msg = "$scraped bids scraped and saved.";
+		if ($errors)
+			$msg .= " Failed URLs: " . implode(', ', $errors);
+
+		return redirect()->route('bids.index')->with('success', $msg);
 	}
 }

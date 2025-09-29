@@ -48,7 +48,7 @@ class AIExtractor
 			];
 		}
 
-		$promptSystem = 'You are a precise data extraction assistant for government and procurement web pages.
+		$promptSystem = 'You are a precise data extraction assistant or agent for government and procurement web pages.
 			Extract only bids that are explicitly marked as "Open" (active).
 			Ignore all bids marked Closed, Pending, Canceled, or Expired.
 			Also ignore any bid whose due date is already earlier than today.
