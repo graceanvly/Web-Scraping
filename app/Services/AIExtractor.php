@@ -78,11 +78,16 @@ class AIExtractor
 			- title: Use the most descriptive project/bid title.
 			- end_date: ISO8601 (YYYY-MM-DDTHH:MM:SS) or empty string if missing.
 			- naics_code: empty string if not found.
-			- other_data: include solicitation number, type, response method, status, documents, etc.
+			- other_data: include **all other important bid-related information** found (e.g. solicitation number, type, category, agency, contact info, response method, status, budget, documents, description, etc.). 
+			Do not add fields if they are not present in the page.
+			- For documents/attachments: extract all links (<a> tags) that point to files 
+			(PDF, DOCX, XLS, etc.) or look like bid-related documents. 
+			Capture both the link text and the href.
 			- Never return null — always use empty string or empty object.
 			',
 			'url' => $url ?? '',
 			'text_excerpt' => mb_substr($text ?? '', 0, 20000),
+			'html_excerpt' => mb_substr($html, 0, 20000),
 		];
 
 

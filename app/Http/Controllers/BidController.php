@@ -71,6 +71,16 @@ class BidController extends Controller
 
 			$saved = [];
 			foreach ($filteredBids as $bidData) {
+				// 🔍 Check if this bid already exists
+				$exists = Bid::where('url', $validated['url'])
+					->where('title', $bidData['title'] ?? null)
+					->exists();
+
+				if ($exists) {
+					$duplicates[] = $bidData['title'] ?? '(untitled bid)';
+					continue;
+				}
+
 				$bid = new Bid();
 				$bid->url = $validated['url'];
 				$bid->title = $bidData['title'] ?? null;
@@ -83,13 +93,25 @@ class BidController extends Controller
 
 				$saved[] = $bid->id;
 			}
+			// 🛑 If no bids saved and only duplicates → show error
+			if (empty($saved) && !empty($duplicates)) {
+				return back()->withErrors([
+					'url' => 'All bids on this page were duplicates: ' . implode(', ', $duplicates)
+				]);
+			}
 
-			if (empty($saved)) {
+			// 🛑 If no bids at all
+			if (empty($saved) && empty($duplicates)) {
 				return back()->withErrors(['url' => 'No open bids found on this page.']);
 			}
 
-			return redirect()->route('bids.index')
-				->with('success', count($saved) . ' bids scraped and saved successfully!');
+			// ✅ Success message
+			$msg = '';
+			if ($saved) {
+				$msg .= count($saved) . ' bids scraped and saved successfully! ';
+			}
+
+			return redirect()->route('bids.index')->with('success', trim($msg));
 		} catch (\Throwable $e) {
 			Log::error('Scrape failed', ['error' => $e->getMessage()]);
 			return back()->withErrors(['url' => 'Failed to scrape this URL. ' . $e->getMessage()])
@@ -104,8 +126,13 @@ class BidController extends Controller
 	}
 	public function scrapeAll(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
+		// Allow longer execution time for multiple URLs
+		@set_time_limit(300);
+		@ini_set('max_execution_time', '300');
+
 		$bidUrls = BidUrl::all();
 		$scraped = 0;
+		$duplicates = 0;
 		$errors = [];
 
 		foreach ($bidUrls as $bidUrl) {
@@ -116,13 +143,15 @@ class BidController extends Controller
 				$today = \Carbon\Carbon::today();
 				$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
 					$status = strtolower($bid['other_data']['status'] ?? '');
-					if ($status !== 'open')
+					if ($status !== 'open') {
 						return false;
+					}
 					if (!empty($bid['end_date'])) {
 						try {
 							$end = \Carbon\Carbon::parse($bid['end_date']);
-							if ($end->lt($today))
+							if ($end->lt($today)) {
 								return false;
+							}
 						} catch (\Exception $e) {
 							return false;
 						}
@@ -131,6 +160,15 @@ class BidController extends Controller
 				})->values()->all();
 
 				foreach ($filteredBids as $bidData) {
+					$exists = Bid::where('url', $bidUrl->url)
+						->where('title', $bidData['title'] ?? null)
+						->exists();
+
+					if ($exists) {
+						$duplicates++;
+						continue; // Skip duplicates
+					}
+
 					$bid = new Bid();
 					$bid->url = $bidUrl->url;
 					$bid->title = $bidData['title'] ?? null;
@@ -140,18 +178,27 @@ class BidController extends Controller
 					$bid->raw_html = $result['html'];
 					$bid->extracted_json = $bidData;
 					$bid->save();
+
 					$scraped++;
 				}
 			} catch (\Throwable $e) {
-				Log::error('Scrape failed for URL: ' . $bidUrl->url, ['error' => $e->getMessage()]);
+				Log::error('Scrape failed for URL: ' . $bidUrl->url, [
+					'error' => $e->getMessage()
+				]);
 				$errors[] = $bidUrl->url;
 			}
 		}
 
-		$msg = "$scraped bids scraped and saved.";
-		if ($errors)
+		// Build summary message
+		$msg = "$scraped new bids scraped and saved.";
+		if ($duplicates > 0) {
+			$msg .= " Skipped $duplicates duplicate bids.";
+		}
+		if ($errors) {
 			$msg .= " Failed URLs: " . implode(', ', $errors);
+		}
 
 		return redirect()->route('bids.index')->with('success', $msg);
 	}
+
 }

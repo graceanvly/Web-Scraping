@@ -1,15 +1,18 @@
 <!doctype html>
 <html>
+
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Bid Scraper</title>
 	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 	<style>
-		html, body {
+		html,
+		body {
 			margin: 0;
 			padding: 0;
-			min-height: 100vh; /* full viewport height */
+			min-height: 100vh;
+			/* full viewport height */
 			background: linear-gradient(135deg, #f5f7fa 0%, #e4ebf5 100%);
 			font-family: system-ui, sans-serif;
 		}
@@ -42,10 +45,11 @@
 			background: #fff;
 			border-radius: 8px;
 			overflow: hidden;
-			box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 		}
 
-		th, td {
+		th,
+		td {
 			padding: 0.75rem 1rem;
 			text-align: left;
 		}
@@ -53,7 +57,8 @@
 		thead {
 			background: #f0f2f5;
 			font-weight: 600;
-			color: #1d4ed8; /* blue headers */
+			color: #1d4ed8;
+			/* blue headers */
 		}
 
 		tbody tr:nth-child(even) {
@@ -83,6 +88,7 @@
 		}
 	</style>
 </head>
+
 <body>
 	<main class="container">
 		<!-- Navigation -->
@@ -101,17 +107,20 @@
 				<!-- Right: Scrape All -->
 				<form method="POST" action="{{ route('bidurl.scrapeAll') }}">
 					@csrf
-					<button type="submit" class="contrast" style="padding:0.6rem 1.2rem; font-size:0.95rem; white-space:nowrap;">
+					<button type="submit" class="contrast"
+						style="padding:0.6rem 1.2rem; font-size:0.95rem; white-space:nowrap;">
 						🚀 Scrape All
 					</button>
 				</form>
 
 				<!-- Left: Add URL -->
-				<form method="POST" action="{{ route('bids.store') }}" style="display:flex; gap:0.5rem; flex:1; max-width:600px;">
+				<form method="POST" action="{{ route('bids.store') }}"
+					style="display:flex; gap:0.5rem; flex:1; max-width:600px;">
 					@csrf
-					<input type="url" id="url" name="url" value="{{ old('url') }}" placeholder="Enter bidding URL…" required
-						style="flex:1; min-width:80px; padding:0.6rem 0.75rem; font-size:0.95rem;">
-					<button type="submit" style="flex:0; width:auto; padding:0.45rem 0.9rem; font-size:0.85rem; white-space:nowrap;">
+					<input type="url" id="url" name="url" value="{{ old('url') }}" placeholder="Enter bidding URL…"
+						required style="flex:1; min-width:80px; padding:0.6rem 0.75rem; font-size:0.95rem;">
+					<button type="submit"
+						style="flex:0; width:auto; padding:0.45rem 0.9rem; font-size:0.85rem; white-space:nowrap;">
 						Scrape
 					</button>
 				</form>
@@ -138,7 +147,7 @@
 						@forelse ($bids as $bid)
 							<tr>
 								<td><a href="{{ route('bids.show', $bid) }}">{{ $bid->title ?? '—' }}</a></td>
-								<td>{{ optional($bid->end_date)->toDateTimeString() ?? '—' }}</td>
+								<td>{{ $bid->end_date ? $bid->end_date->format('M. d, Y h:i a') : '—' }}</td>
 								<td>{{ $bid->naics_code ?? '—' }}</td>
 								<td><a href="{{ $bid->url }}" target="_blank" rel="noreferrer">Open</a></td>
 							</tr>
@@ -153,4 +162,5 @@
 		</section>
 	</main>
 </body>
+
 </html>
