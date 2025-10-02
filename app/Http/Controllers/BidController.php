@@ -200,5 +200,23 @@ class BidController extends Controller
 
 		return redirect()->route('bids.index')->with('success', $msg);
 	}
+	public function update(Request $request, Bid $bid)
+	{
+		$validated = $request->validate([
+			'title' => 'required|string|max:255',
+			'end_date' => 'nullable|date',
+			'naics_code' => 'nullable|string|max:50',
+		]);
+
+		$bid->update($validated);
+
+		return redirect()->route('bids.index')->with('success', 'Bid updated successfully.');
+	}
+
+	public function destroy(Bid $bid)
+	{
+		$bid->delete();
+		return redirect()->route('bids.index')->with('success', 'Bid deleted successfully.');
+	}
 
 }

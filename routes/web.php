@@ -27,6 +27,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/', [BidController::class, 'index'])->name('bids.index');
     Route::post('/bids', [BidController::class, 'store'])->name('bids.store');
     Route::get('/bids/{bid}', [BidController::class, 'show'])->name('bids.show');
+    Route::put('/bids/{bid}', [BidController::class, 'update'])->name('bids.update');
+    Route::delete('/bids/{bid}', [BidController::class, 'destroy'])->name('bids.destroy');
     Route::post('/bidurl/scrape-all', [BidController::class, 'scrapeAll'])->name('bidurl.scrapeAll');
 
     Route::get('/bidurl/upload', [BidUrlController::class, 'create'])->name('bidurl.create');
