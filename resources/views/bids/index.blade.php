@@ -234,7 +234,7 @@
 				<form method="POST" action="{{ route('bids.store') }}"
 					style="display:flex; gap:0.5rem; flex:1; max-width:600px;">
 					@csrf
-					<input type="url" id="url" name="url" value="{{ old('url') }}" placeholder="Enter bidding URL…"
+					<input type="URL" id="URL" name="URL" value="{{ old('URL') }}" placeholder="Enter bidding URL…"
 						required style="flex:1; min-width:80px; padding:0.6rem 0.75rem; font-size:0.95rem;">
 					<button type="submit"
 						style="flex:0; width:auto; padding:0.45rem 0.9rem; font-size:0.85rem; white-space:nowrap;">
@@ -242,7 +242,7 @@
 					</button>
 				</form>
 			</div>
-			@error('url')
+			@error('URL')
 				<small style="color:red; display:block; margin-top:0.5rem;">{{ $message }}</small>
 			@enderror
 		</section>
@@ -269,7 +269,7 @@
 					<input type="text" id="searchInput" placeholder="Search…" />
 					<select id="filterNaics">
 						<option value="">NAICS</option>
-						@foreach ($bids->pluck('naics_code')->unique() as $code)
+						@foreach ($bids->pluck('NAICSCODE')->unique() as $code)
 							@if ($code)
 								<option value="{{ $code }}">{{ $code }}</option>
 							@endif
@@ -292,19 +292,25 @@
 					<tbody>
 						@forelse ($bids as $bid)
 							<tr>
-								<td title="{{ $bid->title }}">
-									<a href="{{ route('bids.show', $bid) }}">{{ $bid->title ?? '—' }}</a>
+								<td title="{{ $bid->TITLE }}">
+									<a href="{{ route('bids.show', ['bid' => $bid->ID]) }}">{{ $bid->TITLE ?? '—' }}</a>
 								</td>
-								<td>{{ $bid->end_date ? $bid->end_date->format('M. d, Y h:i a') : '—' }}</td>
-								<td title="{{ $bid->naics_code }}">{{ $bid->naics_code ?? '—' }}</td>
-								<td><a href="{{ $bid->url }}" target="_blank" rel="noreferrer">Open</a></td>
+								<td>
+									{{ $bid->ENDDATE ? \Carbon\Carbon::parse($bid->ENDDATE)->format('M. d, Y') : '—' }}
+								</td>
+								<td title="{{ $bid->NAICSCODE }}">{{ $bid->NAICSCODE ?? '—' }}</td>
+								<td><a href="{{ $bid->URL }}" target="_blank" rel="noreferrer">Open</a></td>
 								<td>
 									<div class="action-buttons">
-										<button type="button" class="secondary"
-											onclick="openEditModal({{ $bid->id }}, '{{ addslashes($bid->title) }}', '{{ $bid->end_date ? $bid->end_date->format('Y-m-d\TH:i') : '' }}', '{{ $bid->naics_code }}')">
+										<button type="button" class="secondary" onclick="openEditModal(
+													{{ $bid->ID }},
+													'{{ addslashes($bid->TITLE) }}',
+													'{{ $bid->ENDDATE ?? '' }}',
+													'{{ $bid->NAICSCODE ?? '' }}'
+												)">
 											✏️ Edit
 										</button>
-										<form action="{{ route('bids.destroy', $bid) }}" method="POST">
+										<form action="{{ route('bids.destroy', ['bid' => $bid->ID]) }}" method="POST">
 											@csrf
 											@method('DELETE')
 											<button type="submit"
@@ -348,16 +354,17 @@
 				@method('PUT')
 
 				<label for="edit_title">Title</label>
-				<input type="text" id="edit_title" name="title" required>
+				<input type="text" id="edit_title" name="TITLE" required>
 
 				<label for="edit_end_date">End Date</label>
-				<input type="datetime-local" id="edit_end_date" name="end_date">
+				<input type="date" id="edit_end_date" name="ENDDATE">
 
 				<label for="edit_naics_code">NAICS Code</label>
-				<input type="text" id="edit_naics_code" name="naics_code">
+				<input type="text" id="edit_naics_code" name="NAICSCODE">
 
-				<footer>
-					<button type="button" onclick="document.getElementById('editModal').close()">Cancel</button>
+				<footer style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+					<button type="button" class="secondary"
+						onclick="document.getElementById('editModal').close()">Cancel</button>
 					<button type="submit" class="contrast">Update</button>
 				</footer>
 			</form>
@@ -365,15 +372,17 @@
 	</dialog>
 
 	<script>
-		// Modal
-		function openEditModal(id, title, endDate, naics) {
+		function openEditModal(ID, TITLE, ENDDATE, NAICSCODE) {
 			const modal = document.getElementById('editModal');
 			const form = document.getElementById('editForm');
 
-			form.action = `/bids/${id}`;
-			document.getElementById('edit_title').value = title || '';
-			document.getElementById('edit_end_date').value = endDate || '';
-			document.getElementById('edit_naics_code').value = naics || '';
+			// Set form action to correct update route
+			form.action = "{{ url('/bids') }}/" + ID;
+
+			document.getElementById('edit_title').value = TITLE || '';
+			// ENDDATE should be in YYYY-MM-DD format for <input type="date">
+			document.getElementById('edit_end_date').value = ENDDATE ? ENDDATE.substring(0, 10) : '';
+			document.getElementById('edit_naics_code').value = NAICSCODE || '';
 
 			modal.showModal();
 		}
@@ -397,9 +406,9 @@
 			let filter = filterNaics.value;
 
 			filteredRows = rows.filter(row => {
-				let title = row.cells[0]?.innerText.toLowerCase() || "";
-				let naics = row.cells[2]?.innerText.toLowerCase() || "";
-				let matchesSearch = !search || title.includes(search) || naics.includes(search);
+				let TITLE = row.cells[0]?.innerText.toLowerCase() || "";
+				let NAICS = row.cells[2]?.innerText.toLowerCase() || "";
+				let matchesSearch = !search || TITLE.includes(search) || NACICS.includes(search);
 				let matchesFilter = !filter || naics === filter.toLowerCase();
 				return matchesSearch && matchesFilter;
 			});

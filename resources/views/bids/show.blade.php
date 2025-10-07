@@ -84,64 +84,40 @@
 		<a href="{{ route('bids.index') }}" class="back-link">← Back to All Bids</a>
 
 		<section class="card">
-			<h1>{{ $bid->title ?? 'Untitled Bid' }}</h1>
+			<h1>{{ $bid->TITLE ?? 'Untitled Bid' }}</h1>
 			<div class="meta-grid">
 				<div style="grid-column: 1 / -1;">
 					<strong>URL</strong>
-					<a href="{{ $bid->url }}" target="_blank" rel="noreferrer">{{ $bid->url }}</a>
+					<a href="{{ $bid->URL }}" target="_blank" rel="noreferrer">{{ $bid->URL }}</a>
 				</div>
 			</div>
 		</section>
 
 		<section class="card">
 			<h2>Extracted Data</h2>
-			@php
-				$data = is_array($bid->extracted_json)
-					? $bid->extracted_json
-					: json_decode($bid->extracted_json, true);
-			@endphp
 
-
-			@if ($data)
-				<div class="meta-grid">
-					<div>
-						<strong>Title</strong>
-						<span>{{ $data['title'] ?? '—' }}</span>
-					</div>
-					<div>
-						<strong>End Date</strong>
-						<span>
-							{{ !empty($data['end_date']) ? \Illuminate\Support\Carbon::parse($data['end_date'])->format('M. d, Y h:i A') : '—' }}
-						</span>
-					</div>
-
-					<div>
-						<strong>NAICS</strong>
-						<span>{{ $data['naics_code'] ?? '—' }}</span>
-					</div>
+			<div class="meta-grid">
+				<div>
+					<strong>Title</strong>
+					<span>{{ $bid->TITLE ?? '—' }}</span>
 				</div>
-
-				@if (!empty($data['other_data']))
-					<h3 style="margin-top:1.5rem;">Other Details</h3>
-					<div class="sub-grid">
-						@foreach ($data['other_data'] as $key => $value)
-							<div>
-								<strong>{{ ucwords(str_replace('_', ' ', $key)) }}</strong>
-								<span>
-									@if (is_array($value))
-										{{ implode(', ', $value) }}
-									@else
-										{{ $value ?: '—' }}
-									@endif
-								</span>
-							</div>
-						@endforeach
-					</div>
-				@endif
-			@else
-				<p>No extracted data available.</p>
-			@endif
+				<div>
+					<strong>End Date</strong>
+					<span>
+						{{ $bid->ENDDATE ? \Carbon\Carbon::parse($bid->ENDDATE)->format('M. d, Y') : '—' }}
+					</span>
+				</div>
+				<div>
+					<strong></strong>
+					<span>{{ $bid->DESCRIPTION ?? '—' }}</span>
+				</div>
+				<div>
+					<strong>NAICS</strong>
+					<span>{{ $bid->NAICSCODE ?? '—' }}</span>
+				</div>
+			</div>
 		</section>
+
 	</main>
 </body>
 

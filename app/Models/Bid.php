@@ -9,19 +9,41 @@ class Bid extends Model
 {
 	use HasFactory;
 
+	protected $table = "bid";
+	public $timestamps = false;
+	protected $primaryKey = 'ID';
 	protected $fillable = [
-		'url',
-		'title',
-		'end_date',
-		'naics_code',
-		'other_data',
-		'raw_html',
-		'extracted_json',
+		'TTITLE',
+		'DESCRIPTION',
+		'EMAIL',
+		'URL',
+		'CREATED',
+		'ENDDATE',
+		'CATEGORYID',
+		'ENTITYID',
+		'SUBSCRIPTIONTYPEID',
+		'USERID',
+		'THIRD_PARTY_IDENTIFIER',
+		'SOLICIATIONNUMBER',
+		'FEDDATE',
+		'SETASIDECODEID',
+		'NAICSCODE',
+		'BID_URL_ID',
+		'INLINEURL',
+		'NEEDS_REVIEW',
+		'SOURCE_ID',
+		'STATEID',
+		'LAST_MODIFIED',
+		'CATEGORY_ALIAS_ID',
+		'COUNTRY_ID',
+		'UNDERREVIEW',
+		'NAICSCODE_INT',
+		'NSN'
+
 	];
 
 	protected $casts = [
-		'end_date' => 'datetime',
-		'other_data' => 'array',
-		'extracted_json' => 'array',
+		'CREATED' => 'datetime',
+		'LAST_MODIFIED' => 'datetime',
 	];
 }

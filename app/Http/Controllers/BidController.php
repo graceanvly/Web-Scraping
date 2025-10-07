@@ -15,109 +15,115 @@ class BidController extends Controller
 {
 	public function index()
 	{
-		$bids = Bid::latest()->limit(10)->get();
+		$bids = Bid::latest('CREATED')->limit(10)->get();
 		return view('bids.index', compact('bids'));
 	}
-
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
 		@set_time_limit(180);
 		@ini_set('max_execution_time', '180');
+		@ini_set('memory_limit', '512M');
 
 		$validated = $request->validate([
-			'url' => ['required', 'url']
+			'URL' => ['required', 'url']
 		]);
 
 		try {
-			$result = $scraper->fetch($validated['url']);
-			$extracted = $ai->extract($validated['url'], $result['html'], $result['text']);
+			// 1️⃣ Fetch page data and find PDF link
+			$result = $scraper->fetch($validated['URL']);
+			Log::info('SCRAPER DEBUG', [
+				'url' => $validated['URL'],
+				'pdf_link' => $result['pdf_link'] ?? null,
+				'text_length' => strlen($result['text'] ?? ''),
+			]);
 
-			$rawHtmlToStore = $result['html'];
-			$rawHtmlPath = null;
+			// 2️⃣ Let AI extract relevant bid data from the HTML/text
+			$extracted = $ai->extract($validated['URL'], $result['html'], $result['text']);
 
-			// Handle large HTML
-			if (is_string($rawHtmlToStore) && strlen($rawHtmlToStore) > 400000) {
-				try {
-					$filename = 'bids/' . uniqid('bid_', true) . '.html';
-					Storage::disk('local')->put($filename, $rawHtmlToStore);
-					$rawHtmlPath = storage_path('app/' . $filename);
-					$rawHtmlToStore = null;
-				} catch (\Throwable $e) {
-					$rawHtmlToStore = substr($result['html'], 0, 380000);
-				}
-			}
-
-			// ✅ Filter bids before saving
 			$today = \Carbon\Carbon::today();
 			$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
-				$status = strtolower($bid['other_data']['status'] ?? '');
-				if ($status !== 'open') {
-					return false;
-				}
-
-				if (!empty($bid['end_date'])) {
+				if (!empty($bid['ENDDATE'])) {
 					try {
-						$end = \Carbon\Carbon::parse($bid['end_date']);
-						if ($end->lt($today)) {
-							return false; // skip expired bids
-						}
+						$end = \Carbon\Carbon::parse($bid['ENDDATE']);
+						if ($end->lt($today))
+							return false;
 					} catch (\Exception $e) {
-						return false; // skip invalid dates
+						return false;
 					}
 				}
-
 				return true;
-			})->values()->all();
+			})->values();
 
 			$saved = [];
+			$duplicates = [];
+
+			// 3️⃣ Save bids
 			foreach ($filteredBids as $bidData) {
-				// 🔍 Check if this bid already exists
-				$exists = Bid::where('url', $validated['url'])
-					->where('title', $bidData['title'] ?? null)
+				$title = $bidData['TITLE'] ?? null;
+				if (!$title)
+					continue;
+
+				$exists = Bid::where('URL', $validated['URL'])
+					->where('TITLE', $title)
 					->exists();
 
 				if ($exists) {
-					$duplicates[] = $bidData['title'] ?? '(untitled bid)';
+					$duplicates[] = $title;
 					continue;
 				}
 
 				$bid = new Bid();
-				$bid->url = $validated['url'];
-				$bid->title = $bidData['title'] ?? null;
-				$bid->end_date = $bidData['end_date'] ?? null;
-				$bid->naics_code = $bidData['naics_code'] ?? null;
-				$bid->other_data = $bidData['other_data'] ?? [];
-				$bid->raw_html = $rawHtmlToStore; // shared raw HTML
-				$bid->extracted_json = $bidData;
+				$bid->URL = $validated['URL'];
+				$bid->TITLE = $title;
+				$bid->ENDDATE = $bidData['ENDDATE'] ?? null;
+				$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
+
+				// 🧩 Save the PDF link instead of its content
+				$bid->DESCRIPTION = $result['pdf_link']
+					?? ($bidData['DESCRIPTION'] ?? 'No description or PDF link found.');
+
+				$bid->CREATED = now();
+				$bid->LAST_MODIFIED = now();
 				$bid->save();
 
 				$saved[] = $bid->id;
 			}
-			// 🛑 If no bids saved and only duplicates → show error
+
+			// 4️⃣ Response
 			if (empty($saved) && !empty($duplicates)) {
 				return back()->withErrors([
-					'url' => 'All bids on this page were duplicates: ' . implode(', ', $duplicates)
+					'URL' => 'All bids already saved: ' . implode(', ', $duplicates)
 				]);
 			}
 
-			// 🛑 If no bids at all
 			if (empty($saved) && empty($duplicates)) {
-				return back()->withErrors(['url' => 'No open bids found on this page.']);
+				return back()->withErrors([
+					'URL' => 'No open bids found or extractable data from this URL.'
+				]);
 			}
 
-			// ✅ Success message
 			$msg = '';
-			if ($saved) {
-				$msg .= count($saved) . ' bids scraped and saved successfully! ';
-			}
+			if ($saved)
+				$msg .= count($saved) . ' bid(s) saved. ';
+			if ($duplicates)
+				$msg .= count($duplicates) . ' duplicate bid(s) skipped.';
 
 			return redirect()->route('bids.index')->with('success', trim($msg));
+
 		} catch (\Throwable $e) {
-			Log::error('Scrape failed', ['error' => $e->getMessage()]);
-			return back()->withErrors(['url' => 'Failed to scrape this URL. ' . $e->getMessage()])
-				->withInput();
+			Log::error('Scrape failed', [
+				'url' => $validated['URL'],
+				'error' => $e->getMessage(),
+				'trace' => $e->getTraceAsString(),
+			]);
+
+			return back()->withErrors([
+				'URL' => 'Failed to scrape this URL. ' . $e->getMessage()
+			])->withInput();
 		}
 	}
+
+
 
 
 	public function show(Bid $bid)
@@ -137,18 +143,14 @@ class BidController extends Controller
 
 		foreach ($bidUrls as $bidUrl) {
 			try {
-				$result = $scraper->fetch($bidUrl->url);
-				$extracted = $ai->extract($bidUrl->url, $result['html'], $result['text']);
+				$result = $scraper->fetch($bidUrl->URL);
+				$extracted = $ai->extract($bidUrl->URL, $result['html'], $result['text']);
 
 				$today = \Carbon\Carbon::today();
 				$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
-					$status = strtolower($bid['other_data']['status'] ?? '');
-					if ($status !== 'open') {
-						return false;
-					}
-					if (!empty($bid['end_date'])) {
+					if (!empty($bid['ENDDATE'])) {
 						try {
-							$end = \Carbon\Carbon::parse($bid['end_date']);
+							$end = \Carbon\Carbon::parse($bid['ENDDATE']);
 							if ($end->lt($today)) {
 								return false;
 							}
@@ -160,8 +162,8 @@ class BidController extends Controller
 				})->values()->all();
 
 				foreach ($filteredBids as $bidData) {
-					$exists = Bid::where('url', $bidUrl->url)
-						->where('title', $bidData['title'] ?? null)
+					$exists = Bid::where('URL', $bidUrl->URL)
+						->where('TITLE', $bidData['TITLE'] ?? null)
 						->exists();
 
 					if ($exists) {
@@ -170,22 +172,19 @@ class BidController extends Controller
 					}
 
 					$bid = new Bid();
-					$bid->url = $bidUrl->url;
-					$bid->title = $bidData['title'] ?? null;
-					$bid->end_date = $bidData['end_date'] ?? null;
-					$bid->naics_code = $bidData['naics_code'] ?? null;
-					$bid->other_data = $bidData['other_data'] ?? [];
-					$bid->raw_html = $result['html'];
-					$bid->extracted_json = $bidData;
+					$bid->URL = $bidUrl->URL;
+					$bid->TITLE = $bidData['TITLE'] ?? null;
+					$bid->ENDDATE = !empty($bidData['ENDDATE']) ? $bidData['ENDDATE'] : null;
+					$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
 					$bid->save();
 
 					$scraped++;
 				}
 			} catch (\Throwable $e) {
-				Log::error('Scrape failed for URL: ' . $bidUrl->url, [
+				Log::error('Scrape failed for URL: ' . $bidUrl->URL, [
 					'error' => $e->getMessage()
 				]);
-				$errors[] = $bidUrl->url;
+				$errors[] = $bidUrl->URL;
 			}
 		}
 
@@ -203,9 +202,9 @@ class BidController extends Controller
 	public function update(Request $request, Bid $bid)
 	{
 		$validated = $request->validate([
-			'title' => 'required|string|max:255',
-			'end_date' => 'nullable|date',
-			'naics_code' => 'nullable|string|max:50',
+			'TITLE' => 'required|string|max:255',
+			'ENDDATE' => 'nullable|date',
+			'NAICSCODE' => 'nullable|string|max:50',
 		]);
 
 		$bid->update($validated);
