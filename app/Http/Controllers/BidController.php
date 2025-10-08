@@ -123,27 +123,32 @@ class BidController extends Controller
 		}
 	}
 
-
-
-
 	public function show(Bid $bid)
 	{
 		return view('bids.show', compact('bid'));
 	}
 	public function scrapeAll(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
-		// Allow longer execution time for multiple URLs
-		@set_time_limit(300);
-		@ini_set('max_execution_time', '300');
+		@set_time_limit(600);
+		@ini_set('max_execution_time', '600');
+		@ini_set('memory_limit', '1G');
 
 		$bidUrls = BidUrl::all();
-		$scraped = 0;
-		$duplicates = 0;
-		$errors = [];
+		$totalSaved = 0;
+		$totalDuplicates = 0;
+		$failedUrls = [];
 
 		foreach ($bidUrls as $bidUrl) {
 			try {
+				// 1️⃣ Fetch data for each bid URL
 				$result = $scraper->fetch($bidUrl->URL);
+				Log::info('SCRAPER DEBUG scrapeAll', [
+					'url' => $bidUrl->URL,
+					'pdf_link' => $result['pdf_link'] ?? null,
+					'text_length' => strlen($result['text'] ?? ''),
+				]);
+
+				// 2️⃣ Extract bid data via AI
 				$extracted = $ai->extract($bidUrl->URL, $result['html'], $result['text']);
 
 				$today = \Carbon\Carbon::today();
@@ -151,54 +156,79 @@ class BidController extends Controller
 					if (!empty($bid['ENDDATE'])) {
 						try {
 							$end = \Carbon\Carbon::parse($bid['ENDDATE']);
-							if ($end->lt($today)) {
+							if ($end->lt($today))
 								return false;
-							}
 						} catch (\Exception $e) {
 							return false;
 						}
 					}
 					return true;
-				})->values()->all();
+				})->values();
 
+				$savedThisUrl = 0;
+				$duplicatesThisUrl = 0;
+
+				// 3️⃣ Save valid bids
 				foreach ($filteredBids as $bidData) {
+					$title = $bidData['TITLE'] ?? null;
+					if (!$title)
+						continue;
+
 					$exists = Bid::where('URL', $bidUrl->URL)
-						->where('TITLE', $bidData['TITLE'] ?? null)
+						->where('TITLE', $title)
 						->exists();
 
 					if ($exists) {
-						$duplicates++;
-						continue; // Skip duplicates
+						$duplicatesThisUrl++;
+						continue;
 					}
 
 					$bid = new Bid();
 					$bid->URL = $bidUrl->URL;
-					$bid->TITLE = $bidData['TITLE'] ?? null;
-					$bid->ENDDATE = !empty($bidData['ENDDATE']) ? $bidData['ENDDATE'] : null;
+					$bid->TITLE = $title;
+					$bid->ENDDATE = $bidData['ENDDATE'] ?? null;
 					$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
+
+					// Save PDF link (if available)
+					$bid->DESCRIPTION = $result['pdf_link']
+						?? ($bidData['DESCRIPTION'] ?? 'No description or PDF link found.');
+
+					$bid->CREATED = now();
+					$bid->LAST_MODIFIED = now();
 					$bid->save();
 
-					$scraped++;
+					$savedThisUrl++;
 				}
+
+				$totalSaved += $savedThisUrl;
+				$totalDuplicates += $duplicatesThisUrl;
+
+				Log::info('Scrape summary for ' . $bidUrl->URL, [
+					'saved' => $savedThisUrl,
+					'duplicates' => $duplicatesThisUrl,
+				]);
+
 			} catch (\Throwable $e) {
 				Log::error('Scrape failed for URL: ' . $bidUrl->URL, [
-					'error' => $e->getMessage()
+					'error' => $e->getMessage(),
+					'trace' => $e->getTraceAsString(),
 				]);
-				$errors[] = $bidUrl->URL;
+				$failedUrls[] = $bidUrl->URL;
 			}
 		}
 
-		// Build summary message
-		$msg = "$scraped new bids scraped and saved.";
-		if ($duplicates > 0) {
-			$msg .= " Skipped $duplicates duplicate bids.";
+		// 4️⃣ Build final response
+		$msg = "{$totalSaved} new bid(s) saved.";
+		if ($totalDuplicates > 0) {
+			$msg .= " Skipped {$totalDuplicates} duplicate bid(s).";
 		}
-		if ($errors) {
-			$msg .= " Failed URLs: " . implode(', ', $errors);
+		if (!empty($failedUrls)) {
+			$msg .= " Failed URLs: " . implode(', ', $failedUrls);
 		}
 
-		return redirect()->route('bids.index')->with('success', $msg);
+		return redirect()->route('bids.index')->with('success', trim($msg));
 	}
+
 	public function update(Request $request, Bid $bid)
 	{
 		$validated = $request->validate([

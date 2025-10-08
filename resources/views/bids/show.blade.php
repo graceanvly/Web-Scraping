@@ -108,7 +108,7 @@
 					</span>
 				</div>
 				<div>
-					<strong></strong>
+					<strong>Description</strong>
 					<span>{{ $bid->DESCRIPTION ?? '—' }}</span>
 				</div>
 				<div>

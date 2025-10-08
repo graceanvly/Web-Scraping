@@ -36,7 +36,7 @@ class ScraperService
 	{
 		$pdfText = '';
 
-		// 🧩 1. Direct PDF URL
+		// 🧩 1. If direct PDF URL
 		if (preg_match('/\.pdf($|\?)/i', $url)) {
 			return $this->fetchPdf($url);
 		}
@@ -54,25 +54,28 @@ class ScraperService
 			Log::warning('SCRAPER FETCH ERROR', ['url' => $url, 'error' => $e->getMessage()]);
 		}
 
-		// 🧩 3. Find all PDF-related bids
+		// 🧩 3. Find PDF links (bids)
 		$pdfBids = $this->findPdfLink($bestHtml, $url);
 
 		if (!empty($pdfBids)) {
 			Log::info('PDF LINKS FOUND', ['url' => $url, 'count' => count($pdfBids)]);
-
-			// Optionally fetch text from the first one, just for completeness
-			$firstPdf = $pdfBids[0]['PDF_LINK'] ?? null;
-			if ($firstPdf) {
-				$pdfResult = $this->fetchPdf($firstPdf);
-				if (!empty($pdfResult['text'])) {
-					$pdfText = $pdfResult['text'];
+			
+			// Combine all PDFs’ text content (AIExtractor will use this full text)
+			$pdfTexts = [];
+			foreach ($pdfBids as $bid) {
+				if (!empty($bid['PDF_LINK'])) {
+					$pdfResult = $this->fetchPdf($bid['PDF_LINK']);
+					if (!empty($pdfResult['text'])) {
+						$pdfTexts[] = $pdfResult['text'];
+					}
 				}
 			}
+			$pdfText = implode("\n\n----- NEXT DOCUMENT -----\n\n", $pdfTexts);
 		} else {
 			Log::info('NO PDF LINK FOUND', ['url' => $url]);
 		}
 
-		// 🧩 4. Fallback: use Browsershot if text is empty
+		// 🧩 4. Fallback with Browsershot if page text is too short
 		if (strlen($bestText) < 500) {
 			try {
 				$html = Browsershot::url($url)
@@ -106,18 +109,15 @@ class ScraperService
 			'final_url' => $finalUrl,
 			'html' => $bestHtml,
 			'text' => $bestText,
-			'pdf_bids' => $pdfBids, // 🧠 return multiple PDFs with titles
-			'pdf_text' => $pdfText, // keep for compatibility
-			'pdf_link' => $pdfLink ?? null,
+			'pdf_bids' => $pdfBids,
+			'pdf_text' => $pdfText, // Full combined PDF content
 			'blocked' => false,
 		];
 	}
 
-
 	private function findPdfLink(string $html, string $baseUrl): array
 	{
-		if (empty($html))
-			return [];
+		if (empty($html)) return [];
 
 		libxml_use_internal_errors(true);
 		$dom = new \DOMDocument();
@@ -137,7 +137,7 @@ class ScraperService
 			}
 		}
 
-		// fallback: raw .pdf urls in text
+		// fallback: detect raw .pdf URLs in text
 		if (empty($bids) && preg_match_all('/https?:\/\/[^\s"\']+\.pdf/i', $html, $matches)) {
 			foreach ($matches[0] as $pdfUrl) {
 				$bids[] = [
@@ -150,9 +150,6 @@ class ScraperService
 		return $bids;
 	}
 
-	/**
-	 * Produce a readable title from a URL or filename.
-	 */
 	private function extractTitleFromUrl(string $URL): string
 	{
 		$path = parse_url($URL, PHP_URL_PATH);
@@ -166,7 +163,6 @@ class ScraperService
 
 		return $title ?: 'Document';
 	}
-
 
 	private function fetchPdf(string $url): array
 	{

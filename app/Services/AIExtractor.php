@@ -22,12 +22,11 @@ class AIExtractor
 
 	public function extract(string $URL, string $html, string $text, array|string $pdfLinks = []): array
 	{
-		// Normalize pdfLinks to array
+		// Normalize pdfLinks
 		if (is_string($pdfLinks) && !empty($pdfLinks)) {
-			$pdfLinks = [ ['PDF_LINK' => $pdfLinks] ];
+			$pdfLinks = [['PDF_LINK' => $pdfLinks]];
 		}
 
-		// 🧠 No API → fallback to URL-based title
 		if (empty($this->apiKey)) {
 			return [
 				'bids' => array_map(fn($pdf) => [
@@ -36,27 +35,50 @@ class AIExtractor
 					'NAICSCODE' => '',
 					'DESCRIPTION' => "See document: {$pdf['PDF_LINK']}",
 				], $pdfLinks ?: [
-					[
-						'TITLE' => $this->extractTitleFromUrl($URL),
-						'ENDDATE' => '',
-						'NAICSCODE' => '',
-						'DESCRIPTION' => '',
-					]
-				]),
+						[
+							'TITLE' => $this->extractTitleFromUrl($URL),
+							'ENDDATE' => '',
+							'NAICSCODE' => '',
+							'DESCRIPTION' => '',
+						]
+					]),
 			];
 		}
 
-		// 🧩 Build system + user prompts
+		// 🧠 Enhanced system prompt
 		$promptSystem = <<<SYS
-You are a precise assistant that extracts government or school district bid details from web pages.
-Always return output in strict JSON format.
-If a PDF link is provided, include the PDF URL in the DESCRIPTION field as:
-"See document: [PDF URL]"
-Do not summarize or read the PDF content — only include the link.
-SYS;
+			You are an expert bid data extraction assistant.
+
+			Your task:
+			1. Extract only open/active bids (ignore closed or canceled).
+			2. If a bid has a detail PDF, open it and **read its entire content**.
+			- Extract and include **the whole content text** from the PDF.
+			3. Include only the PDF(s) belonging to each specific bid.
+			4. Determine the most likely NAICS code for each bid based on its title, description, or PDF content.
+			Reference: https://www.census.gov/naics/?input=51&chart=2022
+			Examples:
+			- "IT Services", "Software Development", "Website" → 541512
+			- "Construction", "Renovation", "Repair" → 236220
+			- "Janitorial", "Cleaning" → 561720
+			- "Office Supplies" → 424120
+			- "Consulting" → 541611
+			Leave NAICSCODE blank if you cannot infer it confidently.
+			5. Always output valid JSON in this format:
+
+			{
+			"bids": [
+				{
+				"TITLE": "Exact title",
+				"ENDDATE": "YYYY-MM-DD or empty",
+				"NAICSCODE": "541512",
+				"DESCRIPTION": "Full text from the bid detail PDF document."
+				}
+			]
+			}
+			SYS;
 
 		$promptUser = [
-			'instructions' => 'Extract open bids (ignore closed or canceled ones). Respond only with JSON.',
+			'instructions' => 'Extract open bids and include text content from the related bid PDF. Respond only with JSON.',
 			'URL' => $URL,
 			'pdf_links' => array_column($pdfLinks, 'PDF_LINK'),
 			'text_excerpt' => mb_substr($text ?? '', 0, 8000),
@@ -65,15 +87,14 @@ SYS;
 				'bids' => [
 					[
 						'TITLE' => 'Bid title',
-						'ENDDATE' => 'YYYY-MM-DD or empty if not found',
-						'NAICSCODE' => 'NAICS code or empty',
-						'DESCRIPTION' => 'See document: https://example.com/docs/invitation1234.pdf'
+						'ENDDATE' => 'YYYY-MM-DD',
+						'NAICSCODE' => '541512',
+						'DESCRIPTION' => 'Full text from the bid detail PDF document.'
 					]
 				]
 			]
 		];
 
-		// 🧠 Build OpenAI request
 		$body = [
 			'model' => $this->model,
 			'messages' => [
@@ -81,7 +102,7 @@ SYS;
 				['role' => 'user', 'content' => json_encode($promptUser, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
 			],
 			'response_format' => ['type' => 'json_object'],
-			'temperature' => 0,
+			'temperature' => 0.1,
 		];
 
 		$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', [
@@ -98,7 +119,7 @@ SYS;
 
 		$bids = $data['bids'] ?? [];
 
-		// 🧩 Normalize bids safely
+		// Normalize
 		$normalized = array_map(function ($bid) use ($URL, $pdfLinks) {
 			return [
 				'TITLE' => $bid['TITLE'] ?? $this->extractTitleFromUrl($URL),
