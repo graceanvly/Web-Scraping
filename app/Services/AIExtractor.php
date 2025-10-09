@@ -37,11 +37,18 @@ class AIExtractor
 
 			try {
 				$tempFile = tempnam(sys_get_temp_dir(), 'bidpdf_');
-				$this->httpClient->request('GET', $pdf['PDF_LINK'], ['sink' => $tempFile]);
+				// 🧹 Clean up any hidden whitespace or newlines in PDF link
+				$pdfUrl = preg_replace('/\s+/', '', $pdf['PDF_LINK']);
+				$pdfUrl = str_replace(' ', '%20', $pdfUrl); // escape spaces just in case
+
+				$this->httpClient->request('GET', $pdfUrl, ['sink' => $tempFile]);
 
 				$parser = new Parser();
 				$pdfObj = $parser->parseFile($tempFile);
 				$pdfText = trim($pdfObj->getText());
+
+				// 🧹 Normalize excessive line breaks (fixes large paragraph gaps)
+				$pdfText = preg_replace("/\n{3,}/", "\n\n", $pdfText);
 
 				if (!empty($pdfText)) {
 					$pdfTexts[] = [
@@ -139,11 +146,15 @@ class AIExtractor
 
 		// 🧩 Normalize output
 		$normalized = array_map(function ($bid) use ($URL, $fullPdfText) {
+			$desc = $fullPdfText ?: ($bid['DESCRIPTION'] ?? 'No PDF or description found.');
+			// 🧹 Normalize newlines in AI-generated text as well
+			$desc = preg_replace("/\n{3,}/", "\n\n", $desc);
+
 			return [
 				'TITLE' => $bid['TITLE'] ?? $this->extractTitleFromUrl($URL),
 				'ENDDATE' => $bid['ENDDATE'] ?? '',
 				'NAICSCODE' => $bid['NAICSCODE'] ?? '',
-				'DESCRIPTION' => $fullPdfText ?: ($bid['DESCRIPTION'] ?? 'No PDF or description found.'),
+				'DESCRIPTION' => $desc,
 			];
 		}, $bids);
 

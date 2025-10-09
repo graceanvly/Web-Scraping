@@ -7,8 +7,9 @@
 	<title>Bid Details</title>
 	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 	<style>
+		html,
 		body {
-			background: #f4f6f9;
+			background: linear-gradient(135deg, #f5f7fa 0%, #e4ebf5 100%);
 			color: #111827;
 			font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 			line-height: 1.6;
