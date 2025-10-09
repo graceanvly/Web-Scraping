@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Smalot\PdfParser\Parser;
 use GuzzleHttp\Client;
 
 class AIExtractor
@@ -16,54 +17,78 @@ class AIExtractor
 			'timeout' => 90,
 			'connect_timeout' => 30,
 		]);
+
 		$this->apiKey = (string) ($_ENV['OPENAI_API_KEY'] ?? '');
 		$this->model = (string) ($_ENV['OPENAI_MODEL'] ?? 'gpt-4o-mini');
 	}
 
 	public function extract(string $URL, string $html, string $text, array|string $pdfLinks = []): array
 	{
-		// Normalize pdfLinks
+		// 🧩 Normalize pdfLinks
 		if (is_string($pdfLinks) && !empty($pdfLinks)) {
 			$pdfLinks = [['PDF_LINK' => $pdfLinks]];
 		}
 
-		if (empty($this->apiKey)) {
+		// 🧩 Step 1: Extract text directly from any accessible PDFs
+		$pdfTexts = [];
+		foreach ($pdfLinks as $pdf) {
+			if (empty($pdf['PDF_LINK']))
+				continue;
+
+			try {
+				$tempFile = tempnam(sys_get_temp_dir(), 'bidpdf_');
+				$this->httpClient->request('GET', $pdf['PDF_LINK'], ['sink' => $tempFile]);
+
+				$parser = new Parser();
+				$pdfObj = $parser->parseFile($tempFile);
+				$pdfText = trim($pdfObj->getText());
+
+				if (!empty($pdfText)) {
+					$pdfTexts[] = [
+						'PDF_LINK' => $pdf['PDF_LINK'],
+						'PDF_TEXT' => mb_substr($pdfText, 0, 20000),
+					];
+				}
+
+				@unlink($tempFile);
+			} catch (\Throwable $e) {
+				$pdfTexts[] = [
+					'PDF_LINK' => $pdf['PDF_LINK'],
+					'PDF_TEXT' => '',
+				];
+			}
+		}
+
+		// Combine all parsed PDF text
+		$fullPdfText = implode("\n\n", array_column($pdfTexts, 'PDF_TEXT'));
+
+		// 🧩 If there’s no API key, just return the PDF content directly
+		if (!empty($fullPdfText)) {
 			return [
-				'bids' => array_map(fn($pdf) => [
-					'TITLE' => $pdf['TITLE'] ?? $this->extractTitleFromUrl($URL),
-					'ENDDATE' => '',
-					'NAICSCODE' => '',
-					'DESCRIPTION' => "See document: {$pdf['PDF_LINK']}",
-				], $pdfLinks ?: [
-						[
-							'TITLE' => $this->extractTitleFromUrl($URL),
-							'ENDDATE' => '',
-							'NAICSCODE' => '',
-							'DESCRIPTION' => '',
-						]
-					]),
+				'bids' => [
+					[
+						'TITLE' => $this->extractTitleFromUrl($URL),
+						'ENDDATE' => '',
+						'NAICSCODE' => '',
+						'DESCRIPTION' => $fullPdfText,
+					],
+				],
 			];
 		}
 
 		// 🧠 Enhanced system prompt
 		$promptSystem = <<<SYS
 			You are an expert bid data extraction assistant.
+			Your job is to extract all open/active bids and include the *full* content of each bid’s PDF.
 
-			Your task:
-			1. Extract only open/active bids (ignore closed or canceled).
-			2. If a bid has a detail PDF, open it and **read its entire content**.
-			- Extract and include **the whole content text** from the PDF.
-			3. Include only the PDF(s) belonging to each specific bid.
-			4. Determine the most likely NAICS code for each bid based on its title, description, or PDF content.
+			Rules:
+			1. Extract only open or active bids.
+			2. If PDF text is provided, do **not** summarize or shorten any text.
+			Copy the full readable text from the PDF into the DESCRIPTION field exactly as it appears.
+			3. If multiple PDFs exist, merge their text into DESCRIPTION.
+			4. Determine the most likely NAICS code based on title or content.
 			Reference: https://www.census.gov/naics/?input=51&chart=2022
-			Examples:
-			- "IT Services", "Software Development", "Website" → 541512
-			- "Construction", "Renovation", "Repair" → 236220
-			- "Janitorial", "Cleaning" → 561720
-			- "Office Supplies" → 424120
-			- "Consulting" → 541611
-			Leave NAICSCODE blank if you cannot infer it confidently.
-			5. Always output valid JSON in this format:
+			5. Output valid JSON only, in this format:
 
 			{
 			"bids": [
@@ -71,28 +96,20 @@ class AIExtractor
 				"TITLE": "Exact title",
 				"ENDDATE": "YYYY-MM-DD or empty",
 				"NAICSCODE": "541512",
-				"DESCRIPTION": "Full text from the bid detail PDF document."
+				"DESCRIPTION": "Full unedited text from the bid’s PDF"
 				}
 			]
 			}
 			SYS;
 
+		// 🧠 User content (page + PDF info)
 		$promptUser = [
-			'instructions' => 'Extract open bids and include text content from the related bid PDF. Respond only with JSON.',
+			'instructions' => 'Extract open bid(s) from this page. Include the full unedited PDF content in DESCRIPTION. Respond only with JSON.',
 			'URL' => $URL,
 			'pdf_links' => array_column($pdfLinks, 'PDF_LINK'),
+			'pdf_text' => $fullPdfText,
 			'text_excerpt' => mb_substr($text ?? '', 0, 8000),
 			'html_excerpt' => mb_substr($html ?? '', 0, 8000),
-			'example_format' => [
-				'bids' => [
-					[
-						'TITLE' => 'Bid title',
-						'ENDDATE' => 'YYYY-MM-DD',
-						'NAICSCODE' => '541512',
-						'DESCRIPTION' => 'Full text from the bid detail PDF document.'
-					]
-				]
-			]
 		];
 
 		$body = [
@@ -105,6 +122,7 @@ class AIExtractor
 			'temperature' => 0.1,
 		];
 
+		// 🧩 Make OpenAI request
 		$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $this->apiKey,
@@ -119,16 +137,13 @@ class AIExtractor
 
 		$bids = $data['bids'] ?? [];
 
-		// Normalize
-		$normalized = array_map(function ($bid) use ($URL, $pdfLinks) {
+		// 🧩 Normalize output
+		$normalized = array_map(function ($bid) use ($URL, $fullPdfText) {
 			return [
 				'TITLE' => $bid['TITLE'] ?? $this->extractTitleFromUrl($URL),
 				'ENDDATE' => $bid['ENDDATE'] ?? '',
 				'NAICSCODE' => $bid['NAICSCODE'] ?? '',
-				'DESCRIPTION' => $bid['DESCRIPTION']
-					?? (!empty($pdfLinks)
-						? "See document: " . implode(', ', array_column($pdfLinks, 'PDF_LINK'))
-						: ''),
+				'DESCRIPTION' => $fullPdfText ?: ($bid['DESCRIPTION'] ?? 'No PDF or description found.'),
 			];
 		}, $bids);
 

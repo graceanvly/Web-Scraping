@@ -110,7 +110,7 @@ class ScraperService
 			'html' => $bestHtml,
 			'text' => $bestText,
 			'pdf_bids' => $pdfBids,
-			'pdf_text' => $pdfText, // Full combined PDF content
+			'pdf_text' => $pdfText,
 			'blocked' => false,
 		];
 	}

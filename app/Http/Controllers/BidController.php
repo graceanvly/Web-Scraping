@@ -75,7 +75,7 @@ class BidController extends Controller
 				$bid = new Bid();
 				$bid->URL = $validated['URL'];
 				$bid->TITLE = $title;
-				$bid->ENDDATE = $bidData['ENDDATE'] ?? null;
+				$bid->ENDDATE = !empty($bidData['ENDDATE']) ? $bidData['ENDDATE'] : null;
 				$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
 
 				// 🧩 Save the PDF link instead of its content
