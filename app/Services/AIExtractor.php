@@ -22,101 +22,101 @@ class AIExtractor
 		$this->model = (string) ($_ENV['OPENAI_MODEL'] ?? 'gpt-4o-mini');
 	}
 
-	public function extract(string $URL, string $html, string $text, array|string $pdfLinks = []): array
+	public function extract(string $URL, string $html, string $text, array|string $pdfLinks = [], string $pdfText = '', array $bidPages = []): array
 	{
-		// 🧩 Normalize pdfLinks
+		// Normalize pdfLinks input
 		if (is_string($pdfLinks) && !empty($pdfLinks)) {
 			$pdfLinks = [['PDF_LINK' => $pdfLinks]];
 		}
 
-		// 🧩 Step 1: Extract text directly from any accessible PDFs
-		$pdfTexts = [];
-		foreach ($pdfLinks as $pdf) {
-			if (empty($pdf['PDF_LINK']))
-				continue;
-
-			try {
-				$tempFile = tempnam(sys_get_temp_dir(), 'bidpdf_');
-				// 🧹 Clean up any hidden whitespace or newlines in PDF link
-				$pdfUrl = preg_replace('/\s+/', '', $pdf['PDF_LINK']);
-				$pdfUrl = str_replace(' ', '%20', $pdfUrl); // escape spaces just in case
-
-				$this->httpClient->request('GET', $pdfUrl, ['sink' => $tempFile]);
-
-				$parser = new Parser();
-				$pdfObj = $parser->parseFile($tempFile);
-				$pdfText = trim($pdfObj->getText());
-
-				// 🧹 Normalize excessive line breaks (fixes large paragraph gaps)
-				$pdfText = preg_replace("/\n{3,}/", "\n\n", $pdfText);
-
-				if (!empty($pdfText)) {
-					$pdfTexts[] = [
-						'PDF_LINK' => $pdf['PDF_LINK'],
-						'PDF_TEXT' => mb_substr($pdfText, 0, 20000),
-					];
+		// If scraper hasn't parsed the PDFs yet, try to parse them here to feed the AI
+		$parsedPdfTexts = [];
+		if (empty($pdfText)) {
+			foreach ($pdfLinks as $pdf) {
+				if (empty($pdf['PDF_LINK'])) {
+					continue;
 				}
 
-				@unlink($tempFile);
-			} catch (\Throwable $e) {
-				$pdfTexts[] = [
-					'PDF_LINK' => $pdf['PDF_LINK'],
-					'PDF_TEXT' => '',
-				];
+				try {
+					$tempFile = tempnam(sys_get_temp_dir(), 'bidpdf_');
+					$pdfUrl = preg_replace('/\s+/', '', $pdf['PDF_LINK']);
+					$pdfUrl = str_replace(' ', '%20', $pdfUrl);
+
+					$this->httpClient->request('GET', $pdfUrl, ['sink' => $tempFile]);
+
+					$parser = new Parser();
+					$pdfObj = $parser->parseFile($tempFile);
+					$pdfTextRaw = trim($pdfObj->getText());
+					$pdfTextRaw = preg_replace("/\n{3,}/", "\n\n", $pdfTextRaw);
+
+					if (!empty($pdfTextRaw)) {
+						$parsedPdfTexts[] = [
+							'PDF_LINK' => $pdf['PDF_LINK'],
+							'PDF_TEXT' => mb_substr($pdfTextRaw, 0, 20000),
+						];
+					}
+
+					@unlink($tempFile);
+				} catch (\Throwable $e) {
+					$parsedPdfTexts[] = [
+						'PDF_LINK' => $pdf['PDF_LINK'],
+						'PDF_TEXT' => '',
+					];
+				}
 			}
 		}
 
-		// Combine all parsed PDF text
-		$fullPdfText = implode("\n\n", array_column($pdfTexts, 'PDF_TEXT'));
+		$fullPdfText = $pdfText ?: implode("\n\n", array_column($parsedPdfTexts, 'PDF_TEXT'));
+		$fullPdfText = preg_replace("/\n{3,}/", "\n\n", (string) $fullPdfText);
 
-		// 🧩 If there’s no API key, just return the PDF content directly
-		if (!empty($fullPdfText)) {
+		// Fallback when no API key is configured: at least return the text we have
+		if (empty($this->apiKey)) {
 			return [
 				'bids' => [
 					[
 						'TITLE' => $this->extractTitleFromUrl($URL),
 						'ENDDATE' => '',
 						'NAICSCODE' => '',
-						'DESCRIPTION' => $fullPdfText,
+						'DESCRIPTION' => $fullPdfText ?: ($text ?: 'No description or PDF link found.'),
 					],
 				],
 			];
 		}
 
-		// 🧠 Enhanced system prompt
 		$promptSystem = <<<SYS
-			You are an expert bid data extraction assistant.
-			Your job is to extract all open/active bids and include the *full* content of each bid’s PDF.
+You are an expert bid data extraction assistant.
+You receive a listing page plus detail pages that were "clicked" from bid titles and any PDF text already retrieved for those bids.
+Extract all open/active bids and capture the full contact and schedule details.
 
-			Rules:
-			1. Extract only open or active bids.
-			2. If PDF text is provided, do **not** summarize or shorten any text.
-			Copy the full readable text from the PDF into the DESCRIPTION field exactly as it appears.
-			3. If multiple PDFs exist, merge their text into DESCRIPTION.
-			4. Determine the most likely NAICS code based on title or content.
-			Reference: https://www.census.gov/naics/?input=51&chart=2022
-			5. Output valid JSON only, in this format:
+For each bid you return, include:
+- TITLE (exact title from detail page or listing)
+- ENDDATE (YYYY-MM-DD when present)
+- NAICSCODE (best guess if not explicitly provided)
+- DESCRIPTION (A labeled block that includes: Bid Title; Description / Scope / Specification; End Date / Due Date; Pre-bid Meeting Date; Questions relating to the Bid; Contact Person with roles (Purchasing Agent, Finance Officer, Bid Clerk, County/City/Town Clerk, Officer in Charge, School Administrator, District Engineer, Commissioner, Accounting if applicable); Phone Number; Email Address; Mailing Address; Physical Address; Correct geographic location/state and category.)
 
-			{
-			"bids": [
-				{
-				"TITLE": "Exact title",
-				"ENDDATE": "YYYY-MM-DD or empty",
-				"NAICSCODE": "541512",
-				"DESCRIPTION": "Full unedited text from the bid’s PDF"
-				}
-			]
-			}
-			SYS;
+Rules:
+1) Use PDF text when present; otherwise use clicked detail page text and listing text.
+2) If a value is missing, write "Not provided" for that label instead of leaving it blank.
+3) Respond with strict JSON only in the format: {"bids":[{...}]} with the fields above.
+SYS;
 
-		// 🧠 User content (page + PDF info)
 		$promptUser = [
-			'instructions' => 'Extract open bid(s) from this page. Include the full unedited PDF content in DESCRIPTION. Respond only with JSON.',
+			'instructions' => 'Use listing, clicked bid pages, and PDF text to extract open bids.',
 			'URL' => $URL,
 			'pdf_links' => array_column($pdfLinks, 'PDF_LINK'),
-			'pdf_text' => $fullPdfText,
-			'text_excerpt' => mb_substr($text ?? '', 0, 8000),
-			'html_excerpt' => mb_substr($html ?? '', 0, 8000),
+			'pdf_text_excerpt' => mb_substr($fullPdfText ?? '', 0, 18000),
+			'listing_text_excerpt' => mb_substr($text ?? '', 0, 8000),
+			'listing_html_excerpt' => mb_substr($html ?? '', 0, 8000),
+			'bid_pages' => array_map(function ($page) {
+				return [
+					'url' => $page['url'] ?? '',
+					'title' => $page['title'] ?? '',
+					'text_excerpt' => mb_substr($page['text'] ?? '', 0, 6000),
+					'html_excerpt' => mb_substr($page['html'] ?? '', 0, 4000),
+					'pdf_links' => array_column($page['pdf_links'] ?? [], 'PDF_LINK'),
+					'pdf_text_excerpt' => mb_substr($page['pdf_text'] ?? '', 0, 8000),
+				];
+			}, $bidPages),
 		];
 
 		$body = [
@@ -129,7 +129,6 @@ class AIExtractor
 			'temperature' => 0.1,
 		];
 
-		// 🧩 Make OpenAI request
 		$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $this->apiKey,
@@ -144,19 +143,44 @@ class AIExtractor
 
 		$bids = $data['bids'] ?? [];
 
-		// 🧩 Normalize output
-		$normalized = array_map(function ($bid) use ($URL, $fullPdfText) {
-			$desc = $fullPdfText ?: ($bid['DESCRIPTION'] ?? 'No PDF or description found.');
-			// 🧹 Normalize newlines in AI-generated text as well
-			$desc = preg_replace("/\n{3,}/", "\n\n", $desc);
+		$normalized = array_map(function ($bid) use ($URL, $fullPdfText, $text) {
+			$desc = $bid['DESCRIPTION'] ?? '';
+			if (empty($desc)) {
+				$desc = $fullPdfText ?: ($text ?: 'No PDF or description found.');
+			}
+			$desc = $this->formatDescription($desc);
+
+			$title = $bid['TITLE'] ?? $this->extractTitleFromUrl($URL);
+			if (is_array($title)) {
+				$title = implode(' ', $title);
+			}
+
+			$endDate = $bid['ENDDATE'] ?? '';
+			if (is_array($endDate)) {
+				$endDate = implode(' ', $endDate);
+			}
+
+			$naics = $bid['NAICSCODE'] ?? '';
+			if (is_array($naics)) {
+				$naics = implode(' ', $naics);
+			}
 
 			return [
-				'TITLE' => $bid['TITLE'] ?? $this->extractTitleFromUrl($URL),
-				'ENDDATE' => $bid['ENDDATE'] ?? '',
-				'NAICSCODE' => $bid['NAICSCODE'] ?? '',
+				'TITLE' => (string) $title,
+				'ENDDATE' => (string) $endDate,
+				'NAICSCODE' => (string) $naics,
 				'DESCRIPTION' => $desc,
 			];
 		}, $bids);
+
+		if (empty($normalized)) {
+			$normalized[] = [
+				'TITLE' => $this->extractTitleFromUrl($URL),
+				'ENDDATE' => '',
+				'NAICSCODE' => '',
+				'DESCRIPTION' => $fullPdfText ?: ($text ?: 'No PDF or description found.'),
+			];
+		}
 
 		return ['bids' => $normalized];
 	}
@@ -173,5 +197,40 @@ class AIExtractor
 		$title = ucwords(strtolower($title));
 
 		return $title ?: 'Bidding Page';
+	}
+
+	/**
+	 * Make description human readable by decoding JSON/arrays and formatting as labeled lines.
+	 */
+	private function formatDescription($desc): string
+	{
+		if (is_array($desc)) {
+			return $this->flattenDescriptionArray($desc);
+		}
+
+		if (is_string($desc)) {
+			$decoded = json_decode($desc, true);
+			if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+				return $this->flattenDescriptionArray($decoded);
+			}
+			return preg_replace("/\n{3,}/", "\n\n", $desc);
+		}
+
+		return (string) $desc;
+	}
+
+	private function flattenDescriptionArray(array $data, string $indent = ''): string
+	{
+		$lines = [];
+		foreach ($data as $key => $value) {
+			$label = is_int($key) ? $key : $key;
+			if (is_array($value)) {
+				$lines[] = "{$indent}{$label}:";
+				$lines[] = $this->flattenDescriptionArray($value, $indent . '  ');
+				continue;
+			}
+			$lines[] = "{$indent}{$label}: {$value}";
+		}
+		return implode("\n", array_filter($lines));
 	}
 }

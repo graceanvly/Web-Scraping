@@ -8,16 +8,15 @@ use App\Services\AIExtractor;
 use App\Services\ScraperService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Storage;
 
 class BidController extends Controller
 {
 	public function index()
 	{
-		$bids = Bid::latest('CREATED')->limit(10)->get();
+		$bids = Bid::latest('CREATED')->paginate(50);
 		return view('bids.index', compact('bids'));
 	}
+
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
 		@set_time_limit(180);
@@ -29,24 +28,33 @@ class BidController extends Controller
 		]);
 
 		try {
-			// 1️⃣ Fetch page data and find PDF link
+			// 1) Fetch page data, PDFs, and clickable bid pages
 			$result = $scraper->fetch($validated['URL']);
 			Log::info('SCRAPER DEBUG', [
 				'url' => $validated['URL'],
-				'pdf_link' => $result['pdf_link'] ?? null,
+				'pdf_links' => $result['pdf_bids'] ?? [],
 				'text_length' => strlen($result['text'] ?? ''),
+				'clicked_bid_pages' => count($result['bid_pages'] ?? []),
 			]);
 
-			// 2️⃣ Let AI extract relevant bid data from the HTML/text
-			$extracted = $ai->extract($validated['URL'], $result['html'], $result['text']);
+			// 2) Let AI extract relevant bid data from listing + clicked pages + PDFs
+			$extracted = $ai->extract(
+				$validated['URL'],
+				$result['html'],
+				$result['text'],
+				$result['pdf_bids'] ?? [],
+				$result['pdf_text'] ?? '',
+				$result['bid_pages'] ?? []
+			);
 
 			$today = \Carbon\Carbon::today();
 			$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
 				if (!empty($bid['ENDDATE'])) {
 					try {
 						$end = \Carbon\Carbon::parse($bid['ENDDATE']);
-						if ($end->lt($today))
+						if ($end->lt($today)) {
 							return false;
+						}
 					} catch (\Exception $e) {
 						return false;
 					}
@@ -57,11 +65,12 @@ class BidController extends Controller
 			$saved = [];
 			$duplicates = [];
 
-			// 3️⃣ Save bids
+			// 3) Save bids
 			foreach ($filteredBids as $bidData) {
 				$title = $bidData['TITLE'] ?? null;
-				if (!$title)
+				if (!$title) {
 					continue;
+				}
 
 				$exists = Bid::where('URL', $validated['URL'])
 					->where('TITLE', $title)
@@ -72,16 +81,23 @@ class BidController extends Controller
 					continue;
 				}
 
+				$description = $bidData['DESCRIPTION'] ?? '';
+				if (is_array($description)) {
+					$description = $this->formatDescriptionArray($description);
+				}
+				if (empty($description) && !empty($result['pdf_text'])) {
+					$description = $result['pdf_text'];
+				}
+				if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
+					$description = $result['pdf_bids'][0]['PDF_LINK'];
+				}
+
 				$bid = new Bid();
 				$bid->URL = $validated['URL'];
 				$bid->TITLE = $title;
 				$bid->ENDDATE = !empty($bidData['ENDDATE']) ? $bidData['ENDDATE'] : null;
 				$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
-
-				// 🧩 Save the PDF link instead of its content
-				$bid->DESCRIPTION = $result['pdf_link']
-					?? ($bidData['DESCRIPTION'] ?? 'No description or PDF link found.');
-
+				$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
 				$bid->CREATED = now();
 				$bid->LAST_MODIFIED = now();
 				$bid->save();
@@ -89,7 +105,7 @@ class BidController extends Controller
 				$saved[] = $bid->id;
 			}
 
-			// 4️⃣ Response
+			// 4) Response
 			if (empty($saved) && !empty($duplicates)) {
 				return back()->withErrors([
 					'URL' => 'All bids already saved: ' . implode(', ', $duplicates)
@@ -103,13 +119,14 @@ class BidController extends Controller
 			}
 
 			$msg = '';
-			if ($saved)
+			if ($saved) {
 				$msg .= count($saved) . ' bid(s) saved. ';
-			if ($duplicates)
+			}
+			if ($duplicates) {
 				$msg .= count($duplicates) . ' duplicate bid(s) skipped.';
+			}
 
 			return redirect()->route('bids.index')->with('success', trim($msg));
-
 		} catch (\Throwable $e) {
 			Log::error('Scrape failed', [
 				'url' => $validated['URL'],
@@ -127,6 +144,7 @@ class BidController extends Controller
 	{
 		return view('bids.show', compact('bid'));
 	}
+
 	public function scrapeAll(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
 		@set_time_limit(600);
@@ -140,24 +158,33 @@ class BidController extends Controller
 
 		foreach ($bidUrls as $bidUrl) {
 			try {
-				// 1️⃣ Fetch data for each bid URL
+				// 1) Fetch data for each bid URL
 				$result = $scraper->fetch($bidUrl->URL);
 				Log::info('SCRAPER DEBUG scrapeAll', [
 					'url' => $bidUrl->URL,
-					'pdf_link' => $result['pdf_link'] ?? null,
+					'pdf_links' => $result['pdf_bids'] ?? [],
 					'text_length' => strlen($result['text'] ?? ''),
+					'clicked_bid_pages' => count($result['bid_pages'] ?? []),
 				]);
 
-				// 2️⃣ Extract bid data via AI
-				$extracted = $ai->extract($bidUrl->URL, $result['html'], $result['text']);
+				// 2) Extract bid data via AI
+				$extracted = $ai->extract(
+					$bidUrl->URL,
+					$result['html'],
+					$result['text'],
+					$result['pdf_bids'] ?? [],
+					$result['pdf_text'] ?? '',
+					$result['bid_pages'] ?? []
+				);
 
 				$today = \Carbon\Carbon::today();
 				$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
 					if (!empty($bid['ENDDATE'])) {
 						try {
 							$end = \Carbon\Carbon::parse($bid['ENDDATE']);
-							if ($end->lt($today))
+							if ($end->lt($today)) {
 								return false;
+							}
 						} catch (\Exception $e) {
 							return false;
 						}
@@ -168,11 +195,12 @@ class BidController extends Controller
 				$savedThisUrl = 0;
 				$duplicatesThisUrl = 0;
 
-				// 3️⃣ Save valid bids
+				// 3) Save valid bids
 				foreach ($filteredBids as $bidData) {
 					$title = $bidData['TITLE'] ?? null;
-					if (!$title)
+					if (!$title) {
 						continue;
+					}
 
 					$exists = Bid::where('URL', $bidUrl->URL)
 						->where('TITLE', $title)
@@ -183,16 +211,23 @@ class BidController extends Controller
 						continue;
 					}
 
+					$description = $bidData['DESCRIPTION'] ?? '';
+					if (is_array($description)) {
+						$description = $this->formatDescriptionArray($description);
+					}
+					if (empty($description) && !empty($result['pdf_text'])) {
+						$description = $result['pdf_text'];
+					}
+					if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
+						$description = $result['pdf_bids'][0]['PDF_LINK'];
+					}
+
 					$bid = new Bid();
 					$bid->URL = $bidUrl->URL;
 					$bid->TITLE = $title;
 					$bid->ENDDATE = $bidData['ENDDATE'] ?? null;
 					$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
-
-					// Save PDF link (if available)
-					$bid->DESCRIPTION = $result['pdf_link']
-						?? ($bidData['DESCRIPTION'] ?? 'No description or PDF link found.');
-
+					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
 					$bid->save();
@@ -207,7 +242,6 @@ class BidController extends Controller
 					'saved' => $savedThisUrl,
 					'duplicates' => $duplicatesThisUrl,
 				]);
-
 			} catch (\Throwable $e) {
 				Log::error('Scrape failed for URL: ' . $bidUrl->URL, [
 					'error' => $e->getMessage(),
@@ -217,7 +251,7 @@ class BidController extends Controller
 			}
 		}
 
-		// 4️⃣ Build final response
+		// 4) Build final response
 		$msg = "{$totalSaved} new bid(s) saved.";
 		if ($totalDuplicates > 0) {
 			$msg .= " Skipped {$totalDuplicates} duplicate bid(s).";
@@ -248,4 +282,18 @@ class BidController extends Controller
 		return redirect()->route('bids.index')->with('success', 'Bid deleted successfully.');
 	}
 
+	private function formatDescriptionArray(array $data, string $indent = ''): string
+	{
+		$lines = [];
+		foreach ($data as $key => $value) {
+			$label = is_int($key) ? $key : $key;
+			if (is_array($value)) {
+				$lines[] = "{$indent}{$label}:";
+				$lines[] = $this->formatDescriptionArray($value, $indent . '  ');
+			} else {
+				$lines[] = "{$indent}{$label}: {$value}";
+			}
+		}
+		return implode("\n", array_filter($lines));
+	}
 }

@@ -12,12 +12,14 @@ class ScraperService
 {
 	private Client $httpClient;
 
+	// app/Services/ScraperService.php
 	public function __construct()
 	{
 		$this->httpClient = new Client([
-			'timeout' => 60,
+			'timeout' => 90,
+			'connect_timeout' => 20,
 			'headers' => [
-				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+				'User-Agent' => 'Mozilla/5.0 ...',
 				'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
 				'Accept-Language' => 'en-US,en;q=0.9',
 				'Connection' => 'keep-alive',
@@ -29,38 +31,55 @@ class ScraperService
 			],
 			'verify' => false,
 			'cookies' => true,
+			// force IPv4 + TLS1.2 to avoid handshake issues
+			'curl' => [
+				CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+				CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_2,
+			],
 		]);
 	}
+
 
 	public function fetch(string $url): array
 	{
 		$pdfText = '';
+		$bidPages = [];
 
-		// 🧩 1. If direct PDF URL
+		// 1. If direct PDF URL
 		if (preg_match('/\.pdf($|\?)/i', $url)) {
 			return $this->fetchPdf($url);
 		}
 
-		// 🧩 2. Fetch HTML content
+		// 2. Fetch HTML content
 		$bestHtml = '';
 		$bestText = '';
 		$finalUrl = $url;
 
 		try {
 			$response = $this->httpClient->get($url);
-			$bestHtml = (string) $response->getBody();
-			$bestText = $this->htmlToText($bestHtml);
 		} catch (RequestException $e) {
 			Log::warning('SCRAPER FETCH ERROR', ['url' => $url, 'error' => $e->getMessage()]);
+			if (str_starts_with($url, 'https://')) {
+				$httpUrl = 'http://' . substr($url, 8);
+				try {
+					$response = $this->httpClient->get($httpUrl);
+					$url = $httpUrl;
+				} catch (RequestException $e2) {
+					throw $e2;
+				}
+			} else {
+				throw $e;
+			}
 		}
+		$bestHtml = (string) ($response->getBody() ?? '');
+		$bestText = $this->htmlToText($bestHtml);
 
-		// 🧩 3. Find PDF links (bids)
+		// 3. Find PDF links (bids)
 		$pdfBids = $this->findPdfLink($bestHtml, $url);
 
 		if (!empty($pdfBids)) {
 			Log::info('PDF LINKS FOUND', ['url' => $url, 'count' => count($pdfBids)]);
-			
-			// Combine all PDFs’ text content (AIExtractor will use this full text)
+
 			$pdfTexts = [];
 			foreach ($pdfBids as $bid) {
 				if (!empty($bid['PDF_LINK'])) {
@@ -75,7 +94,50 @@ class ScraperService
 			Log::info('NO PDF LINK FOUND', ['url' => $url]);
 		}
 
-		// 🧩 4. Fallback with Browsershot if page text is too short
+		// 3b. Follow clickable bid titles (detail pages) to pull richer data and PDFs
+		$detailLinks = $this->findBidDetailLinks($bestHtml, $url);
+		$detailLinks = array_slice($detailLinks, 0, 8); // cap depth
+		foreach ($detailLinks as $detail) {
+			try {
+				$pageHtml = '';
+				$pageText = '';
+				$pagePdfText = '';
+				$pagePdfLinks = [];
+
+				$response = $this->httpClient->get($detail['URL']);
+				$pageHtml = (string) $response->getBody();
+				$pageText = $this->htmlToText($pageHtml);
+				$pagePdfLinks = $this->findPdfLink($pageHtml, $detail['URL']);
+
+				$pdfTexts = [];
+				foreach ($pagePdfLinks as $link) {
+					if (!empty($link['PDF_LINK'])) {
+						$pdfResult = $this->fetchPdf($link['PDF_LINK']);
+						if (!empty($pdfResult['text'])) {
+							$pdfTexts[] = $pdfResult['text'];
+						}
+					}
+				}
+				$pagePdfText = implode("\n\n----- NEXT DOCUMENT -----\n\n", $pdfTexts);
+
+				if (!empty($pagePdfText)) {
+					$pdfText .= (!empty($pdfText) ? "\n\n----- NEXT DOCUMENT -----\n\n" : '') . $pagePdfText;
+				}
+
+				$bidPages[] = [
+					'title' => $detail['TITLE'],
+					'url' => $detail['URL'],
+					'html' => $pageHtml,
+					'text' => $pageText,
+					'pdf_links' => $pagePdfLinks,
+					'pdf_text' => $pagePdfText,
+				];
+			} catch (\Throwable $e) {
+				Log::warning('CLICKED BID PAGE FAILED', ['url' => $detail['URL'], 'error' => $e->getMessage()]);
+			}
+		}
+
+		// 4. Fallback with Browsershot if page text is too short
 		if (strlen($bestText) < 500) {
 			try {
 				$html = Browsershot::url($url)
@@ -103,6 +165,7 @@ class ScraperService
 			'pdf_count' => count($pdfBids),
 			'pdf_length' => strlen($pdfText),
 			'pdf_preview' => substr($pdfText, 0, 100),
+			'clicked_bid_pages' => count($bidPages),
 		]);
 
 		return [
@@ -111,13 +174,15 @@ class ScraperService
 			'text' => $bestText,
 			'pdf_bids' => $pdfBids,
 			'pdf_text' => $pdfText,
+			'bid_pages' => $bidPages,
 			'blocked' => false,
 		];
 	}
 
 	private function findPdfLink(string $html, string $baseUrl): array
 	{
-		if (empty($html)) return [];
+		if (empty($html))
+			return [];
 
 		libxml_use_internal_errors(true);
 		$dom = new \DOMDocument();
@@ -138,7 +203,7 @@ class ScraperService
 		}
 
 		// fallback: detect raw .pdf URLs in text
-		if (empty($bids) && preg_match_all('/https?:\/\/[^\s"\']+\.pdf/i', $html, $matches)) {
+		if (empty($bids) && preg_match_all('/https?:\/\/[^\\s"\']+\.pdf/i', $html, $matches)) {
 			foreach ($matches[0] as $pdfUrl) {
 				$bids[] = [
 					'TITLE' => $this->extractTitleFromUrl($pdfUrl),
@@ -162,6 +227,56 @@ class ScraperService
 		$title = trim(ucwords(strtolower($title)));
 
 		return $title ?: 'Document';
+	}
+
+	/**
+	 * Attempt to find clickable bid titles (non-PDF detail links) to crawl for richer data.
+	 */
+	private function findBidDetailLinks(string $html, string $baseUrl): array
+	{
+		if (empty($html))
+			return [];
+
+		libxml_use_internal_errors(true);
+		$dom = new \DOMDocument();
+		$dom->loadHTML($html);
+		$xpath = new \DOMXPath($dom);
+
+		$links = [];
+		foreach ($xpath->query('//a[@href]') as $anchor) {
+			$text = trim($anchor->textContent ?? '');
+			$href = $anchor->getAttribute('href');
+
+			if (strlen($text) < 5)
+				continue;
+			if (preg_match('/\.pdf($|\?)/i', $href))
+				continue;
+			if (stripos($href, 'javascript:') === 0)
+				continue;
+
+			$resolved = $this->resolveUrl($href, $baseUrl);
+			$lower = strtolower($text . ' ' . $resolved);
+			if (!preg_match('/bid|rfp|rfq|tender|solicitation|proposal/', $lower)) {
+				continue;
+			}
+
+			$links[] = [
+				'TITLE' => trim($text),
+				'URL' => $resolved,
+			];
+		}
+
+		// Deduplicate by URL
+		$unique = [];
+		$deduped = [];
+		foreach ($links as $link) {
+			if (isset($unique[$link['URL']]))
+				continue;
+			$unique[$link['URL']] = true;
+			$deduped[] = $link;
+		}
+
+		return $deduped;
 	}
 
 	private function fetchPdf(string $url): array

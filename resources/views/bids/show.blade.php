@@ -79,18 +79,36 @@
 		.description-box {
 			background: #f9fafb;
 			border: 1px solid #e5e7eb;
-			border-radius: 8px;
+			border-radius: 10px;
 			padding: 1.25rem;
 			margin-top: 0.5rem;
-			max-height: 400px;
-			overflow-y: auto;
 			color: #111827;
 			font-size: 0.95rem;
 		}
 
-		.description-box p {
-			margin: 0.5rem 0; /* ✅ tighter paragraph spacing */
-			line-height: 1.5;
+		.desc-row {
+			display: grid;
+			grid-template-columns: 220px 1fr;
+			gap: 0.5rem;
+			padding: 0.5rem 0.65rem;
+			border-radius: 8px;
+			align-items: start;
+		}
+
+		.desc-row:nth-child(odd) {
+			background: #f3f4f6;
+		}
+
+		.desc-row .label {
+			font-weight: 700;
+			color: #1f2937;
+			font-size: 0.95rem;
+		}
+
+		.desc-row .value {
+			color: #0f172a;
+			white-space: pre-wrap;
+			line-height: 1.55;
 		}
 
 		.description-box::-webkit-scrollbar {
@@ -122,7 +140,7 @@
 			</div>
 		@endif
 
-		<a href="{{ route('bids.index') }}" class="back-link">← Back to All Bids</a>
+		<a href="{{ route('bids.index') }}" class="back-link">&#8592; Back to All Bids</a>
 
 		<section class="card">
 			<h1>{{ $bid->TITLE ?? 'Untitled Bid' }}</h1>
@@ -139,30 +157,54 @@
 			<div class="meta-grid">
 				<div class="meta-item">
 					<strong>Title</strong>
-					<span>{{ $bid->TITLE ?? '—' }}</span>
+					<span>{{ $bid->TITLE ?? 'N/A' }}</span>
 				</div>
 
 				<div class="meta-item">
 					<strong>End Date</strong>
 					<span>
-						{{ $bid->ENDDATE ? \Carbon\Carbon::parse($bid->ENDDATE)->format('M. d, Y') : '—' }}
+						{{ $bid->ENDDATE ? \Carbon\Carbon::parse($bid->ENDDATE)->format('M. d, Y') : 'N/A' }}
 					</span>
 				</div>
 
 				<div class="meta-item">
 					<strong>NAICS</strong>
-					<span>{{ $bid->NAICSCODE ?? '—' }}</span>
+					<span>{{ $bid->NAICSCODE ?? 'N/A' }}</span>
 				</div>
 			</div>
 
+			@php
+				$desc = trim($bid->DESCRIPTION ?? '');
+				$lines = collect(preg_split('/\r?\n+/', $desc))
+					->filter()
+					->map(function ($line) {
+						if (strpos($line, ':') !== false) {
+							[$k, $v] = array_pad(explode(':', $line, 2), 2, '');
+							return [
+								'label' => trim($k),
+								'value' => trim($v),
+							];
+						}
+						return [
+							'label' => '',
+							'value' => trim($line),
+						];
+					});
+			@endphp
+
 			<div style="margin-top: 1.5rem;">
-				<strong>Description</strong>
+				<strong>Details</strong>
 				<div class="description-box">
-					{!! collect(preg_split('/\r?\n{2,}/', trim($bid->DESCRIPTION ?? '')))
-						->filter()
-						->map(fn($p) => '<p>' . e(trim($p)) . '</p>')
-						->implode('')
-					!!}
+					@if ($lines->isEmpty())
+						<p style="margin:0;">No details available.</p>
+					@else
+						@foreach ($lines as $row)
+							<div class="desc-row">
+								<span class="label">{{ $row['label'] ?: 'Detail' }}</span>
+								<span class="value">{{ $row['value'] }}</span>
+							</div>
+						@endforeach
+					@endif
 				</div>
 			</div>
 		</section>
