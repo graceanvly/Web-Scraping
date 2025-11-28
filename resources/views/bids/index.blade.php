@@ -426,6 +426,19 @@
 	</dialog>
 
 	<script>
+		// Auto-dismiss alerts after a few seconds
+		window.addEventListener('DOMContentLoaded', () => {
+			const alerts = document.querySelectorAll('.alert');
+			if (!alerts.length) return;
+			setTimeout(() => {
+				alerts.forEach(el => {
+					el.style.transition = 'opacity 0.4s ease';
+					el.style.opacity = '0';
+					setTimeout(() => el.remove(), 400);
+				});
+			}, 3500);
+		});
+
 		function openEditModal(ID, TITLE, ENDDATE, NAICSCODE) {
 			const modal = document.getElementById('editModal');
 			const form = document.getElementById('editForm');
