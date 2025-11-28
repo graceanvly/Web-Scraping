@@ -299,9 +299,6 @@
 					</button>
 				</form>
 			</div>
-			@error('URL')
-				<small style="color:red; display:block; margin-top:0.5rem;">{{ $message }}</small>
-			@enderror
 		</section>
 
 		<!-- Recent Bids -->

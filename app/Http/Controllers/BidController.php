@@ -86,17 +86,6 @@ class BidController extends Controller
 					continue;
 				}
 
-				$description = $bidData['DESCRIPTION'] ?? '';
-				if (is_array($description)) {
-					$description = $this->formatDescriptionArray($description);
-				}
-				if (empty($description) && !empty($result['pdf_text'])) {
-					$description = $result['pdf_text'];
-				}
-				if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
-					$description = $result['pdf_bids'][0]['PDF_LINK'];
-				}
-
 				$endDate = $bidData['ENDDATE'] ?? null;
 				if (!empty($endDate)) {
 					try {
@@ -106,11 +95,28 @@ class BidController extends Controller
 					}
 				}
 
+				$description = $bidData['DESCRIPTION'] ?? '';
+				if (is_array($description)) {
+					$description = $this->formatDescriptionArray($description);
+				}
+				$description = $this->stripNotProvidedLines($description);
+				if (empty($description) && !empty($result['pdf_text'])) {
+					$description = $result['pdf_text'];
+				}
+				if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
+					$description = $result['pdf_bids'][0]['PDF_LINK'];
+				}
+
 				$bid = new Bid();
 				$bid->URL = $validated['URL'];
 				$bid->TITLE = $title;
 				$bid->ENDDATE = $endDate;
-				$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
+				$bid->NAICSCODE = $this->normalizeNaicsCode(
+					$bidData['NAICSCODE'] ?? null,
+					$description,
+					$title,
+					$validated['URL']
+				);
 				$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
 				$bid->CREATED = now();
 				$bid->LAST_MODIFIED = now();
@@ -236,17 +242,6 @@ class BidController extends Controller
 						continue;
 					}
 
-					$description = $bidData['DESCRIPTION'] ?? '';
-					if (is_array($description)) {
-						$description = $this->formatDescriptionArray($description);
-					}
-					if (empty($description) && !empty($result['pdf_text'])) {
-						$description = $result['pdf_text'];
-					}
-					if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
-						$description = $result['pdf_bids'][0]['PDF_LINK'];
-					}
-
 					$endDate = $bidData['ENDDATE'] ?? null;
 					if (!empty($endDate)) {
 						try {
@@ -256,11 +251,28 @@ class BidController extends Controller
 						}
 					}
 
+					$description = $bidData['DESCRIPTION'] ?? '';
+					if (is_array($description)) {
+						$description = $this->formatDescriptionArray($description);
+					}
+					$description = $this->stripNotProvidedLines($description);
+					if (empty($description) && !empty($result['pdf_text'])) {
+						$description = $result['pdf_text'];
+					}
+					if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
+						$description = $result['pdf_bids'][0]['PDF_LINK'];
+					}
+
 					$bid = new Bid();
 					$bid->URL = $url;
 					$bid->TITLE = $title;
 					$bid->ENDDATE = $endDate;
-					$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
+					$bid->NAICSCODE = $this->normalizeNaicsCode(
+						$bidData['NAICSCODE'] ?? null,
+						$description,
+						$title,
+						$url
+					);
 					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
@@ -353,5 +365,196 @@ class BidController extends Controller
 			}
 		}
 		return implode("\n", array_filter($lines));
+	}
+
+	/**
+	 * Remove lines that are empty, "Not provided", or NAICS labels.
+	 */
+	private function stripNotProvidedLines(?string $description): string
+	{
+		if (empty($description)) {
+			return '';
+		}
+
+		$lines = preg_split('/\r\n|\r|\n/', $description) ?: [];
+		$clean = array_filter($lines, function ($line) {
+			$trimmed = trim($line);
+			if ($trimmed === '') {
+				return false;
+			}
+			if (stripos($trimmed, 'not provided') !== false) {
+				return false;
+			}
+			// Drop NAICS entries from description.
+			if (stripos($trimmed, 'naics') === 0) {
+				return false;
+			}
+			return true;
+		});
+
+		return trim(implode("\n", $clean));
+	}
+
+	/**
+<<<<<<< ours
+	 * Append important details if missing: title, end date, NAICS, and source URL.
+	 */
+	private function augmentDescription(string $description, ?string $title, ?string $endDate, $naics, ?string $url): string
+	{
+		$lines = preg_split('/\r\n|\r|\n/', $description) ?: [];
+		$normalized = array_map('trim', $lines);
+
+		$ensure = function (string $label, ?string $value) use (&$normalized) {
+			$val = trim((string) $value);
+			if ($val === '') {
+				return;
+			}
+			$lowerLabel = strtolower($label);
+			$already = array_filter($normalized, fn($line) => str_starts_with(strtolower($line), $lowerLabel));
+			if (empty($already)) {
+				$normalized[] = "{$label}: {$val}";
+			}
+		};
+
+		$ensure('Title', $title);
+		$ensure('End Date', $endDate);
+		$ensure('Bid URL', $url);
+
+		return trim(implode("\n", array_filter($normalized, fn($line) => $line !== '')));
+	}
+
+	/**
+=======
+>>>>>>> theirs
+	 * Normalize NAICS to a safe DB value:
+	 * - If a census NAICS URL is provided, pull the ?input=<code> value.
+	 * - Otherwise, extract the first 2-6 digit sequence.
+	 * - Truncate to 6 characters and strip non-digits.
+	 */
+	private function normalizeNaicsCode($value, ?string $fallbackText = null, ?string $title = null, ?string $url = null): ?string
+	{
+		$raw = trim(is_array($value) ? implode(' ', $value) : (string) $value);
+		if ($raw === '' || strcasecmp($raw, 'not provided') === 0) {
+			$raw = '';
+		}
+
+		// If it looks like a census NAICS URL, read the input query param.
+		if (str_contains(strtolower($raw), 'census.gov/naics')) {
+			$parts = parse_url($raw);
+			if (!empty($parts['query'])) {
+				parse_str($parts['query'], $query);
+				if (!empty($query['input'])) {
+					$raw = (string) $query['input'];
+				}
+			}
+		}
+
+		// Extract first 2-6 digit sequence and validate.
+		if ($raw !== '' && preg_match('/(\d{2,6})/', $raw, $matches)) {
+			$candidate = substr($matches[1], 0, 6);
+			if ($this->isValidNaicsCandidate($candidate)) {
+				return $candidate;
+			}
+		}
+
+		// Look for "NAICS" followed by digits inside description/title/url.
+		$candidates = [$fallbackText, $title, $url];
+		foreach ($candidates as $text) {
+			if (empty($text)) {
+				continue;
+			}
+			if (preg_match('/NAICS[^0-9]{0,10}(\d{2,6})/i', $text, $m)) {
+				$candidate = substr($m[1], 0, 6);
+				if ($this->isValidNaicsCandidate($candidate)) {
+					return $candidate;
+				}
+			}
+		}
+
+		// Heuristic: map common categories to NAICS codes when none provided.
+		$heuristic = $this->inferNaicsFromText(($fallbackText ?? '') . ' ' . ($title ?? ''));
+		if ($heuristic !== null) {
+			return $heuristic;
+		}
+
+		// Secondary scan: pick first valid digit sequence anywhere in description/title/url.
+		foreach ($candidates as $text) {
+			if (empty($text)) {
+				continue;
+			}
+			if (preg_match('/(\d{2,6})/', $text, $m)) {
+				$candidate = substr($m[1], 0, 6);
+				if ($this->isValidNaicsCandidate($candidate)) {
+					return $candidate;
+				}
+			}
+		}
+
+		// Final fallback to a valid, generic public admin NAICS to avoid null saves.
+		return '921190';
+	}
+
+	// Very small keyword heuristic to avoid random numbers; extend as needed.
+	private function inferNaicsFromText(string $text): ?string
+	{
+		$text = strtolower($text);
+		$map = [
+			['keywords' => ['software', 'saas', 'it services', 'cloud', 'system', 'platform'], 'code' => '541512'],
+			['keywords' => ['data center', 'hosting'], 'code' => '518210'],
+			['keywords' => ['record', 'records management', 'document management', 'archives', 'land records'], 'code' => '519190'],
+			['keywords' => ['web', 'website'], 'code' => '541511'],
+			['keywords' => ['cyber', 'security'], 'code' => '541519'],
+			['keywords' => ['consulting', 'professional services'], 'code' => '541611'],
+			['keywords' => ['engineering'], 'code' => '541330'],
+			['keywords' => ['telecom', 'telecommunications'], 'code' => '517919'],
+			['keywords' => ['janitorial', 'custodial', 'cleaning'], 'code' => '561720'],
+			['keywords' => ['landscape', 'mowing', 'grounds', 'lawn'], 'code' => '561730'],
+			['keywords' => ['waste', 'trash', 'recycling', 'garbage'], 'code' => '562111'],
+			['keywords' => ['construction', 'renovation', 'remodel', 'building'], 'code' => '236220'],
+			['keywords' => ['roof', 'roofing'], 'code' => '238160'],
+			['keywords' => ['electrical'], 'code' => '238210'],
+			['keywords' => ['hvac', 'mechanical', 'plumbing'], 'code' => '238220'],
+			['keywords' => ['road', 'street', 'paving', 'asphalt', 'bridge'], 'code' => '237310'],
+		];
+
+		foreach ($map as $entry) {
+			foreach ($entry['keywords'] as $kw) {
+				if (str_contains($text, $kw)) {
+					return $entry['code'];
+				}
+			}
+		}
+
+		return null;
+	}
+
+	private function isValidNaicsCandidate(string $code): bool
+	{
+		$code = trim($code);
+		if ($code === '' || !ctype_digit($code)) {
+			return false;
+		}
+
+		$len = strlen($code);
+		if ($len < 2 || $len > 6) {
+			return false;
+		}
+
+		$validTwoDigit = [
+			'11', '21', '22', '23', '31', '32', '33', '42', '44', '45',
+			'48', '49', '51', '52', '53', '54', '55', '56', '61', '62',
+			'71', '72', '81', '92',
+		];
+
+		if (!in_array(substr($code, 0, 2), $validTwoDigit, true)) {
+			return false;
+		}
+
+		// Reject known bad 926xxx combinations outside 2022 table.
+		if ($len === 6 && substr($code, 0, 3) === '926' && !in_array($code, ['926110', '926120', '926130', '926140', '926150', '926160'])) {
+			return false;
+		}
+
+		return true;
 	}
 }
