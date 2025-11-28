@@ -30,6 +30,11 @@ class BidController extends Controller
 		try {
 			// 1) Fetch page data, PDFs, and clickable bid pages
 			$result = $scraper->fetch($validated['URL']);
+			if (!empty($result['no_open_bids'])) {
+				return back()->withErrors([
+					'URL' => 'No open bids found on this page.'
+				]);
+			}
 			Log::info('SCRAPER DEBUG', [
 				'url' => $validated['URL'],
 				'pdf_links' => $result['pdf_bids'] ?? [],
@@ -92,10 +97,19 @@ class BidController extends Controller
 					$description = $result['pdf_bids'][0]['PDF_LINK'];
 				}
 
+				$endDate = $bidData['ENDDATE'] ?? null;
+				if (!empty($endDate)) {
+					try {
+						$endDate = \Carbon\Carbon::parse($endDate)->toDateString();
+					} catch (\Exception $e) {
+						$endDate = null;
+					}
+				}
+
 				$bid = new Bid();
 				$bid->URL = $validated['URL'];
 				$bid->TITLE = $title;
-				$bid->ENDDATE = !empty($bidData['ENDDATE']) ? $bidData['ENDDATE'] : null;
+				$bid->ENDDATE = $endDate;
 				$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
 				$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
 				$bid->CREATED = now();
@@ -154,14 +168,25 @@ class BidController extends Controller
 		$bidUrls = BidUrl::all();
 		$totalSaved = 0;
 		$totalDuplicates = 0;
+		$scrapeIssues = [];
 		$failedUrls = [];
 
 		foreach ($bidUrls as $bidUrl) {
 			try {
+				$url = trim((string) ($bidUrl->URL ?? $bidUrl->url ?? ''));
+				if ($url === '') {
+					$scrapeIssues[] = "Record ID {$bidUrl->id} - missing URL, skipped.";
+					continue;
+				}
+
 				// 1) Fetch data for each bid URL
-				$result = $scraper->fetch($bidUrl->URL);
+				$result = $scraper->fetch($url);
+				if (!empty($result['no_open_bids'])) {
+					$scrapeIssues[] = "{$url} - no open bids listed.";
+					continue;
+				}
 				Log::info('SCRAPER DEBUG scrapeAll', [
-					'url' => $bidUrl->URL,
+					'url' => $url,
 					'pdf_links' => $result['pdf_bids'] ?? [],
 					'text_length' => strlen($result['text'] ?? ''),
 					'clicked_bid_pages' => count($result['bid_pages'] ?? []),
@@ -169,7 +194,7 @@ class BidController extends Controller
 
 				// 2) Extract bid data via AI
 				$extracted = $ai->extract(
-					$bidUrl->URL,
+					$url,
 					$result['html'],
 					$result['text'],
 					$result['pdf_bids'] ?? [],
@@ -202,7 +227,7 @@ class BidController extends Controller
 						continue;
 					}
 
-					$exists = Bid::where('URL', $bidUrl->URL)
+					$exists = Bid::where('URL', $url)
 						->where('TITLE', $title)
 						->exists();
 
@@ -222,10 +247,19 @@ class BidController extends Controller
 						$description = $result['pdf_bids'][0]['PDF_LINK'];
 					}
 
+					$endDate = $bidData['ENDDATE'] ?? null;
+					if (!empty($endDate)) {
+						try {
+							$endDate = \Carbon\Carbon::parse($endDate)->toDateString();
+						} catch (\Exception $e) {
+							$endDate = null;
+						}
+					}
+
 					$bid = new Bid();
-					$bid->URL = $bidUrl->URL;
+					$bid->URL = $url;
 					$bid->TITLE = $title;
-					$bid->ENDDATE = $bidData['ENDDATE'] ?? null;
+					$bid->ENDDATE = $endDate;
 					$bid->NAICSCODE = $bidData['NAICSCODE'] ?? null;
 					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
 					$bid->CREATED = now();
@@ -238,16 +272,22 @@ class BidController extends Controller
 				$totalSaved += $savedThisUrl;
 				$totalDuplicates += $duplicatesThisUrl;
 
-				Log::info('Scrape summary for ' . $bidUrl->URL, [
+				Log::info('Scrape summary for ' . $url, [
 					'saved' => $savedThisUrl,
 					'duplicates' => $duplicatesThisUrl,
 				]);
+
+				// Surface silent misses so the UI can show which URLs returned nothing.
+				if ($savedThisUrl === 0 && $duplicatesThisUrl === 0) {
+					$scrapeIssues[] = "{$url} - no bids found.";
+				}
 			} catch (\Throwable $e) {
-				Log::error('Scrape failed for URL: ' . $bidUrl->URL, [
+				Log::error('Scrape failed for URL: ' . $url, [
 					'error' => $e->getMessage(),
 					'trace' => $e->getTraceAsString(),
 				]);
-				$failedUrls[] = $bidUrl->URL;
+				$failedUrls[] = $url;
+				$scrapeIssues[] = "{$url} - failed: {$e->getMessage()}";
 			}
 		}
 
@@ -256,11 +296,29 @@ class BidController extends Controller
 		if ($totalDuplicates > 0) {
 			$msg .= " Skipped {$totalDuplicates} duplicate bid(s).";
 		}
-		if (!empty($failedUrls)) {
-			$msg .= " Failed URLs: " . implode(', ', $failedUrls);
+
+		$redirect = redirect()->route('bids.index')->with('scrape_issues', $scrapeIssues);
+
+		// Always surface failures to the user instead of silently succeeding.
+		if (!empty($failedUrls) || ($totalSaved === 0 && $totalDuplicates === 0)) {
+			$errorMsg = [];
+			if (!empty($failedUrls)) {
+				$errorMsg[] = "Failed URLs: " . implode(', ', $failedUrls);
+			}
+			if ($totalSaved === 0 && $totalDuplicates === 0) {
+				$errorMsg[] = 'No bids were scraped from the configured URLs.';
+			}
+
+			$redirect = $redirect->withErrors([
+				'scrape_all' => implode(' ', $errorMsg)
+			]);
 		}
 
-		return redirect()->route('bids.index')->with('success', trim($msg));
+		if ($totalSaved > 0 || $totalDuplicates > 0) {
+			$redirect = $redirect->with('success', trim($msg));
+		}
+
+		return $redirect;
 	}
 
 	public function update(Request $request, Bid $bid)

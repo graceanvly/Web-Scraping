@@ -44,6 +44,7 @@ class ScraperService
 	{
 		$pdfText = '';
 		$bidPages = [];
+		$noOpenBids = false;
 
 		// 1. If direct PDF URL
 		if (preg_match('/\.pdf($|\?)/i', $url)) {
@@ -73,9 +74,13 @@ class ScraperService
 		}
 		$bestHtml = (string) ($response->getBody() ?? '');
 		$bestText = $this->htmlToText($bestHtml);
+		$noOpenBids = $this->detectNoOpenBids($bestHtml, $bestText);
+		if ($noOpenBids) {
+			Log::info('NO OPEN BIDS FLAGGED', ['url' => $url]);
+		}
 
 		// 3. Find PDF links (bids)
-		$pdfBids = $this->findPdfLink($bestHtml, $url);
+		$pdfBids = $noOpenBids ? [] : $this->findPdfLink($bestHtml, $url);
 
 		if (!empty($pdfBids)) {
 			Log::info('PDF LINKS FOUND', ['url' => $url, 'count' => count($pdfBids)]);
@@ -95,7 +100,7 @@ class ScraperService
 		}
 
 		// 3b. Follow clickable bid titles (detail pages) to pull richer data and PDFs
-		$detailLinks = $this->findBidDetailLinks($bestHtml, $url);
+		$detailLinks = $noOpenBids ? [] : $this->findBidDetailLinks($bestHtml, $url);
 		$detailLinks = array_slice($detailLinks, 0, 8); // cap depth
 		foreach ($detailLinks as $detail) {
 			try {
@@ -176,6 +181,7 @@ class ScraperService
 			'pdf_text' => $pdfText,
 			'bid_pages' => $bidPages,
 			'blocked' => false,
+			'no_open_bids' => $noOpenBids,
 		];
 	}
 
@@ -347,5 +353,31 @@ class ScraperService
 			return $prefix . $href;
 		}
 		return rtrim($prefix, '/') . '/' . ltrim($href, '/');
+	}
+
+	private function detectNoOpenBids(string $html, string $text): bool
+	{
+		$haystack = strtolower($text . ' ' . strip_tags($html));
+		$patterns = [
+			'no open bid',
+			'no open bids',
+			'no open solicitations',
+			'no open opportunities',
+			'no bid postings',
+			'there are no bids',
+			'no current bids',
+			'no current solicitations',
+			'no open procurement',
+			'no opportunities available',
+			'there are no open bid postings',
+		];
+
+		foreach ($patterns as $pattern) {
+			if (str_contains($haystack, $pattern)) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 }

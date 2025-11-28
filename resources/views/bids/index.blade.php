@@ -111,6 +111,32 @@
 			white-space: nowrap;
 		}
 
+		.alert {
+			padding: 0.75rem 1rem;
+			border-radius: 8px;
+			margin-bottom: 1rem;
+			border: 1px solid transparent;
+			font-size: 0.95rem;
+		}
+
+		.alert.success {
+			background: #ecfdf3;
+			border-color: #bbf7d0;
+			color: #166534;
+		}
+
+		.alert.error {
+			background: #fef2f2;
+			border-color: #fecaca;
+			color: #b91c1c;
+		}
+
+		.alert.warning {
+			background: #fff7ed;
+			border-color: #fed7aa;
+			color: #c2410c;
+		}
+
 		/* Toolbar */
 		.table-toolbar {
 			display: flex;
@@ -210,19 +236,50 @@
 <body>
 	<main class="container">
 		<!-- Navigation -->
-		<nav>
-			<h1>Bid Scraper</h1>
-			<form method="POST" action="{{ route('logout') }}">
-				@csrf
-				<button type="submit" class="secondary">Logout</button>
-			</form>
-		</nav>
+	<nav>
+		<h1>Bid Scraper</h1>
+		<form method="POST" action="{{ route('logout') }}">
+			@csrf
+			<button type="submit" class="secondary">Logout</button>
+		</form>
+	</nav>
 
-		<!-- Actions -->
-		<section class="card">
-			<div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; justify-content:space-between;">
-				<!-- Scrape All -->
-				<form method="POST" action="{{ route('bidurl.scrapeAll') }}">
+		@if (session('success'))
+			<div class="alert success">
+				{{ session('success') }}
+			</div>
+		@endif
+
+		@if ($errors->any())
+			<div class="alert error">
+				<strong>Scrape issues:</strong>
+				<ul style="margin:0.5rem 0 0 1.25rem;">
+					@foreach ($errors->all() as $error)
+						<li>{{ $error }}</li>
+					@endforeach
+				</ul>
+			</div>
+		@endif
+
+		@if (session('scrape_issues'))
+			@php $issues = session('scrape_issues') ?? []; @endphp
+			@if (!empty($issues))
+				<div class="alert warning">
+					<strong>Skipped URLs:</strong>
+					<ul style="margin:0.5rem 0 0 1.25rem;">
+						@foreach ($issues as $issue)
+							<li>{{ $issue }}</li>
+						@endforeach
+					</ul>
+				</div>
+			@endif
+		@endif
+
+	<!-- Actions -->
+	<section class="card">
+		<div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; justify-content:space-between;">
+			<!-- Scrape All -->
+			<form method="POST" action="{{ route('bidurl.scrapeAll') }}">
 					@csrf
 					<button type="submit" class="contrast"
 						style="padding:0.6rem 1.2rem; font-size:0.95rem; white-space:nowrap;">
