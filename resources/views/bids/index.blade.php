@@ -436,7 +436,7 @@
 					el.style.opacity = '0';
 					setTimeout(() => el.remove(), 400);
 				});
-			}, 3500);
+			}, 10000);
 		});
 
 		function openEditModal(ID, TITLE, ENDDATE, NAICSCODE) {

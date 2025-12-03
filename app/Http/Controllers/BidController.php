@@ -6,6 +6,7 @@ use App\Models\Bid;
 use App\Models\BidUrl;
 use App\Services\AIExtractor;
 use App\Services\ScraperService;
+use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -24,7 +25,12 @@ class BidController extends Controller
 		@ini_set('memory_limit', '512M');
 
 		$validated = $request->validate([
-			'URL' => ['required', 'url']
+			'URL' => ['required', 'url', 'max:2048', 'regex:/^https?:\\/\\//i'],
+		], [
+			'URL.required' => 'Please enter a link to a page that lists open bids.',
+			'URL.url' => 'The link needs to be a valid URL (for example, https://example.gov/bids).',
+			'URL.max' => 'The link is too long. Please paste a shorter, direct link to the bids page.',
+			'URL.regex' => 'Only http:// or https:// links are supported.',
 		]);
 
 		try {
@@ -34,6 +40,11 @@ class BidController extends Controller
 				return back()->withErrors([
 					'URL' => 'No open bids found on this page.'
 				]);
+			}
+			if (empty($result['html']) && empty($result['pdf_bids']) && empty($result['bid_pages'])) {
+				return back()->withErrors([
+					'URL' => 'We could not read any content from this link. Please confirm the page is publicly accessible and lists current bids.'
+				])->withInput();
 			}
 			Log::info('SCRAPER DEBUG', [
 				'url' => $validated['URL'],
@@ -69,6 +80,7 @@ class BidController extends Controller
 
 			$saved = [];
 			$duplicates = [];
+			$nonBids = [];
 
 			// 3) Save bids
 			foreach ($filteredBids as $bidData) {
@@ -86,14 +98,7 @@ class BidController extends Controller
 					continue;
 				}
 
-				$endDate = $bidData['ENDDATE'] ?? null;
-				if (!empty($endDate)) {
-					try {
-						$endDate = \Carbon\Carbon::parse($endDate)->toDateString();
-					} catch (\Exception $e) {
-						$endDate = null;
-					}
-				}
+				$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
 				$description = $bidData['DESCRIPTION'] ?? '';
 				if (is_array($description)) {
@@ -105,6 +110,11 @@ class BidController extends Controller
 				}
 				if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
 					$description = $result['pdf_bids'][0]['PDF_LINK'];
+				}
+
+				if (!$this->looksLikeBid($title, $description, $validated['URL'], $endDate)) {
+					$nonBids[] = $title;
+					continue;
 				}
 
 				$bid = new Bid();
@@ -132,7 +142,7 @@ class BidController extends Controller
 				]);
 			}
 
-			if (empty($saved) && empty($duplicates)) {
+			if (empty($saved) && empty($duplicates) && empty($nonBids)) {
 				return back()->withErrors([
 					'URL' => 'No open bids found or extractable data from this URL.'
 				]);
@@ -145,6 +155,9 @@ class BidController extends Controller
 			if ($duplicates) {
 				$msg .= count($duplicates) . ' duplicate bid(s) skipped.';
 			}
+			if ($nonBids) {
+				$msg .= ' Skipped ' . count($nonBids) . ' item(s) that did not look like bids.';
+			}
 
 			return redirect()->route('bids.index')->with('success', trim($msg));
 		} catch (\Throwable $e) {
@@ -155,7 +168,7 @@ class BidController extends Controller
 			]);
 
 			return back()->withErrors([
-				'URL' => 'Failed to scrape this URL. ' . $e->getMessage()
+				'URL' => $this->friendlyExceptionMessage($e)
 			])->withInput();
 		}
 	}
@@ -184,11 +197,19 @@ class BidController extends Controller
 					$scrapeIssues[] = "Record ID {$bidUrl->id} - missing URL, skipped.";
 					continue;
 				}
+				if (!filter_var($url, FILTER_VALIDATE_URL) || !preg_match('/^https?:\\/\\//i', $url)) {
+					$scrapeIssues[] = "{$url} - not a valid http/https link, skipped.";
+					continue;
+				}
 
 				// 1) Fetch data for each bid URL
 				$result = $scraper->fetch($url);
 				if (!empty($result['no_open_bids'])) {
 					$scrapeIssues[] = "{$url} - no open bids listed.";
+					continue;
+				}
+				if (empty($result['html']) && empty($result['pdf_bids']) && empty($result['bid_pages'])) {
+					$scrapeIssues[] = "{$url} - page content could not be read.";
 					continue;
 				}
 				Log::info('SCRAPER DEBUG scrapeAll', [
@@ -225,6 +246,7 @@ class BidController extends Controller
 
 				$savedThisUrl = 0;
 				$duplicatesThisUrl = 0;
+				$nonBidsThisUrl = 0;
 
 				// 3) Save valid bids
 				foreach ($filteredBids as $bidData) {
@@ -242,14 +264,7 @@ class BidController extends Controller
 						continue;
 					}
 
-					$endDate = $bidData['ENDDATE'] ?? null;
-					if (!empty($endDate)) {
-						try {
-							$endDate = \Carbon\Carbon::parse($endDate)->toDateString();
-						} catch (\Exception $e) {
-							$endDate = null;
-						}
-					}
+					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
 					$description = $bidData['DESCRIPTION'] ?? '';
 					if (is_array($description)) {
@@ -261,6 +276,11 @@ class BidController extends Controller
 					}
 					if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
 						$description = $result['pdf_bids'][0]['PDF_LINK'];
+					}
+
+					if (!$this->looksLikeBid($title, $description, $url, $endDate)) {
+						$nonBidsThisUrl++;
+						continue;
 					}
 
 					$bid = new Bid();
@@ -287,11 +307,14 @@ class BidController extends Controller
 				Log::info('Scrape summary for ' . $url, [
 					'saved' => $savedThisUrl,
 					'duplicates' => $duplicatesThisUrl,
+					'non_bids' => $nonBidsThisUrl,
 				]);
 
 				// Surface silent misses so the UI can show which URLs returned nothing.
-				if ($savedThisUrl === 0 && $duplicatesThisUrl === 0) {
+				if ($savedThisUrl === 0 && $duplicatesThisUrl === 0 && $nonBidsThisUrl === 0) {
 					$scrapeIssues[] = "{$url} - no bids found.";
+				} elseif ($savedThisUrl === 0 && $duplicatesThisUrl === 0 && $nonBidsThisUrl > 0) {
+					$scrapeIssues[] = "{$url} - skipped {$nonBidsThisUrl} item(s) that did not look like bids.";
 				}
 			} catch (\Throwable $e) {
 				Log::error('Scrape failed for URL: ' . $url, [
@@ -299,7 +322,7 @@ class BidController extends Controller
 					'trace' => $e->getTraceAsString(),
 				]);
 				$failedUrls[] = $url;
-				$scrapeIssues[] = "{$url} - failed: {$e->getMessage()}";
+				$scrapeIssues[] = "{$url} - " . $this->friendlyExceptionMessage($e);
 			}
 		}
 
@@ -339,7 +362,14 @@ class BidController extends Controller
 			'TITLE' => 'required|string|max:255',
 			'ENDDATE' => 'nullable|date',
 			'NAICSCODE' => 'nullable|string|max:50',
+		], [
+			'TITLE.required' => 'Title is required.',
+			'TITLE.max' => 'Title is too long. Please keep it under 255 characters.',
+			'ENDDATE.date' => 'End Date must be a valid date in the format YYYY-MM-DD.',
+			'NAICSCODE.max' => 'NAICS code must be 50 characters or fewer.',
 		]);
+
+		$validated['ENDDATE'] = $this->sanitizeDate($validated['ENDDATE'] ?? null);
 
 		$bid->update($validated);
 
@@ -396,7 +426,6 @@ class BidController extends Controller
 	}
 
 	/**
-<<<<<<< ours
 	 * Append important details if missing: title, end date, NAICS, and source URL.
 	 */
 	private function augmentDescription(string $description, ?string $title, ?string $endDate, $naics, ?string $url): string
@@ -424,8 +453,6 @@ class BidController extends Controller
 	}
 
 	/**
-=======
->>>>>>> theirs
 	 * Normalize NAICS to a safe DB value:
 	 * - If a census NAICS URL is provided, pull the ?input=<code> value.
 	 * - Otherwise, extract the first 2-6 digit sequence.
@@ -556,5 +583,89 @@ class BidController extends Controller
 		}
 
 		return true;
+	}
+
+	private function sanitizeDate($value): ?string
+	{
+		$value = is_string($value) ? trim($value) : $value;
+		if (empty($value)) {
+			return null;
+		}
+
+		try {
+			return \Carbon\Carbon::parse($value)->toDateString();
+		} catch (\Throwable $e) {
+			return null;
+		}
+	}
+
+	private function friendlyExceptionMessage(\Throwable $e): string
+	{
+		if ($e instanceof RequestException) {
+			$status = $e->getResponse()?->getStatusCode();
+			if ($status === 403) {
+				return 'The site blocked our request (403 Forbidden). Please try opening the link in a browser first or use a different source.';
+			}
+			if ($status === 404) {
+				return 'The page could not be found (404). Please double-check the link.';
+			}
+			if ($status === 522 || str_contains(strtolower($e->getMessage()), 'timed out')) {
+				return 'The site took too long to respond. Please try again later.';
+			}
+			if ($status >= 500) {
+				return 'The site returned a server error. Please retry after a few minutes.';
+			}
+		}
+
+		$message = strtolower($e->getMessage());
+		if (str_contains($message, 'timed out')) {
+			return 'The site took too long to respond. Please try again later.';
+		}
+		if (str_contains($message, 'ssl') || str_contains($message, 'certificate')) {
+			return 'We could not establish a secure connection to this site. Please verify the link or try another URL.';
+		}
+
+		return 'Failed to scrape this URL. ' . $e->getMessage();
+	}
+
+	private function looksLikeBid(?string $title, ?string $description, ?string $url, ?string $endDate): bool
+	{
+		$title = trim((string) $title);
+		$desc = strtolower((string) $description);
+		$url = strtolower((string) $url);
+
+		// If we have a parsable end date, treat as a strong signal.
+		if (!empty($endDate)) {
+			return true;
+		}
+
+		// Titles that are too short or generic are unlikely to be bids.
+		if ($title === '' || strlen($title) < 5) {
+			return false;
+		}
+		$genericTitles = ['home', 'contact', 'about', 'document', 'documents', 'news', 'events', 'calendar', 'bids.aspx'];
+		if (in_array(strtolower($title), $genericTitles, true)) {
+			return false;
+		}
+
+		$bidKeywords = '(bid|bids|rfp|rfq|rfi|tender|solicitation|proposal|invitation)';
+
+		// Strong signals in title, description, or URL.
+		if (preg_match("/{$bidKeywords}/i", $title)) {
+			return true;
+		}
+		if (preg_match("/{$bidKeywords}/i", $desc)) {
+			return true;
+		}
+		if (preg_match("/{$bidKeywords}/i", $url)) {
+			return true;
+		}
+
+		// Require some descriptive substance to avoid saving bare page text.
+		if (strlen($desc) < 120) {
+			return false;
+		}
+
+		return false;
 	}
 }
