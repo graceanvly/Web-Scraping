@@ -33,6 +33,9 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/bidurl/upload', [BidUrlController::class, 'create'])->name('bidurl.create');
     Route::post('/bidurl/upload', [BidUrlController::class, 'store'])->name('bidurl.store');
+    Route::post('/bidurl', [BidUrlController::class, 'storeSingle'])->name('bidurl.storeSingle');
     Route::get('/bidurl', [BidUrlController::class, 'index'])->name('bidurl.index');
     Route::get('/bidurl/{bidUrl}', [BidUrlController::class, 'show'])->name('bidurl.show');
+    Route::put('/bidurl/{bidUrl}', [BidUrlController::class, 'update'])->name('bidurl.update');
+    Route::delete('/bidurl/{bidUrl}', [BidUrlController::class, 'destroy'])->name('bidurl.destroy');
 });

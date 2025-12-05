@@ -238,10 +238,12 @@
 		<!-- Navigation -->
 	<nav>
 		<h1>Bid Scraper</h1>
-		<form method="POST" action="{{ route('logout') }}">
-			@csrf
-			<button type="submit" class="secondary">Logout</button>
-		</form>
+		<div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+			<form method="POST" action="{{ route('logout') }}">
+				@csrf
+				<button type="submit" class="secondary">Logout</button>
+			</form>
+		</div>
 	</nav>
 
 		@if (session('success'))
@@ -275,33 +277,36 @@
 			@endif
 		@endif
 
-	<!-- Actions -->
+		<!-- Actions -->
 	<section class="card">
-		<div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; justify-content:space-between;">
-			<!-- Scrape All -->
-			<form method="POST" action="{{ route('bidurl.scrapeAll') }}">
+		<div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-start; justify-content:space-between;">
+			<div style="display:flex; flex-direction:column; gap:0.35rem; align-items:flex-start;">
+				<!-- Scrape All -->
+				<form method="POST" action="{{ route('bidurl.scrapeAll') }}">
 					@csrf
 					<button type="submit" class="contrast"
 						style="padding:0.6rem 1.2rem; font-size:0.95rem; white-space:nowrap;">
 						🚀 Scrape All
 					</button>
 				</form>
-
-				<!-- Add URL -->
-				<form method="POST" action="{{ route('bids.store') }}"
-					style="display:flex; gap:0.5rem; flex:1; max-width:600px;">
-					@csrf
-					<input type="URL" id="URL" name="URL" value="{{ old('URL') }}" placeholder="Enter bidding URL…"
-						required style="flex:1; min-width:80px; padding:0.6rem 0.75rem; font-size:0.95rem;">
-					<button type="submit"
-						style="flex:0; width:auto; padding:0.45rem 0.9rem; font-size:0.85rem; white-space:nowrap;">
-						Scrape
-					</button>
-				</form>
+				<a href="{{ route('bidurl.index') }}" class="secondary" style="white-space:nowrap;">Show Bid URLs</a>
 			</div>
-		</section>
 
-		<!-- Recent Bids -->
+			<!-- Add URL -->
+			<form method="POST" action="{{ route('bids.store') }}"
+				style="display:flex; gap:0.5rem; flex:1; max-width:600px;">
+				@csrf
+				<input type="URL" id="URL" name="URL" value="{{ old('URL') }}" placeholder="Enter bidding URL to scrape"
+					required style="flex:1; min-width:80px; padding:0.6rem 0.75rem; font-size:0.95rem;">
+				<button type="submit"
+					style="flex:0; width:auto; padding:0.45rem 0.9rem; font-size:0.85rem; white-space:nowrap;">
+					Scrape
+				</button>
+			</form>
+		</div>
+	</section>
+
+	<!-- Recent Bids -->
 		<section class="card">
 			<h2 style="margin-top:0;">Recent Bids</h2>
 
@@ -525,3 +530,7 @@
 </body>
 
 </html>
+
+
+
+

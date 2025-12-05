@@ -62,6 +62,54 @@ class BidUrlController extends Controller
     }
 
     /**
+     * Store a single BidUrl from the inline form.
+     */
+    public function storeSingle(Request $request)
+    {
+        $data = $request->validate([
+            'url' => ['required', 'url', 'max:2048', 'regex:/^https?:\\/\\//i'],
+            'name' => ['nullable', 'string', 'max:255'],
+        ], [
+            'url.required' => 'Please provide a URL.',
+            'url.url' => 'Enter a valid URL (http or https).',
+            'url.regex' => 'Only http:// or https:// links are supported.',
+        ]);
+
+        BidUrl::create($data);
+
+        return redirect()->route('bidurl.index')->with('success', 'Bid URL added.');
+    }
+
+    /**
+     * Update an existing BidUrl.
+     */
+    public function update(Request $request, BidUrl $bidUrl)
+    {
+        $data = $request->validate([
+            'url' => ['required', 'url', 'max:2048', 'regex:/^https?:\\/\\//i'],
+            'name' => ['nullable', 'string', 'max:255'],
+        ], [
+            'url.required' => 'Please provide a URL.',
+            'url.url' => 'Enter a valid URL (http or https).',
+            'url.regex' => 'Only http:// or https:// links are supported.',
+        ]);
+
+        $bidUrl->update($data);
+
+        return redirect()->route('bidurl.index')->with('success', 'Bid URL updated.');
+    }
+
+    /**
+     * Delete a BidUrl.
+     */
+    public function destroy(BidUrl $bidUrl)
+    {
+        $bidUrl->delete();
+
+        return redirect()->route('bidurl.index')->with('success', 'Bid URL deleted.');
+    }
+
+    /**
      * Show a single BidUrl record.
      */
     public function show(BidUrl $bidUrl)
