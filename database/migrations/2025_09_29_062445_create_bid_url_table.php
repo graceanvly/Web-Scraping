@@ -24,7 +24,6 @@ return new class extends Migration
             $table->decimal('checksum', 24, 0)->nullable();
             $table->integer('valid')->default(1);
             $table->bigInteger('third_party_url_id')->nullable();
-            $table->timestamps(); // created_at, updated_at
         });
     }
 

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BidUrl;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class BidUrlController extends Controller
 {
@@ -57,7 +58,7 @@ class BidUrlController extends Controller
      */
     public function index()
     {
-        $bidUrls = BidUrl::latest()->paginate(15);
+        $bidUrls = BidUrl::paginate(15);
         return view('bidurl.index', compact('bidUrls'));
     }
 
@@ -67,12 +68,21 @@ class BidUrlController extends Controller
     public function storeSingle(Request $request)
     {
         $data = $request->validate([
-            'url' => ['required', 'url', 'max:2048', 'regex:/^https?:\\/\\//i'],
+            'url' => [
+                'required',
+                'url',
+                'max:2048',
+                'regex:/^https?:\\/\\//i',
+                Rule::unique('bid_url', 'url'),
+            ],
             'name' => ['nullable', 'string', 'max:255'],
+            'username' => ['nullable', 'string', 'max:255'],
+            'password' => ['nullable', 'string', 'max:255'],
         ], [
             'url.required' => 'Please provide a URL.',
             'url.url' => 'Enter a valid URL (http or https).',
             'url.regex' => 'Only http:// or https:// links are supported.',
+            'url.unique' => 'This URL is already in the list.',
         ]);
 
         BidUrl::create($data);
@@ -86,12 +96,21 @@ class BidUrlController extends Controller
     public function update(Request $request, BidUrl $bidUrl)
     {
         $data = $request->validate([
-            'url' => ['required', 'url', 'max:2048', 'regex:/^https?:\\/\\//i'],
+            'url' => [
+                'required',
+                'url',
+                'max:2048',
+                'regex:/^https?:\\/\\//i',
+                Rule::unique('bid_url', 'url')->ignore($bidUrl->id, 'ID'),
+            ],
             'name' => ['nullable', 'string', 'max:255'],
+            'username' => ['nullable', 'string', 'max:255'],
+            'password' => ['nullable', 'string', 'max:255'],
         ], [
             'url.required' => 'Please provide a URL.',
             'url.url' => 'Enter a valid URL (http or https).',
             'url.regex' => 'Only http:// or https:// links are supported.',
+            'url.unique' => 'This URL is already in the list.',
         ]);
 
         $bidUrl->update($data);

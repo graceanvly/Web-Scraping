@@ -11,6 +11,8 @@ class BidUrl extends Model
 
     protected $table = "bid_url";
 
+    public $timestamps = false;
+
 	protected $fillable = [
 		'url',
         'name',
@@ -18,11 +20,13 @@ class BidUrl extends Model
         'end_time',
         'weight',
         'user_id',
-        'check_changes',
-        'visit_required',
-        'checksum',
-        'valid',
-        'third_party_url_id',
+		'check_changes',
+		'visit_required',
+		'checksum',
+		'valid',
+		'third_party_url_id',
+		'username',
+		'password',
 	];
 
 	protected $casts = [

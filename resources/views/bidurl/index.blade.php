@@ -406,6 +406,12 @@
 				<label for="add_name">Name (optional)</label>
 				<input type="text" id="add_name" name="name" placeholder="Optional name">
 
+				<label for="add_username">Username (optional)</label>
+				<input type="text" id="add_username" name="username" placeholder="Optional username">
+
+				<label for="add_password">Password (optional)</label>
+				<input type="text" id="add_password" name="password" placeholder="Optional password">
+
 				<footer style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
 					<button class="secondary" type="button" onclick="addModal.close()">Cancel</button>
 					<button class="contrast" type="submit">Add</button>
@@ -425,6 +431,12 @@
 
 				<label for="edit_name">Name</label>
 				<input type="text" id="edit_name" name="name">
+
+				<label for="edit_username">Username (optional)</label>
+				<input type="text" id="edit_username" name="username">
+
+				<label for="edit_password">Password (optional)</label>
+				<input type="text" id="edit_password" name="password">
 
 				<footer style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
 					<button class="secondary" type="button" onclick="editModal.close()">Cancel</button>
@@ -452,6 +464,8 @@
 		function openAdd() {
 			document.getElementById('add_url').value = '';
 			document.getElementById('add_name').value = '';
+			document.getElementById('add_username').value = '';
+			document.getElementById('add_password').value = '';
 			addModal.showModal();
 		}
 
@@ -478,6 +492,8 @@
 			editForm.action = "{{ url('/bidurl') }}/" + bidUrl.id;
 			document.getElementById('edit_url').value = bidUrl.url ? bidUrl.url : '';
 			document.getElementById('edit_name').value = bidUrl.name ? bidUrl.name : '';
+			document.getElementById('edit_username').value = bidUrl.username ? bidUrl.username : '';
+			document.getElementById('edit_password').value = bidUrl.password ? bidUrl.password : '';
 			editModal.showModal();
 		}
 
