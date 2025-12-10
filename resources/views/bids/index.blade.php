@@ -137,6 +137,17 @@
 			color: #c2410c;
 		}
 
+		.alert .close-btn {
+			background: transparent;
+			border: none;
+			color: inherit;
+			font-weight: 600;
+			margin-left: auto;
+			margin-right: 0;
+			cursor: pointer;
+			line-height: 1;
+		}
+
 		/* Toolbar */
 		.table-toolbar {
 			display: flex;
@@ -247,32 +258,35 @@
 	</nav>
 
 		@if (session('success'))
-			<div class="alert success">
+			<div class="alert success" style="display:flex; align-items:flex-start; gap:0.5rem;">
 				{{ session('success') }}
+				<button type="button" class="close-btn" aria-label="Close alert" onclick="this.parentElement.remove()">×</button>
 			</div>
 		@endif
 
 		@if ($errors->any())
-			<div class="alert error">
+			<div class="alert error" style="display:flex; align-items:flex-start; gap:0.5rem;">
 				<strong>Scrape issues:</strong>
 				<ul style="margin:0.5rem 0 0 1.25rem;">
 					@foreach ($errors->all() as $error)
 						<li>{{ $error }}</li>
 					@endforeach
 				</ul>
+				<button type="button" class="close-btn" aria-label="Close alert" onclick="this.parentElement.remove()">×</button>
 			</div>
 		@endif
 
 		@if (session('scrape_issues'))
 			@php $issues = session('scrape_issues') ?? []; @endphp
 			@if (!empty($issues))
-				<div class="alert warning">
+				<div class="alert warning" style="display:flex; align-items:flex-start; gap:0.5rem;">
 					<strong>Skipped URLs:</strong>
 					<ul style="margin:0.5rem 0 0 1.25rem;">
 						@foreach ($issues as $issue)
 							<li>{{ $issue }}</li>
 						@endforeach
 					</ul>
+					<button type="button" class="close-btn" aria-label="Close alert" onclick="this.parentElement.remove()">×</button>
 				</div>
 			@endif
 		@endif
@@ -431,19 +445,6 @@
 	</dialog>
 
 	<script>
-		// Auto-dismiss alerts after a few seconds
-		window.addEventListener('DOMContentLoaded', () => {
-			const alerts = document.querySelectorAll('.alert');
-			if (!alerts.length) return;
-			setTimeout(() => {
-				alerts.forEach(el => {
-					el.style.transition = 'opacity 0.4s ease';
-					el.style.opacity = '0';
-					setTimeout(() => el.remove(), 400);
-				});
-			}, 10000);
-		});
-
 		function openEditModal(ID, TITLE, ENDDATE, NAICSCODE) {
 			const modal = document.getElementById('editModal');
 			const form = document.getElementById('editForm');

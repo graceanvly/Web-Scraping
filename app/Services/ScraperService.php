@@ -11,6 +11,11 @@ use Illuminate\Support\Facades\Log;
 class ScraperService
 {
 	private Client $httpClient;
+	private int $maxPdfBytes = 15728640; // 15 MB limit per PDF to avoid timeouts on large files.
+	private int $pdfTimeout = 30; // Seconds per PDF download.
+	private int $maxPdfDownloads = 8; // Avoid excessive parallel PDF processing per page.
+	private int $maxPerUrlSeconds = 200; // Hard cap per URL scrape to avoid controller timeouts.
+	private int $requestTimeout = 60; // General HTTP request timeout.
 
 	// app/Services/ScraperService.php
 	public function __construct()
@@ -40,15 +45,18 @@ class ScraperService
 	}
 
 
-	public function fetch(string $url): array
+	public function fetch(string $url, ?string $username = null, ?string $password = null): array
 	{
+		$startedAt = microtime(true);
 		$pdfText = '';
 		$bidPages = [];
 		$noOpenBids = false;
+		$authProvided = $this->hasAuthCredentials($username, $password);
+		$requestOptions = $this->buildRequestOptions($username, $password);
 
 		// 1. If direct PDF URL
 		if (preg_match('/\.pdf($|\?)/i', $url)) {
-			return $this->fetchPdf($url);
+			return $this->fetchPdf($url, $requestOptions, $authProvided, $startedAt);
 		}
 
 		// 2. Fetch HTML content
@@ -57,13 +65,15 @@ class ScraperService
 		$finalUrl = $url;
 
 		try {
-			$response = $this->httpClient->get($url);
+			$this->ensureWithinBudget($startedAt, 'initial page request');
+			$response = $this->requestWithAuth($url, $requestOptions, $authProvided);
 		} catch (RequestException $e) {
 			Log::warning('SCRAPER FETCH ERROR', ['url' => $url, 'error' => $e->getMessage()]);
 			if (str_starts_with($url, 'https://')) {
 				$httpUrl = 'http://' . substr($url, 8);
 				try {
-					$response = $this->httpClient->get($httpUrl);
+					$this->ensureWithinBudget($startedAt, 'http fallback request');
+					$response = $this->requestWithAuth($httpUrl, $requestOptions, $authProvided);
 					$url = $httpUrl;
 				} catch (RequestException $e2) {
 					throw $e2;
@@ -74,6 +84,7 @@ class ScraperService
 		}
 		$bestHtml = (string) ($response->getBody() ?? '');
 		$bestText = $this->htmlToText($bestHtml);
+		$this->guardLoginRequirement($bestHtml, $bestText, $authProvided);
 		$noOpenBids = $this->detectNoOpenBids($bestHtml, $bestText);
 		if ($noOpenBids) {
 			Log::info('NO OPEN BIDS FLAGGED', ['url' => $url]);
@@ -83,12 +94,19 @@ class ScraperService
 		$pdfBids = $noOpenBids ? [] : $this->findPdfLink($bestHtml, $url);
 
 		if (!empty($pdfBids)) {
+			// Cap PDF downloads to avoid long-running requests.
+			if (count($pdfBids) > $this->maxPdfDownloads) {
+				Log::info('PDF DOWNLOADS CAPPED', ['url' => $url, 'found' => count($pdfBids), 'capped_at' => $this->maxPdfDownloads]);
+				$pdfBids = array_slice($pdfBids, 0, $this->maxPdfDownloads);
+			}
+
 			Log::info('PDF LINKS FOUND', ['url' => $url, 'count' => count($pdfBids)]);
 
 			$pdfTexts = [];
 			foreach ($pdfBids as $bid) {
 				if (!empty($bid['PDF_LINK'])) {
-					$pdfResult = $this->fetchPdf($bid['PDF_LINK']);
+					$this->ensureWithinBudget($startedAt, 'pdf download loop');
+					$pdfResult = $this->fetchPdf($bid['PDF_LINK'], $requestOptions, $authProvided, $startedAt);
 					if (!empty($pdfResult['text'])) {
 						$pdfTexts[] = $pdfResult['text'];
 					}
@@ -109,15 +127,18 @@ class ScraperService
 				$pagePdfText = '';
 				$pagePdfLinks = [];
 
-				$response = $this->httpClient->get($detail['URL']);
+				$this->ensureWithinBudget($startedAt, 'detail page request');
+				$response = $this->requestWithAuth($detail['URL'], $requestOptions, $authProvided);
 				$pageHtml = (string) $response->getBody();
 				$pageText = $this->htmlToText($pageHtml);
+				$this->guardLoginRequirement($pageHtml, $pageText, $authProvided);
 				$pagePdfLinks = $this->findPdfLink($pageHtml, $detail['URL']);
 
 				$pdfTexts = [];
 				foreach ($pagePdfLinks as $link) {
 					if (!empty($link['PDF_LINK'])) {
-						$pdfResult = $this->fetchPdf($link['PDF_LINK']);
+						$this->ensureWithinBudget($startedAt, 'detail pdf loop');
+						$pdfResult = $this->fetchPdf($link['PDF_LINK'], $requestOptions, $authProvided, $startedAt);
 						if (!empty($pdfResult['text'])) {
 							$pdfTexts[] = $pdfResult['text'];
 						}
@@ -145,6 +166,7 @@ class ScraperService
 		// 4. Fallback with Browsershot if page text is too short
 		if (strlen($bestText) < 500) {
 			try {
+				$this->ensureWithinBudget($startedAt, 'browsershot fetch');
 				$html = Browsershot::url($url)
 					->setNodeBinary('node')
 					->timeout(120)
@@ -158,6 +180,7 @@ class ScraperService
 				if (strlen($text) > strlen($bestText)) {
 					$bestHtml = $html;
 					$bestText = $text;
+					$this->guardLoginRequirement($bestHtml, $bestText, $authProvided);
 				}
 			} catch (\Throwable $e) {
 				Log::warning('BROWSERSHOT FAILED', ['url' => $url, 'error' => $e->getMessage()]);
@@ -183,6 +206,104 @@ class ScraperService
 			'blocked' => false,
 			'no_open_bids' => $noOpenBids,
 		];
+	}
+
+	private function buildRequestOptions(?string $username, ?string $password): array
+	{
+		$options = [];
+		if ($this->hasAuthCredentials($username, $password)) {
+			$options['auth'] = [$username, $password];
+		}
+
+		return $options;
+	}
+
+	private function hasAuthCredentials(?string $username, ?string $password): bool
+	{
+		return !empty($username) && !empty($password);
+	}
+
+	private function requestWithAuth(string $url, array $options, bool $authProvided)
+	{
+		try {
+			// Apply sane defaults if not provided.
+			if (!isset($options['timeout'])) {
+				$options['timeout'] = $this->requestTimeout;
+			}
+			if (!isset($options['read_timeout'])) {
+				$options['read_timeout'] = $this->requestTimeout;
+			}
+			if (!isset($options['connect_timeout'])) {
+				$options['connect_timeout'] = 20;
+			}
+
+			return $this->httpClient->get($url, $options);
+		} catch (RequestException $e) {
+			$status = $e->getResponse()?->getStatusCode();
+			if ($this->isAuthError($status)) {
+				if ($authProvided) {
+					throw new \RuntimeException('Provided login credentials were not accepted for this URL.');
+				}
+				throw new \RuntimeException('Login credentials are required to scrape this URL. Please add a username and password.');
+			}
+
+			throw $e;
+		}
+	}
+
+	private function guardLoginRequirement(string $html, string $text, bool $authProvided): void
+	{
+		if (!$this->looksLikeLoginPage($html, $text)) {
+			return;
+		}
+
+		if ($authProvided) {
+			throw new \RuntimeException('Provided login credentials did not allow access to the bid details for this URL.');
+		}
+
+		throw new \RuntimeException('Login credentials are required to scrape this URL. Please add a username and password.');
+	}
+
+	private function looksLikeLoginPage(string $html, string $text): bool
+	{
+		$haystack = strtolower($text . ' ' . strip_tags($html));
+
+		// Quick checks for login form markers.
+		if (preg_match('/type=[\"\\\']password[\"\\\']/i', $html) && preg_match('/log in|login|sign in/i', $haystack)) {
+			return true;
+		}
+
+		if (preg_match('/<form[^>]*(login|signin)[^>]*>/i', $html)) {
+			return true;
+		}
+
+		return false;
+	}
+
+	private function isAuthError(?int $status): bool
+	{
+		return in_array($status, [401, 403], true);
+	}
+
+	private function formatBytes(int $bytes): string
+	{
+		$units = ['B', 'KB', 'MB', 'GB'];
+		$i = 0;
+		$val = $bytes;
+		while ($val >= 1024 && $i < count($units) - 1) {
+			$val /= 1024;
+			$i++;
+		}
+
+		return round($val, 1) . ' ' . $units[$i];
+	}
+
+	private function ensureWithinBudget(float $startedAt, string $context): void
+	{
+		$elapsed = microtime(true) - $startedAt;
+		if ($elapsed > $this->maxPerUrlSeconds) {
+			throw new \RuntimeException("Scrape timed out while processing {$context}. Please retry later or reduce the amount of content to download.");
+		}
 	}
 
 	private function findPdfLink(string $html, string $baseUrl): array
@@ -285,13 +406,38 @@ class ScraperService
 		return $deduped;
 	}
 
-	private function fetchPdf(string $url): array
+	private function fetchPdf(string $url, array $requestOptions, bool $authProvided, float $startedAt): array
 	{
 		try {
-			$response = $this->httpClient->get($url, ['stream' => true]);
+			$this->ensureWithinBudget($startedAt, 'pdf download');
+			$options = array_merge($requestOptions, [
+				'stream' => true,
+				'timeout' => $this->pdfTimeout,
+				'read_timeout' => $this->pdfTimeout,
+				'connect_timeout' => 20,
+			]);
+
+			$response = $this->requestWithAuth($url, $options, $authProvided);
+
+			// Enforce size limit using headers if available.
+			$lenHeader = $response->getHeaderLine('Content-Length');
+			if (!empty($lenHeader) && (int) $lenHeader > $this->maxPdfBytes) {
+				throw new \RuntimeException("PDF is larger than allowed (" . $this->formatBytes($this->maxPdfBytes) . ").");
+			}
+
 			$tempFile = tmpfile();
 			$meta = stream_get_meta_data($tempFile);
-			file_put_contents($meta['uri'], $response->getBody()->getContents());
+			$body = $response->getBody();
+			$downloaded = 0;
+
+			while (!$body->eof()) {
+				$chunk = $body->read(8192);
+				$downloaded += strlen($chunk);
+				if ($downloaded > $this->maxPdfBytes) {
+					throw new \RuntimeException("PDF exceeds size limit (" . $this->formatBytes($this->maxPdfBytes) . ").");
+				}
+				fwrite($tempFile, $chunk);
+			}
 
 			$parser = new Parser();
 			$pdf = $parser->parseFile($meta['uri']);

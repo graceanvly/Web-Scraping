@@ -20,9 +20,10 @@ class BidController extends Controller
 
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
-		@set_time_limit(180);
-		@ini_set('max_execution_time', '180');
-		@ini_set('memory_limit', '512M');
+		// Allow more time/memory for heavy PDF pages to avoid timeouts during single-URL scrapes.
+		@set_time_limit(300);
+		@ini_set('max_execution_time', '300');
+		@ini_set('memory_limit', '1024M');
 
 		$validated = $request->validate([
 			'URL' => ['required', 'url', 'max:2048', 'regex:/^https?:\\/\\//i'],
@@ -203,7 +204,7 @@ class BidController extends Controller
 				}
 
 				// 1) Fetch data for each bid URL
-				$result = $scraper->fetch($url);
+				$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null);
 				if (!empty($result['no_open_bids'])) {
 					$scrapeIssues[] = "{$url} - no open bids listed.";
 					continue;
@@ -601,6 +602,11 @@ class BidController extends Controller
 
 	private function friendlyExceptionMessage(\Throwable $e): string
 	{
+		$rawMessage = $e->getMessage();
+		if (str_contains(strtolower($rawMessage), 'login credentials')) {
+			return $rawMessage;
+		}
+
 		if ($e instanceof RequestException) {
 			$status = $e->getResponse()?->getStatusCode();
 			if ($status === 403) {
@@ -622,10 +628,10 @@ class BidController extends Controller
 			return 'The site took too long to respond. Please try again later.';
 		}
 		if (str_contains($message, 'ssl') || str_contains($message, 'certificate')) {
-			return 'We could not establish a secure connection to this site. Please verify the link or try another URL.';
+				return 'We could not establish a secure connection to this site. Please verify the link or try another URL.';
 		}
 
-		return 'Failed to scrape this URL. ' . $e->getMessage();
+		return 'Failed to scrape this URL. ' . $rawMessage;
 	}
 
 	private function looksLikeBid(?string $title, ?string $description, ?string $url, ?string $endDate): bool
