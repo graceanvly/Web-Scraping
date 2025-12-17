@@ -96,7 +96,10 @@ class BidController extends Controller
 					continue;
 				}
 
-				$exists = Bid::where('URL', $validated['URL'])
+				$detailUrl = trim((string) ($bidData['URL'] ?? $validated['URL']));
+				$detailUrl = $detailUrl !== '' ? $detailUrl : $validated['URL'];
+
+				$exists = Bid::where('URL', $detailUrl)
 					->where('TITLE', $title)
 					->exists();
 
@@ -125,7 +128,7 @@ class BidController extends Controller
 				}
 
 				$bid = new Bid();
-				$bid->URL = $validated['URL'];
+				$bid->URL = $detailUrl;
 				$bid->TITLE = $title;
 				$bid->ENDDATE = $endDate;
 				$bid->NAICSCODE = $this->normalizeNaicsCode(
@@ -267,7 +270,10 @@ class BidController extends Controller
 						continue;
 					}
 
-					$exists = Bid::where('URL', $url)
+					$detailUrl = trim((string) ($bidData['URL'] ?? $url));
+					$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
+
+					$exists = Bid::where('URL', $detailUrl)
 						->where('TITLE', $title)
 						->exists();
 
@@ -296,7 +302,7 @@ class BidController extends Controller
 					}
 
 					$bid = new Bid();
-					$bid->URL = $url;
+					$bid->URL = $detailUrl;
 					$bid->TITLE = $title;
 					$bid->ENDDATE = $endDate;
 					$bid->NAICSCODE = $this->normalizeNaicsCode(
