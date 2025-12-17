@@ -51,6 +51,8 @@ class ScraperService
 		$pdfText = '';
 		$bidPages = [];
 		$noOpenBids = false;
+		$blocked = false;
+		$blockedReason = null;
 		$authProvided = $this->hasAuthCredentials($username, $password);
 		$requestOptions = $this->buildRequestOptions($username, $password);
 
@@ -84,6 +86,8 @@ class ScraperService
 		}
 		$bestHtml = (string) ($response->getBody() ?? '');
 		$bestText = $this->htmlToText($bestHtml);
+		$blockedReason = $this->detectBlockedPage($bestHtml, $bestText);
+		$blocked = !empty($blockedReason);
 		$this->guardLoginRequirement($bestHtml, $bestText, $authProvided);
 		$noOpenBids = $this->detectNoOpenBids($bestHtml, $bestText);
 		if ($noOpenBids) {
@@ -203,7 +207,8 @@ class ScraperService
 			'pdf_bids' => $pdfBids,
 			'pdf_text' => $pdfText,
 			'bid_pages' => $bidPages,
-			'blocked' => false,
+			'blocked' => $blocked,
+			'blocked_reason' => $blockedReason,
 			'no_open_bids' => $noOpenBids,
 		];
 	}
@@ -499,6 +504,25 @@ class ScraperService
 			return $prefix . $href;
 		}
 		return rtrim($prefix, '/') . '/' . ltrim($href, '/');
+	}
+
+	private function detectBlockedPage(string $html, string $text): ?string
+	{
+		$haystack = strtolower($text . ' ' . strip_tags($html));
+		$signals = [
+			'blocked country',
+			'geolocation setting',
+			'connection was denied because this country',
+			'watchguard',
+		];
+
+		foreach ($signals as $signal) {
+			if (str_contains($haystack, $signal)) {
+				return $signal;
+			}
+		}
+
+		return null;
 	}
 
 	private function detectNoOpenBids(string $html, string $text): bool

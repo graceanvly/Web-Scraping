@@ -37,6 +37,12 @@ class BidController extends Controller
 		try {
 			// 1) Fetch page data, PDFs, and clickable bid pages
 			$result = $scraper->fetch($validated['URL']);
+			if (!empty($result['blocked'])) {
+				$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
+				return back()->withErrors([
+					'URL' => 'The site blocked our request due to geolocation/firewall rules.' . $reason . ' Please try with a proxy/VPN or different source.'
+				])->withInput();
+			}
 			if (!empty($result['no_open_bids'])) {
 				return back()->withErrors([
 					'URL' => 'No open bids found on this page.'
@@ -157,7 +163,7 @@ class BidController extends Controller
 				$msg .= count($duplicates) . ' duplicate bid(s) skipped.';
 			}
 			if ($nonBids) {
-				$msg .= ' Skipped ' . count($nonBids) . ' item(s) that did not look like bids.';
+				$msg .= ' No open Bids Listed.';
 			}
 
 			return redirect()->route('bids.index')->with('success', trim($msg));
@@ -205,6 +211,11 @@ class BidController extends Controller
 
 				// 1) Fetch data for each bid URL
 				$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null);
+				if (!empty($result['blocked'])) {
+					$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
+					$scrapeIssues[] = "{$url} - blocked by geolocation/firewall." . $reason;
+					continue;
+				}
 				if (!empty($result['no_open_bids'])) {
 					$scrapeIssues[] = "{$url} - no open bids listed.";
 					continue;
@@ -639,17 +650,18 @@ class BidController extends Controller
 		$title = trim((string) $title);
 		$desc = strtolower((string) $description);
 		$url = strtolower((string) $url);
+		$host = strtolower((string) parse_url($url, PHP_URL_HOST));
 
-		// If we have a parsable end date, treat as a strong signal.
-		if (!empty($endDate)) {
-			return true;
+		// Require an end date to consider this a bid.
+		if (empty($endDate)) {
+			return false;
 		}
 
 		// Titles that are too short or generic are unlikely to be bids.
 		if ($title === '' || strlen($title) < 5) {
 			return false;
 		}
-		$genericTitles = ['home', 'contact', 'about', 'document', 'documents', 'news', 'events', 'calendar', 'bids.aspx'];
+		$genericTitles = ['home', 'contact', 'about', 'document', 'documents', 'news', 'events', 'calendar', 'bids.aspx', 'bidding page', 'portal', 'webs'];
 		if (in_array(strtolower($title), $genericTitles, true)) {
 			return false;
 		}
@@ -670,6 +682,21 @@ class BidController extends Controller
 		// Require some descriptive substance to avoid saving bare page text.
 		if (strlen($desc) < 120) {
 			return false;
+		}
+
+		// Blocked/geolocation pages should not be saved.
+		$blockedSignals = ['blocked country', 'geolocation', 'watchguard', 'connection was denied because this country'];
+		foreach ($blockedSignals as $sig) {
+			if (str_contains($desc, $sig)) {
+				return false;
+			}
+		}
+
+		// Special-case: pr-webs portal without end date should not be saved unless it has real content.
+		if ($host === 'pr-webs-customer.des.wa.gov' && empty($endDate)) {
+			if (stripos($title, 'bidding page') !== false || strlen($desc) < 300 || stripos($desc, 'webs') !== false) {
+				return false;
+			}
 		}
 
 		return false;

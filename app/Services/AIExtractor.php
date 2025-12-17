@@ -77,6 +77,7 @@ class AIExtractor
 						'TITLE' => $this->extractTitleFromUrl($URL),
 						'ENDDATE' => '',
 						'NAICSCODE' => '',
+						'URL' => $URL,
 						'DESCRIPTION' => $fullPdfText ?: ($text ?: 'No description or PDF link found.'),
 					],
 				],
@@ -92,12 +93,14 @@ For each bid you return, include:
 - TITLE (exact title from detail page or listing)
 - ENDDATE (YYYY-MM-DD when present)
 - NAICSCODE (best guess if not explicitly provided)
+- URL (detail page URL or PDF URL where the bid was found; otherwise the listing URL)
 - DESCRIPTION (A labeled block that includes: Bid Title; Description / Scope / Specification; End Date / Due Date; Pre-bid Meeting Date; Questions relating to the Bid; Contact Person with roles (Purchasing Agent, Finance Officer, Bid Clerk, County/City/Town Clerk, Officer in Charge, School Administrator, District Engineer, Commissioner, Accounting if applicable); Phone Number; Email Address; Mailing Address; Physical Address; Correct geographic location/state and category.)
 
 Rules:
 1) Use PDF text when present; otherwise use clicked detail page text and listing text.
 2) If a value is missing, write "Not provided" for that label instead of leaving it blank.
 3) Respond with strict JSON only in the format: {"bids":[{...}]} with the fields above.
+4) Do your best to find the bids: some sites require clicking links (e.g., "see all open bid opportunities") before listings appear. Only return actual bids; do not treat generic portal/home pages or unrelated content as bids.
 SYS;
 
 		$promptUser = [
@@ -165,10 +168,19 @@ SYS;
 				$naics = implode(' ', $naics);
 			}
 
+			$detailUrl = $bid['URL'] ?? '';
+			if (is_array($detailUrl)) {
+				$detailUrl = implode(' ', $detailUrl);
+			}
+			if (empty($detailUrl)) {
+				$detailUrl = $URL;
+			}
+
 			return [
 				'TITLE' => (string) $title,
 				'ENDDATE' => (string) $endDate,
 				'NAICSCODE' => (string) $naics,
+				'URL' => (string) $detailUrl,
 				'DESCRIPTION' => $desc,
 			];
 		}, $bids);
@@ -178,6 +190,7 @@ SYS;
 				'TITLE' => $this->extractTitleFromUrl($URL),
 				'ENDDATE' => '',
 				'NAICSCODE' => '',
+				'URL' => $URL,
 				'DESCRIPTION' => $fullPdfText ?: ($text ?: 'No PDF or description found.'),
 			];
 		}
