@@ -20,15 +20,21 @@ class ScraperService
 	// app/Services/ScraperService.php
 	public function __construct()
 	{
+		$headers = [
+			'User-Agent' => 'Mozilla/5.0 ...',
+			'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+			'Accept-Language' => 'en-US,en;q=0.9',
+			'Connection' => 'keep-alive',
+		];
+		$cookieHeader = trim((string) env('SCRAPER_COOKIE', ''));
+		if ($cookieHeader !== '') {
+			$headers['Cookie'] = $cookieHeader;
+		}
+
 		$this->httpClient = new Client([
 			'timeout' => 90,
 			'connect_timeout' => 20,
-			'headers' => [
-				'User-Agent' => 'Mozilla/5.0 ...',
-				'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-				'Accept-Language' => 'en-US,en;q=0.9',
-				'Connection' => 'keep-alive',
-			],
+			'headers' => $headers,
 			'allow_redirects' => [
 				'max' => 5,
 				'referer' => true,
@@ -244,8 +250,17 @@ class ScraperService
 
 			return $this->httpClient->get($url, $options);
 		} catch (RequestException $e) {
+			// If credentials were supplied, allow parsing the response body even on 4xx.
+			if ($authProvided && $e->getResponse()) {
+				Log::warning('AUTH REQUEST RETURNED ERROR STATUS, USING BODY', [
+					'url' => $url,
+					'status' => $e->getResponse()->getStatusCode(),
+				]);
+				return $e->getResponse();
+			}
+
 			$status = $e->getResponse()?->getStatusCode();
-			if ($this->isAuthError($status)) {
+			if ($status === 401) {
 				if ($authProvided) {
 					throw new \RuntimeException('Provided login credentials were not accepted for this URL.');
 				}
@@ -511,6 +526,9 @@ class ScraperService
 		$haystack = strtolower($text . ' ' . strip_tags($html));
 		$signals = [
 			'blocked country',
+			'sorry, you have been blocked',
+			'unable to access',
+			'cloudflare',
 			'geolocation setting',
 			'connection was denied because this country',
 			'watchguard',

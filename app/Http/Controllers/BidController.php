@@ -166,7 +166,7 @@ class BidController extends Controller
 				$msg .= count($duplicates) . ' duplicate bid(s) skipped.';
 			}
 			if ($nonBids) {
-				$msg .= ' No open Bids Listed.';
+				$msg .= ' No Bids Found. Please check the URL.';
 			}
 
 			return redirect()->route('bids.index')->with('success', trim($msg));
@@ -332,7 +332,7 @@ class BidController extends Controller
 				if ($savedThisUrl === 0 && $duplicatesThisUrl === 0 && $nonBidsThisUrl === 0) {
 					$scrapeIssues[] = "{$url} - no bids found.";
 				} elseif ($savedThisUrl === 0 && $duplicatesThisUrl === 0 && $nonBidsThisUrl > 0) {
-					$scrapeIssues[] = "{$url} - skipped {$nonBidsThisUrl} item(s) that did not look like bids.";
+					$scrapeIssues[] = "{$url} - No Bids found. Please check the URL.";
 				}
 			} catch (\Throwable $e) {
 				Log::error('Scrape failed for URL: ' . $url, [
