@@ -181,6 +181,54 @@
 			width: auto;
 		}
 
+		/* Tabs */
+		.tab-btn {
+			padding: 0.6rem 1.4rem;
+			font-size: 0.95rem;
+			font-weight: 600;
+			border: 1px solid #e2e8f0;
+			border-bottom: none;
+			background: #f1f5f9;
+			color: #64748b;
+			cursor: pointer;
+			border-radius: 8px 8px 0 0;
+			margin-right: -1px;
+			position: relative;
+			transition: background 0.15s, color 0.15s;
+		}
+		.tab-btn:hover { background: #e2e8f0; color: #334155; }
+		.tab-btn.tab-active {
+			background: #fff;
+			color: #1d4ed8;
+			border-color: #e2e8f0;
+			z-index: 1;
+		}
+		.tab-badge {
+			display: inline-block;
+			background: #dc2626;
+			color: #fff;
+			border-radius: 999px;
+			font-size: 0.65rem;
+			padding: 1px 6px;
+			font-weight: 700;
+			margin-left: 4px;
+			vertical-align: top;
+			min-width: 16px;
+			text-align: center;
+		}
+		.issue-badge {
+			display: inline-block;
+			padding: 0.15rem 0.55rem;
+			border-radius: 999px;
+			font-size: 0.75rem;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.03em;
+		}
+		.issue-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+		.issue-warning { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+		.issue-success { background: #ecfdf3; color: #166534; border: 1px solid #bbf7d0; }
+
 		/* Responsive table for mobile */
 		@media (max-width: 768px) {
 			table {
@@ -232,12 +280,10 @@
 
 			th:nth-child(2),
 			td:nth-child(2),
-			/* End Date */
 			th:nth-child(4),
-			td:nth-child(4)
-
-			/* URL */
-				{
+			td:nth-child(4),
+			th:nth-child(5),
+			td:nth-child(5) {
 				display: none;
 			}
 		}
@@ -295,18 +341,16 @@
 	<section class="card">
 		<div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-start; justify-content:space-between;">
 			<div style="display:flex; flex-direction:column; gap:0.35rem; align-items:flex-start;">
-				<!-- Scrape All -->
-				<form method="POST" action="{{ route('bidurl.scrapeAll') }}">
-					@csrf
-					<button type="submit" class="contrast"
-						style="padding:0.6rem 1.2rem; font-size:0.95rem; white-space:nowrap;">
-						🚀 Scrape All
+				<div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+					<button id="scrapeAllBtn" type="button" class="contrast"
+						style="padding:0.6rem 1.2rem; font-size:0.95rem; white-space:nowrap;"
+						onclick="startScrapeAll()">
+						Scrape All
 					</button>
-				</form>
-				<a href="{{ route('bidurl.index') }}" class="secondary" style="white-space:nowrap;">Show Bid URLs</a>
+					<a href="{{ route('bidurl.index') }}" class="secondary" style="white-space:nowrap;">Bid URLs</a>
+				</div>
 			</div>
 
-			<!-- Add URL -->
 			<form method="POST" action="{{ route('bids.store') }}"
 				style="display:flex; gap:0.5rem; flex:1; max-width:600px;">
 				@csrf
@@ -318,12 +362,36 @@
 				</button>
 			</form>
 		</div>
+
+		<!-- Scrape Progress Panel -->
+		<div id="scrapeProgress" style="display:none; margin-top:1rem; padding:1rem; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+			<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+				<strong id="progressTitle" style="font-size:0.95rem;">Starting scrape...</strong>
+				<span id="progressCounter" style="font-size:0.85rem; color:#6b7280;"></span>
+			</div>
+			<div style="width:100%; background:#e5e7eb; border-radius:4px; height:6px; margin-bottom:0.75rem;">
+				<div id="progressBar" style="width:0%; height:100%; background:#2563eb; border-radius:4px; transition:width 0.3s;"></div>
+			</div>
+			<div id="progressUrl" style="font-size:0.85rem; color:#374151; word-break:break-all; min-height:1.3rem;"></div>
+			<div id="progressLog" style="margin-top:0.5rem; max-height:120px; overflow-y:auto; font-size:0.8rem; color:#6b7280;"></div>
+		</div>
 	</section>
 
-	<!-- Recent Bids -->
-		<section class="card">
-			<h2 style="margin-top:0;">Recent Bids</h2>
+	<!-- Tabs -->
+	<div style="display:flex; gap:0; margin-bottom:0;">
+		<button id="tabBids" class="tab-btn tab-active" onclick="switchTab('bids')">
+			Bids
+		</button>
+		<button id="tabIssues" class="tab-btn" onclick="switchTab('issues')">
+			Issues
+			@if (($issueCount ?? 0) > 0)
+				<span class="tab-badge">{{ $issueCount }}</span>
+			@endif
+		</button>
+	</div>
 
+	<!-- Bids Tab -->
+	<section id="panelBids" class="card" style="border-top-left-radius:0;">
 			<!-- Toolbar -->
 			<div class="table-toolbar">
 				<div class="left-controls">
@@ -331,15 +399,16 @@
 						Show
 						<select id="showEntries">
 							<option value="5">5</option>
-							<option value="10" selected>10</option>
+							<option value="10">10</option>
 							<option value="25">25</option>
-							<option value="50">50</option>
+							<option value="50" selected>50</option>
 						</select>
 						entries
 					</label>
 				</div>
 				<div class="right-controls">
 					<input type="text" id="searchInput" placeholder="Search…" />
+					<input type="date" id="filterDate" title="Filter by date scraped" />
 					<select id="filterNaics">
 						<option value="">NAICS</option>
 						@foreach ($bids->pluck('NAICSCODE')->unique() as $code)
@@ -358,20 +427,24 @@
 							<th>Title</th>
 							<th>End Date</th>
 							<th>NAICS</th>
+							<th>Scraped</th>
 							<th>URL</th>
 							<th>Actions</th>
 						</tr>
 					</thead>
 					<tbody>
-						@forelse ($bids as $bid)
-							<tr>
+						@forelse ($bids as $idx => $bid)
+							<tr data-scraped="{{ $bid->CREATED ? \Carbon\Carbon::parse($bid->CREATED)->toDateString() : '' }}">
 								<td title="{{ $bid->TITLE }}">
-									<a href="{{ route('bids.show', ['bid' => $bid->ID]) }}">{{ $bid->TITLE ?? '—' }}</a>
+									<a href="javascript:void(0)" data-bid-idx="{{ $idx }}" class="bid-detail-link">{{ $bid->TITLE ?? '—' }}</a>
 								</td>
 								<td>
 									{{ $bid->ENDDATE ? \Carbon\Carbon::parse($bid->ENDDATE)->format('M. d, Y') : '—' }}
 								</td>
 								<td title="{{ $bid->NAICSCODE }}">{{ $bid->NAICSCODE ?? '—' }}</td>
+								<td style="font-size:0.85rem; color:#6b7280;">
+									{{ $bid->CREATED ? \Carbon\Carbon::parse($bid->CREATED)->format('M. d, Y') : '—' }}
+								</td>
 								<td><a href="{{ $bid->URL }}" target="_blank" rel="noreferrer">Open</a></td>
 								<td>
 									<div class="action-buttons">
@@ -397,7 +470,7 @@
 							</tr>
 						@empty
 							<tr>
-								<td colspan="5" style="text-align:center; color:#6b7280;">No bids found.</td>
+								<td colspan="6" style="text-align:center; color:#6b7280;">No bids found.</td>
 							</tr>
 						@endforelse
 					</tbody>
@@ -416,7 +489,96 @@
 				</div>
 			</div>
 		</section>
+
+	<!-- Issues Tab -->
+	<section id="panelIssues" class="card" style="display:none; border-top-left-radius:0;">
+		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+			<span style="color:#6b7280; font-size:0.85rem;">
+				{{ $issueCount ?? 0 }} issue(s) recorded
+			</span>
+			@if (($issueCount ?? 0) > 0)
+				<form method="POST" action="{{ route('scrape.clearIssues') }}" onsubmit="return confirm('Clear all issues?')">
+					@csrf
+					@method('DELETE')
+					<button type="submit" class="outline contrast" style="padding:0.4rem 0.8rem; font-size:0.8rem;">Clear All</button>
+				</form>
+			@endif
+		</div>
+
+		@if (($issueCount ?? 0) === 0)
+			<p style="color:#6b7280; text-align:center; padding:2rem 0;">No issues recorded.</p>
+		@else
+			<div style="overflow-x:auto;">
+				<table>
+					<thead>
+						<tr>
+							<th>Level</th>
+							<th>URL</th>
+							<th>Message</th>
+							<th>Date</th>
+						</tr>
+					</thead>
+					<tbody>
+						@foreach ($scrapeLogs as $log)
+							<tr>
+								<td>
+									<span class="issue-badge issue-{{ $log->level }}">{{ $log->level }}</span>
+								</td>
+								<td style="max-width:300px; word-break:break-all; font-size:0.85rem;">
+									<a href="{{ $log->url }}" target="_blank" rel="noopener" style="color:#2563eb;">{{ $log->url }}</a>
+								</td>
+								<td style="max-width:400px; word-break:break-word; font-size:0.85rem;">{{ $log->message }}</td>
+								<td style="white-space:nowrap; font-size:0.85rem; color:#6b7280;">
+									{{ $log->created_at->format('M d, Y h:i A') }}
+								</td>
+							</tr>
+						@endforeach
+					</tbody>
+				</table>
+			</div>
+		@endif
+	</section>
+
 	</main>
+
+	<!-- Detail Modal -->
+	<dialog id="detailModal" style="max-width:800px; width:90%; border:none; border-radius:12px; padding:0; box-shadow:0 8px 30px rgba(0,0,0,0.12);">
+		<article style="margin:0; padding:2rem;">
+			<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:1rem;">
+				<h3 id="detail_title" style="margin:0; font-size:1.3rem; font-weight:600; color:#1f2937;"></h3>
+				<button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280; padding:0; line-height:1;" onclick="document.getElementById('detailModal').close()">&times;</button>
+			</div>
+
+			<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:1.25rem;">
+				<div style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:0.85rem;">
+					<strong style="display:block; color:#374151; font-size:0.85rem; margin-bottom:0.25rem;">End Date</strong>
+					<span id="detail_enddate" style="color:#111827;"></span>
+				</div>
+				<div style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:0.85rem;">
+					<strong style="display:block; color:#374151; font-size:0.85rem; margin-bottom:0.25rem;">NAICS Code</strong>
+					<span id="detail_naics" style="color:#111827;"></span>
+				</div>
+				<div style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:0.85rem;">
+					<strong style="display:block; color:#374151; font-size:0.85rem; margin-bottom:0.25rem;">Scraped</strong>
+					<span id="detail_created" style="color:#111827;"></span>
+				</div>
+			</div>
+
+			<div style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:0.85rem; margin-bottom:1.25rem;">
+				<strong style="display:block; color:#374151; font-size:0.85rem; margin-bottom:0.25rem;">URL</strong>
+				<a id="detail_url" href="#" target="_blank" rel="noopener noreferrer" style="word-break:break-all;"></a>
+			</div>
+
+			<div>
+				<strong style="display:block; color:#374151; font-size:0.95rem; margin-bottom:0.5rem;">Details</strong>
+				<div id="detail_description" style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:1rem; max-height:400px; overflow-y:auto; font-size:0.9rem; line-height:1.6;"></div>
+			</div>
+
+			<footer style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem;">
+				<button type="button" class="secondary" onclick="document.getElementById('detailModal').close()">Close</button>
+			</footer>
+		</article>
+	</dialog>
 
 	<!-- Edit Modal -->
 	<dialog id="editModal">
@@ -444,26 +606,98 @@
 		</article>
 	</dialog>
 
+	@php
+		$bidsModalData = $bids->map(fn ($bid) => [
+			'TITLE' => $bid->TITLE,
+			'ENDDATE' => $bid->ENDDATE,
+			'NAICSCODE' => $bid->NAICSCODE,
+			'URL' => $bid->URL,
+			'DESCRIPTION' => $bid->DESCRIPTION,
+			'CREATED' => $bid->CREATED,
+		])->values();
+	@endphp
 	<script>
-		function openEditModal(ID, TITLE, ENDDATE, NAICSCODE) {
-			const modal = document.getElementById('editModal');
-			const form = document.getElementById('editForm');
+		const bidsData = @json($bidsModalData);
 
-			// Set form action to correct update route
-			form.action = "{{ url('/bids') }}/" + ID;
+		document.addEventListener('click', function(e) {
+			const link = e.target.closest('.bid-detail-link');
+			if (link) {
+				e.preventDefault();
+				const idx = parseInt(link.dataset.bidIdx, 10);
+				if (bidsData[idx]) openDetailModal(bidsData[idx]);
+			}
+		});
 
-			document.getElementById('edit_title').value = TITLE || '';
-			// ENDDATE should be in YYYY-MM-DD format for <input type="date">
-			document.getElementById('edit_end_date').value = ENDDATE ? ENDDATE.substring(0, 10) : '';
-			document.getElementById('edit_naics_code').value = NAICSCODE || '';
+		function formatDate(dateStr) {
+			if (!dateStr) return 'N/A';
+			try {
+				const d = new Date(dateStr);
+				if (isNaN(d)) return dateStr;
+				const months = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
+				return months[d.getMonth()] + ' ' + String(d.getDate()).padStart(2, '0') + ', ' + d.getFullYear();
+			} catch (e) { return dateStr; }
+		}
 
+		function openDetailModal(bid) {
+			const modal = document.getElementById('detailModal');
+			document.getElementById('detail_title').textContent = bid.TITLE || 'Untitled Bid';
+
+			document.getElementById('detail_enddate').textContent = bid.ENDDATE ? formatDate(bid.ENDDATE) : 'N/A';
+			document.getElementById('detail_naics').textContent = bid.NAICSCODE || 'N/A';
+			document.getElementById('detail_created').textContent = bid.CREATED ? formatDate(bid.CREATED) : 'N/A';
+
+			const urlEl = document.getElementById('detail_url');
+			urlEl.href = bid.URL || '#';
+			urlEl.textContent = bid.URL || 'N/A';
+
+			const descBox = document.getElementById('detail_description');
+			const desc = (bid.DESCRIPTION || '').trim();
+			if (!desc) {
+				descBox.innerHTML = '<p style="margin:0; color:#6b7280;">No details available.</p>';
+			} else {
+				const lines = desc.split(/\r?\n+/).filter(l => l.trim());
+				let html = '';
+				lines.forEach((line, i) => {
+					const bg = i % 2 === 0 ? 'background:#f3f4f6;' : '';
+					const colonIdx = line.indexOf(':');
+					if (colonIdx > 0 && colonIdx < 60) {
+						const label = line.substring(0, colonIdx).trim();
+						const value = line.substring(colonIdx + 1).trim();
+						html += `<div style="display:grid; grid-template-columns:200px 1fr; gap:0.5rem; padding:0.5rem 0.65rem; border-radius:6px; ${bg} align-items:start;">
+							<span style="font-weight:700; color:#1f2937; font-size:0.9rem;">${escHtml(label)}</span>
+							<span style="color:#0f172a; white-space:pre-wrap;">${escHtml(value)}</span>
+						</div>`;
+					} else {
+						html += `<div style="padding:0.5rem 0.65rem; border-radius:6px; ${bg}">
+							<span style="color:#0f172a; white-space:pre-wrap;">${escHtml(line)}</span>
+						</div>`;
+					}
+				});
+				descBox.innerHTML = html;
+			}
 			modal.showModal();
 		}
 
-		// Filtering + Search + Show entries + Pagination
+		function escHtml(str) {
+			const div = document.createElement('div');
+			div.textContent = str;
+			return div.innerHTML;
+		}
+
+		function openEditModal(ID, TITLE, ENDDATE, NAICSCODE) {
+			const modal = document.getElementById('editModal');
+			const form = document.getElementById('editForm');
+			form.action = "{{ url('/bids') }}/" + ID;
+			document.getElementById('edit_title').value = TITLE || '';
+			document.getElementById('edit_end_date').value = ENDDATE ? ENDDATE.substring(0, 10) : '';
+			document.getElementById('edit_naics_code').value = NAICSCODE || '';
+			modal.showModal();
+		}
+
 		const table = document.getElementById("bidsTable");
 		const rows = Array.from(table.querySelectorAll("tbody tr"));
 		const searchInput = document.getElementById("searchInput");
+		const filterDate = document.getElementById("filterDate");
 		const filterNaics = document.getElementById("filterNaics");
 		const showEntries = document.getElementById("showEntries");
 		const showingCount = document.getElementById("showingCount");
@@ -475,58 +709,180 @@
 		let filteredRows = [];
 
 		function applyFilters() {
-			let search = searchInput.value.toLowerCase();
-			let filter = filterNaics.value;
+			const search = searchInput.value.toLowerCase();
+			const naicsFilter = filterNaics.value;
+			const dateFilter = filterDate.value;
 
 			filteredRows = rows.filter(row => {
-				let TITLE = row.cells[0]?.innerText.toLowerCase() || "";
-				let NAICS = row.cells[2]?.innerText.toLowerCase() || "";
-				let matchesSearch = !search || TITLE.includes(search) || NACICS.includes(search);
-				let matchesFilter = !filter || naics === filter.toLowerCase();
-				return matchesSearch && matchesFilter;
+				const TITLE = row.cells[0]?.innerText.toLowerCase() || "";
+				const NAICS = row.cells[2]?.innerText.toLowerCase() || "";
+				const scrapedDate = row.dataset.scraped || "";
+
+				const matchesSearch = !search || TITLE.includes(search) || NAICS.includes(search);
+				const matchesNaics = !naicsFilter || NAICS === naicsFilter.toLowerCase();
+				const matchesDate = !dateFilter || scrapedDate === dateFilter;
+				return matchesSearch && matchesNaics && matchesDate;
 			});
 
 			totalCount.textContent = filteredRows.length;
-			currentPage = 1; // reset to first page
+			currentPage = 1;
 			renderTable();
 		}
 
 		function renderTable() {
-			let limit = parseInt(showEntries.value);
-			let start = (currentPage - 1) * limit;
-			let end = start + limit;
+			const limit = parseInt(showEntries.value);
+			const start = (currentPage - 1) * limit;
+			const end = start + limit;
 
-			rows.forEach(row => row.style.display = "none"); // hide all
-			filteredRows.slice(start, end).forEach(row => row.style.display = ""); // show only current page
+			rows.forEach(row => row.style.display = "none");
+			filteredRows.slice(start, end).forEach(row => row.style.display = "");
 
 			showingCount.textContent = filteredRows.slice(start, end).length;
-
 			prevPageBtn.disabled = currentPage === 1;
 			nextPageBtn.disabled = end >= filteredRows.length;
 		}
 
-		// Pagination controls
 		prevPageBtn.addEventListener("click", () => {
-			if (currentPage > 1) {
-				currentPage--;
-				renderTable();
-			}
+			if (currentPage > 1) { currentPage--; renderTable(); }
 		});
-
 		nextPageBtn.addEventListener("click", () => {
-			let limit = parseInt(showEntries.value);
-			if (currentPage * limit < filteredRows.length) {
-				currentPage++;
-				renderTable();
-			}
+			const limit = parseInt(showEntries.value);
+			if (currentPage * limit < filteredRows.length) { currentPage++; renderTable(); }
 		});
 
-		// Event listeners
 		searchInput.addEventListener("input", applyFilters);
+		filterDate.addEventListener("change", applyFilters);
 		filterNaics.addEventListener("change", applyFilters);
 		showEntries.addEventListener("change", applyFilters);
 
-		applyFilters(); // initial
+		applyFilters();
+
+		function switchTab(tab) {
+			document.getElementById('panelBids').style.display = tab === 'bids' ? '' : 'none';
+			document.getElementById('panelIssues').style.display = tab === 'issues' ? '' : 'none';
+			document.getElementById('tabBids').classList.toggle('tab-active', tab === 'bids');
+			document.getElementById('tabIssues').classList.toggle('tab-active', tab === 'issues');
+		}
+
+		function startScrapeAll() {
+			const btn = document.getElementById('scrapeAllBtn');
+			const panel = document.getElementById('scrapeProgress');
+			const progressTitle = document.getElementById('progressTitle');
+			const progressCounter = document.getElementById('progressCounter');
+			const progressBar = document.getElementById('progressBar');
+			const progressUrl = document.getElementById('progressUrl');
+			const progressLog = document.getElementById('progressLog');
+
+			btn.disabled = true;
+			btn.textContent = 'Scraping...';
+			panel.style.display = 'block';
+			progressTitle.textContent = 'Initializing...';
+			progressCounter.textContent = '';
+			progressBar.style.width = '0%';
+			progressUrl.textContent = '';
+			progressLog.innerHTML = '';
+
+			let total = 0;
+
+			fetch("{{ route('bidurl.scrapeStream') }}", {
+				method: 'GET',
+				headers: { 'Accept': 'text/event-stream' },
+			}).then(response => {
+				const reader = response.body.getReader();
+				const decoder = new TextDecoder();
+				let buffer = '';
+
+				function read() {
+					reader.read().then(({ done, value }) => {
+						if (done) {
+							btn.disabled = false;
+							btn.textContent = 'Scrape All';
+							return;
+						}
+						buffer += decoder.decode(value, { stream: true });
+						const lines = buffer.split('\n');
+						buffer = lines.pop();
+
+						lines.forEach(line => {
+							if (!line.startsWith('data: ')) return;
+							try {
+								const ev = JSON.parse(line.substring(6));
+								handleScrapeEvent(ev);
+							} catch (e) {}
+						});
+						read();
+					});
+				}
+				read();
+			}).catch(err => {
+				progressTitle.textContent = 'Error: ' + err.message;
+				progressBar.style.background = '#dc2626';
+				btn.disabled = false;
+				btn.textContent = 'Scrape All';
+			});
+
+			function handleScrapeEvent(ev) {
+				switch (ev.type) {
+					case 'start':
+						total = ev.total;
+						progressTitle.textContent = 'Scraping ' + total + ' URL(s)...';
+						break;
+
+					case 'processing':
+						progressCounter.textContent = ev.index + ' / ' + total;
+						progressBar.style.width = Math.round((ev.index / total) * 100) + '%';
+						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtml(ev.url);
+						break;
+
+					case 'skip':
+						progressCounter.textContent = ev.index + ' / ' + total;
+						progressBar.style.width = Math.round((ev.index / total) * 100) + '%';
+						addLogLine('Skipped: ' + ev.url + ' (' + ev.reason + ')', '#9ca3af');
+						break;
+
+					case 'done_url':
+						addLogLine(ev.url + ' — ' + ev.saved + ' saved, ' + ev.duplicates + ' duplicates' + (ev.message ? ' (' + ev.message + ')' : ''), ev.saved > 0 ? '#16a34a' : '#6b7280');
+						break;
+
+					case 'error':
+						addLogLine('Error: ' + ev.url + ' — ' + ev.message, '#dc2626');
+						break;
+
+					case 'complete':
+						progressBar.style.width = '100%';
+						progressBar.style.background = '#16a34a';
+						let msg = ev.total_saved + ' new bid(s) saved.';
+						if (ev.total_duplicates > 0) msg += ' ' + ev.total_duplicates + ' duplicate(s).';
+						if (ev.total_skipped > 0) msg += ' ' + ev.total_skipped + ' already scraped today.';
+						if (ev.total_issues > 0) msg += ' ' + ev.total_issues + ' issue(s).';
+						progressTitle.textContent = 'Complete! ' + msg;
+						progressUrl.innerHTML = ev.total_issues > 0
+							? '<a href="javascript:void(0)" onclick="switchTab(\'issues\')" style="color:#dc2626;">View Issues</a>'
+							: '';
+						btn.disabled = false;
+						btn.textContent = 'Scrape All';
+						if (ev.total_saved > 0) {
+							setTimeout(() => location.reload(), 2000);
+						}
+						break;
+				}
+			}
+
+			function addLogLine(text, color) {
+				const div = document.createElement('div');
+				div.style.color = color || '#6b7280';
+				div.style.padding = '1px 0';
+				div.textContent = text;
+				progressLog.appendChild(div);
+				progressLog.scrollTop = progressLog.scrollHeight;
+			}
+
+			function escapeHtml(s) {
+				const d = document.createElement('div');
+				d.textContent = s;
+				return d.innerHTML;
+			}
+		}
 	</script>
 </body>
 

@@ -68,8 +68,6 @@
 				<li><strong>Visit Required:</strong> {{ $bidUrl->visit_required ?? '—' }}</li>
 				<li><strong>Checksum:</strong> {{ $bidUrl->checksum ?? '—' }}</li>
 				<li><strong>Third Party URL ID:</strong> {{ $bidUrl->third_party_url_id ?? '—' }}</li>
-				<li><strong>Created:</strong> {{ $bidUrl->created_at ?? '—' }}</li>
-				<li><strong>Updated:</strong> {{ $bidUrl->updated_at ?? '—' }}</li>
 			</ul>
 		</section>
 	</main>

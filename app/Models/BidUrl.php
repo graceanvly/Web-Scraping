@@ -27,10 +27,12 @@ class BidUrl extends Model
 		'third_party_url_id',
 		'username',
 		'password',
+		'last_scraped_at',
 	];
 
 	protected $casts = [
 		'start_time' => 'datetime',
         'end_time' => 'datetime',
+		'last_scraped_at' => 'datetime',
 	];
 }

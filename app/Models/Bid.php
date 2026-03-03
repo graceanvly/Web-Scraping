@@ -13,7 +13,7 @@ class Bid extends Model
 	public $timestamps = false;
 	protected $primaryKey = 'ID';
 	protected $fillable = [
-		'TTITLE',
+		'TITLE',
 		'DESCRIPTION',
 		'EMAIL',
 		'URL',
@@ -38,8 +38,9 @@ class Bid extends Model
 		'COUNTRY_ID',
 		'UNDERREVIEW',
 		'NAICSCODE_INT',
-		'NSN'
-
+		'NSN',
+		'raw_html',
+		'extracted_json',
 	];
 
 	protected $casts = [

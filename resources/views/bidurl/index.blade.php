@@ -349,6 +349,7 @@
 						<tr>
 							<th>URL</th>
 							<th>Name</th>
+							<th>Last Scraped</th>
 							<th>Actions</th>
 						</tr>
 					</thead>
@@ -357,6 +358,15 @@
 							<tr>
 								<td><a href="{{ $bidUrl->url }}" target="_blank" rel="noreferrer">{{ $bidUrl->url }}</a></td>
 								<td>{{ $bidUrl->name ?? '—' }}</td>
+								<td>
+									@if ($bidUrl->last_scraped_at)
+										<span style="color: {{ $bidUrl->last_scraped_at->isToday() ? '#16a34a' : '#6b7280' }}; font-size:0.9rem;">
+											{{ $bidUrl->last_scraped_at->format('M d, Y g:i A') }}
+										</span>
+									@else
+										<span style="color:#9ca3af; font-size:0.9rem;">Never</span>
+									@endif
+								</td>
 								<td>
 									<div class="actions">
 										<button class="btn btn-secondary" type="button" onclick='openDetails(@json($bidUrl))'>View</button>
@@ -371,7 +381,7 @@
 							</tr>
 						@empty
 							<tr>
-								<td colspan="3" style="text-align:center; color:#6b7280;">No Bid URLs found.</td>
+								<td colspan="4" style="text-align:center; color:#6b7280;">No Bid URLs found.</td>
 							</tr>
 						@endforelse
 					</tbody>

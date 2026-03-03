@@ -18,8 +18,8 @@ class AIExtractor
 			'connect_timeout' => 30,
 		]);
 
-		$this->apiKey = (string) ($_ENV['OPENAI_API_KEY'] ?? '');
-		$this->model = (string) ($_ENV['OPENAI_MODEL'] ?? 'gpt-4o-mini');
+		$this->apiKey = (string) env('OPENAI_API_KEY', '');
+		$this->model = (string) env('OPENAI_MODEL', 'gpt-4o-mini');
 	}
 
 	public function extract(string $URL, string $html, string $text, array|string $pdfLinks = [], string $pdfText = '', array $bidPages = []): array

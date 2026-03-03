@@ -3,8 +3,9 @@
 namespace App\Services;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException;
-use Spatie\Browsershot\Browsershot;
+use GuzzleHttp\Exception\TransferException;
 use Smalot\PdfParser\Parser;
 use Illuminate\Support\Facades\Log;
 
@@ -21,10 +22,20 @@ class ScraperService
 	public function __construct()
 	{
 		$headers = [
-			'User-Agent' => 'Mozilla/5.0 ...',
-			'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+			'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+			'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
 			'Accept-Language' => 'en-US,en;q=0.9',
+			'Accept-Encoding' => 'gzip, deflate, br',
 			'Connection' => 'keep-alive',
+			'Upgrade-Insecure-Requests' => '1',
+			'Sec-Fetch-Dest' => 'document',
+			'Sec-Fetch-Mode' => 'navigate',
+			'Sec-Fetch-Site' => 'none',
+			'Sec-Fetch-User' => '?1',
+			'Sec-Ch-Ua' => '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+			'Sec-Ch-Ua-Mobile' => '?0',
+			'Sec-Ch-Ua-Platform' => '"Windows"',
+			'Cache-Control' => 'max-age=0',
 		];
 		$cookieHeader = trim((string) env('SCRAPER_COOKIE', ''));
 		if ($cookieHeader !== '') {
@@ -42,10 +53,11 @@ class ScraperService
 			],
 			'verify' => false,
 			'cookies' => true,
-			// force IPv4 + TLS1.2 to avoid handshake issues
+			'decode_content' => true,
 			'curl' => [
 				CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
 				CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_2,
+				CURLOPT_ENCODING => '',
 			],
 		]);
 	}
@@ -72,26 +84,89 @@ class ScraperService
 		$bestText = '';
 		$finalUrl = $url;
 
+		$httpFailed = false;
+		$httpFailReason = '';
+
 		try {
 			$this->ensureWithinBudget($startedAt, 'initial page request');
-			$response = $this->requestWithAuth($url, $requestOptions, $authProvided);
+			$shortOpts = array_merge($requestOptions, ['timeout' => 30, 'connect_timeout' => 15]);
+			$response = $this->requestWithAuth($url, $shortOpts, $authProvided);
+			$bestHtml = (string) ($response->getBody() ?? '');
+			$bestText = $this->htmlToText($bestHtml);
+		} catch (ConnectException $e) {
+			Log::warning('SCRAPER CONNECT/TIMEOUT ERROR — falling back to headless Chrome', ['url' => $url, 'error' => $e->getMessage()]);
+			$httpFailed = true;
+			$httpFailReason = 'Connection timed out';
 		} catch (RequestException $e) {
-			Log::warning('SCRAPER FETCH ERROR', ['url' => $url, 'error' => $e->getMessage()]);
-			if (str_starts_with($url, 'https://')) {
+			$httpStatus = $e->getResponse()?->getStatusCode();
+			Log::warning('SCRAPER FETCH ERROR', ['url' => $url, 'status' => $httpStatus, 'error' => $e->getMessage()]);
+
+			$isTimeout = $httpStatus === null && (
+				stripos($e->getMessage(), 'timed out') !== false ||
+				stripos($e->getMessage(), 'timeout') !== false ||
+				stripos($e->getMessage(), 'cURL error 28') !== false
+			);
+
+			if ($httpStatus === 403 || $isTimeout) {
+				$httpFailed = true;
+				$httpFailReason = $httpStatus === 403 ? '403 Forbidden' : 'Request timed out';
+				Log::info("{$httpFailReason} — falling back to headless Chrome", ['url' => $url]);
+			} elseif (str_starts_with($url, 'https://')) {
 				$httpUrl = 'http://' . substr($url, 8);
 				try {
 					$this->ensureWithinBudget($startedAt, 'http fallback request');
 					$response = $this->requestWithAuth($httpUrl, $requestOptions, $authProvided);
 					$url = $httpUrl;
-				} catch (RequestException $e2) {
-					throw $e2;
+					$bestHtml = (string) ($response->getBody() ?? '');
+					$bestText = $this->htmlToText($bestHtml);
+				} catch (TransferException $e2) {
+					$status2 = ($e2 instanceof RequestException) ? $e2->getResponse()?->getStatusCode() : null;
+					if ($status2 === 403 || $e2 instanceof ConnectException || stripos($e2->getMessage(), 'timeout') !== false) {
+						$httpFailed = true;
+						$httpFailReason = $status2 === 403 ? '403 Forbidden' : 'Request timed out';
+						Log::info("{$httpFailReason} on HTTP fallback — trying headless Chrome", ['url' => $url]);
+					} else {
+						throw $e2;
+					}
 				}
 			} else {
 				throw $e;
 			}
 		}
-		$bestHtml = (string) ($response->getBody() ?? '');
-		$bestText = $this->htmlToText($bestHtml);
+
+		// 2b. Use headless Chrome when HTTP failed (403/timeout), detected SPA, or thin content
+		$isSpa = false;
+		$needsHeadless = $httpFailed;
+		if (!$needsHeadless) {
+			$isSpa = $this->detectSpa($bestHtml, $bestText);
+			$needsHeadless = $isSpa || strlen($bestText) < 500;
+		}
+
+		if ($needsHeadless) {
+			$reason = $httpFailed ? $httpFailReason : ($isSpa ? 'SPA detected' : 'thin content');
+			Log::info("HEADLESS CHROME TRIGGERED ({$reason})", ['url' => $url, 'text_length' => strlen($bestText)]);
+			try {
+				$this->ensureWithinBudget($startedAt, 'headless chrome fetch');
+				$renderedHtml = $this->renderWithPuppeteer($url, ($httpFailed || $isSpa) ? 8000 : 2000);
+
+				if ($renderedHtml !== null) {
+					$renderedText = $this->htmlToText($renderedHtml);
+					if (strlen($renderedText) > strlen($bestText)) {
+						$bestHtml = $renderedHtml;
+						$bestText = $renderedText;
+						$httpFailed = false;
+						Log::info('HEADLESS CHROME SUCCESS', ['url' => $url, 'text_length' => strlen($bestText)]);
+					}
+				}
+			} catch (\Throwable $e) {
+				Log::warning('HEADLESS CHROME FAILED', ['url' => $url, 'error' => $e->getMessage()]);
+			}
+
+			if ($httpFailed && empty($bestText)) {
+				throw new \RuntimeException("Failed to scrape this URL ({$httpFailReason}). Headless Chrome also could not load the page. Please verify the URL opens in a browser.");
+			}
+		}
+
 		$blockedReason = $this->detectBlockedPage($bestHtml, $bestText);
 		$blocked = !empty($blockedReason);
 		$this->guardLoginRequirement($bestHtml, $bestText, $authProvided);
@@ -104,7 +179,6 @@ class ScraperService
 		$pdfBids = $noOpenBids ? [] : $this->findPdfLink($bestHtml, $url);
 
 		if (!empty($pdfBids)) {
-			// Cap PDF downloads to avoid long-running requests.
 			if (count($pdfBids) > $this->maxPdfDownloads) {
 				Log::info('PDF DOWNLOADS CAPPED', ['url' => $url, 'found' => count($pdfBids), 'capped_at' => $this->maxPdfDownloads]);
 				$pdfBids = array_slice($pdfBids, 0, $this->maxPdfDownloads);
@@ -129,7 +203,7 @@ class ScraperService
 
 		// 3b. Follow clickable bid titles (detail pages) to pull richer data and PDFs
 		$detailLinks = $noOpenBids ? [] : $this->findBidDetailLinks($bestHtml, $url);
-		$detailLinks = array_slice($detailLinks, 0, 8); // cap depth
+		$detailLinks = array_slice($detailLinks, 0, 8);
 		foreach ($detailLinks as $detail) {
 			try {
 				$pageHtml = '';
@@ -170,30 +244,6 @@ class ScraperService
 				];
 			} catch (\Throwable $e) {
 				Log::warning('CLICKED BID PAGE FAILED', ['url' => $detail['URL'], 'error' => $e->getMessage()]);
-			}
-		}
-
-		// 4. Fallback with Browsershot if page text is too short
-		if (strlen($bestText) < 500) {
-			try {
-				$this->ensureWithinBudget($startedAt, 'browsershot fetch');
-				$html = Browsershot::url($url)
-					->setNodeBinary('node')
-					->timeout(120)
-					->setDelay(2000)
-					->disableSandbox()
-					->userAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
-					->bodyHtml();
-
-				$text = $this->htmlToText($html);
-
-				if (strlen($text) > strlen($bestText)) {
-					$bestHtml = $html;
-					$bestText = $text;
-					$this->guardLoginRequirement($bestHtml, $bestText, $authProvided);
-				}
-			} catch (\Throwable $e) {
-				Log::warning('BROWSERSHOT FAILED', ['url' => $url, 'error' => $e->getMessage()]);
 			}
 		}
 
@@ -288,16 +338,26 @@ class ScraperService
 	{
 		$haystack = strtolower($text . ' ' . strip_tags($html));
 
-		// Quick checks for login form markers.
+		$hasLoginForm = false;
+
 		if (preg_match('/type=[\"\\\']password[\"\\\']/i', $html) && preg_match('/log in|login|sign in/i', $haystack)) {
-			return true;
+			$hasLoginForm = true;
 		}
 
 		if (preg_match('/<form[^>]*(login|signin)[^>]*>/i', $html)) {
-			return true;
+			$hasLoginForm = true;
 		}
 
-		return false;
+		if (!$hasLoginForm) {
+			return false;
+		}
+
+		$bidSignals = '(bid|bids|rfp|rfq|rfi|tender|solicitation|proposal|invitation|procurement|bid opportunities|current bids|open bids|closing date|bids due)';
+		if (preg_match("/{$bidSignals}/i", $haystack)) {
+			return false;
+		}
+
+		return true;
 	}
 
 	private function isAuthError(?int $status): bool
@@ -486,6 +546,46 @@ class ScraperService
 		}
 	}
 
+	private function renderWithPuppeteer(string $url, int $delayMs = 3000): ?string
+	{
+		$script = base_path('bin/render-page.cjs');
+		$nodeBin = env('NODE_BINARY', 'C:\\Program Files\\nodejs\\node.exe');
+
+		$env = [
+			'SystemRoot' => getenv('SystemRoot') ?: 'C:\\WINDOWS',
+			'LOCALAPPDATA' => getenv('LOCALAPPDATA') ?: '',
+			'USERPROFILE' => getenv('USERPROFILE') ?: '',
+			'Path' => getenv('Path') ?: getenv('PATH') ?: '',
+			'TEMP' => getenv('TEMP') ?: sys_get_temp_dir(),
+			'TMP' => getenv('TMP') ?: sys_get_temp_dir(),
+			'APPDATA' => getenv('APPDATA') ?: '',
+			'HOME' => getenv('USERPROFILE') ?: '',
+			'NODE_PATH' => base_path('node_modules'),
+		];
+
+		$process = new \Symfony\Component\Process\Process(
+			[$nodeBin, $script, $url, (string) $delayMs],
+			base_path(),
+			$env,
+			null,
+			120
+		);
+		$process->run();
+
+		if (!$process->isSuccessful()) {
+			$error = trim($process->getErrorOutput());
+			Log::warning('PUPPETEER PROCESS FAILED', ['url' => $url, 'error' => $error]);
+			return null;
+		}
+
+		$html = $process->getOutput();
+		if (empty(trim($html))) {
+			return null;
+		}
+
+		return $html;
+	}
+
 	private function htmlToText(string $html): string
 	{
 		libxml_use_internal_errors(true);
@@ -541,6 +641,36 @@ class ScraperService
 		}
 
 		return null;
+	}
+
+	private function detectSpa(string $html, string $text): bool
+	{
+		$indicators = [
+			'<div id="root"',
+			'<div id="app"',
+			'<div id="__next"',
+			'<div id="__nuxt"',
+			'window.__INITIAL_STATE__',
+			'window.__NEXT_DATA__',
+			'ng-app=',
+			'ng-version=',
+			'data-reactroot',
+		];
+		$htmlLower = strtolower($html);
+		foreach ($indicators as $indicator) {
+			if (str_contains($htmlLower, strtolower($indicator))) {
+				return true;
+			}
+		}
+
+		$scriptCount = substr_count($htmlLower, '<script');
+		$bodyContent = preg_replace('/<script[\s\S]*?<\/script>/i', '', $html);
+		$bodyText = trim(strip_tags($bodyContent));
+		if ($scriptCount >= 3 && strlen($bodyText) < 200) {
+			return true;
+		}
+
+		return false;
 	}
 
 	private function detectNoOpenBids(string $html, string $text): bool

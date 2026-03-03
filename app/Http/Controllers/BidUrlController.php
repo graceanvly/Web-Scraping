@@ -101,7 +101,7 @@ class BidUrlController extends Controller
                 'url',
                 'max:2048',
                 'regex:/^https?:\\/\\//i',
-                Rule::unique('bid_url', 'url')->ignore($bidUrl->id, 'ID'),
+                Rule::unique('bid_url', 'url')->ignore($bidUrl->id),
             ],
             'name' => ['nullable', 'string', 'max:255'],
             'username' => ['nullable', 'string', 'max:255'],
