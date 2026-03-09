@@ -198,6 +198,71 @@ SYS;
 		return ['bids' => $normalized];
 	}
 
+	/**
+	 * Use AI to rewrite raw scraped titles into clean, standardized format.
+	 * Batches all titles in one API call for efficiency.
+	 */
+	public function rewriteTitles(array $titles): array
+	{
+		if (empty($titles) || empty($this->apiKey)) {
+			return $titles;
+		}
+
+		$system = <<<SYS
+You are a bid title editor. Rewrite each government bid title to be clear, professional, and concise.
+
+Rules:
+1) Remove bid/solicitation numbers from the beginning (e.g. "Bid 26121 - " or "RFP-2026-003:") but keep them if they are the ONLY identifier.
+2) Use title case.
+3) Remove redundant words like "Request for", "Invitation to Bid for", "Solicitation for" — just state what the bid is for.
+4) Keep important qualifiers (location, department, year) if present.
+5) Maximum 120 characters.
+6) Do NOT change meaning or add information not in the original.
+7) If a title is already clean, return it as-is.
+
+Respond with strict JSON: {"titles": ["rewritten title 1", "rewritten title 2", ...]}
+The output array MUST have the same number of items as the input, in the same order.
+SYS;
+
+		$body = [
+			'model' => $this->model,
+			'messages' => [
+				['role' => 'system', 'content' => $system],
+				['role' => 'user', 'content' => json_encode(['titles' => array_values($titles)], JSON_UNESCAPED_UNICODE)],
+			],
+			'response_format' => ['type' => 'json_object'],
+			'temperature' => 0.1,
+		];
+
+		try {
+			$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $this->apiKey,
+					'Content-Type' => 'application/json',
+				],
+				'body' => json_encode($body),
+			]);
+
+			$json = json_decode((string) $response->getBody(), true);
+			$content = $json['choices'][0]['message']['content'] ?? '{}';
+			$data = json_decode($content, true);
+			$rewritten = $data['titles'] ?? [];
+
+			if (count($rewritten) === count($titles)) {
+				return array_values($rewritten);
+			}
+
+			\Illuminate\Support\Facades\Log::warning('AI title rewrite count mismatch', [
+				'input' => count($titles),
+				'output' => count($rewritten),
+			]);
+			return $titles;
+		} catch (\Throwable $e) {
+			\Illuminate\Support\Facades\Log::warning('AI title rewrite failed', ['error' => $e->getMessage()]);
+			return $titles;
+		}
+	}
+
 	private function extractTitleFromUrl(string $URL): string
 	{
 		$path = parse_url($URL, PHP_URL_PATH);

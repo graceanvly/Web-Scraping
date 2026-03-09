@@ -98,12 +98,16 @@ class BidController extends Controller
 			$duplicates = [];
 			$nonBids = [];
 
-			// 3) Save bids
+			$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
+			$rewrittenTitles = $ai->rewriteTitles($rawTitles);
+			$titleMap = array_combine($rawTitles, $rewrittenTitles);
+
 			foreach ($filteredBids as $bidData) {
-				$title = $bidData['TITLE'] ?? null;
-				if (!$title) {
+				$rawTitle = $bidData['TITLE'] ?? null;
+				if (!$rawTitle) {
 					continue;
 				}
+				$title = $titleMap[$rawTitle] ?? $rawTitle;
 
 				$detailUrl = trim((string) ($bidData['URL'] ?? $validated['URL']));
 				$detailUrl = $detailUrl !== '' ? $detailUrl : $validated['URL'];
@@ -297,12 +301,16 @@ class BidController extends Controller
 				$duplicatesThisUrl = 0;
 				$nonBidsThisUrl = 0;
 
-				// 3) Save valid bids
+				$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
+				$rewrittenTitles = $ai->rewriteTitles($rawTitles);
+				$titleMap = array_combine($rawTitles, $rewrittenTitles);
+
 				foreach ($filteredBids as $bidData) {
-					$title = $bidData['TITLE'] ?? null;
-					if (!$title) {
+					$rawTitle = $bidData['TITLE'] ?? null;
+					if (!$rawTitle) {
 						continue;
 					}
+					$title = $titleMap[$rawTitle] ?? $rawTitle;
 
 					$detailUrl = trim((string) ($bidData['URL'] ?? $url));
 					$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
@@ -522,9 +530,14 @@ class BidController extends Controller
 					$duplicatesThisUrl = 0;
 					$nonBidsThisUrl = 0;
 
+					$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
+					$rewrittenTitles = $ai->rewriteTitles($rawTitles);
+					$titleMap = array_combine($rawTitles, $rewrittenTitles);
+
 					foreach ($filteredBids as $bidData) {
-						$title = $bidData['TITLE'] ?? null;
-						if (!$title) continue;
+						$rawTitle = $bidData['TITLE'] ?? null;
+						if (!$rawTitle) continue;
+						$title = $titleMap[$rawTitle] ?? $rawTitle;
 
 						$detailUrl = trim((string) ($bidData['URL'] ?? $url));
 						$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
