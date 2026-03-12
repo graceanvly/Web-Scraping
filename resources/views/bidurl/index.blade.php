@@ -9,11 +9,12 @@
 	<style>
 		:root {
 			--card-bg: #fff;
-			--card-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+			--card-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
 			--muted: #6b7280;
 			--border: #e5e7eb;
 			--accent: #2563eb;
 			--accent-strong: #1d4ed8;
+			--page-bg: #f6f7fb;
 		}
 
 		html,
@@ -21,7 +22,7 @@
 			margin: 0;
 			padding: 0;
 			min-height: 100vh;
-			background: linear-gradient(135deg, #f5f7fa 0%, #e4ebf5 100%);
+			background: var(--page-bg);
 			font-family: system-ui, sans-serif;
 		}
 
@@ -47,6 +48,7 @@
 			background: var(--card-bg);
 			padding: 1.5rem;
 			border-radius: 10px;
+			border: 1px solid var(--border);
 			box-shadow: var(--card-shadow);
 			margin-bottom: 1.25rem;
 		}
@@ -96,6 +98,12 @@
 			background: #ecfdf3;
 			border-color: #bbf7d0;
 			color: #166534;
+		}
+
+		.alert.error {
+			background: #fef2f2;
+			border-color: #fecaca;
+			color: #991b1b;
 		}
 
 		.actions {
@@ -244,6 +252,79 @@
 			font-size: 0.8rem;
 		}
 
+		.section-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			gap: 0.75rem;
+			flex-wrap: wrap;
+			margin-bottom: 0.75rem;
+		}
+
+		.section-title {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			flex-wrap: wrap;
+		}
+
+		.footer-bar {
+			margin-top: 0.75rem;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			flex-wrap: wrap;
+			gap: 0.5rem;
+			color: #4b5563;
+			font-size: 0.95rem;
+		}
+
+		.pagination {
+			display: flex;
+			justify-content: flex-end;
+		}
+
+		.pagination ul {
+			display: flex;
+			gap: 0.35rem;
+			list-style: none;
+			margin: 0;
+			padding: 0;
+			align-items: center;
+			flex-wrap: wrap;
+		}
+
+		.pagination li {
+			margin: 0;
+		}
+
+		.pagination a,
+		.pagination span {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			min-width: 2rem;
+			height: 2rem;
+			padding: 0 0.5rem;
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			text-decoration: none;
+			color: #0f172a;
+			background: #fff;
+			font-size: 0.9rem;
+		}
+
+		.pagination .active span {
+			background: var(--accent);
+			color: #fff;
+			border-color: var(--accent-strong);
+		}
+
+		.pagination .disabled span {
+			background: #f8fafc;
+			color: #9ca3af;
+		}
+
 		th:nth-child(3),
 		td:nth-child(3) {
 			width: 220px;
@@ -276,6 +357,10 @@
 				justify-content: flex-start;
 				margin-left: 0;
 				gap: 0.5rem;
+			}
+
+			.section-header {
+				align-items: flex-start;
 			}
 
 			.toolbar-main {
@@ -314,14 +399,23 @@
 		@if (session('success'))
 			<div class="alert success">{{ session('success') }}</div>
 		@endif
+		@if ($errors->any())
+			<div class="alert error">
+				<ul style="margin:0; padding-left:1.1rem;">
+					@foreach ($errors->all() as $error)
+						<li>{{ $error }}</li>
+					@endforeach
+				</ul>
+			</div>
+		@endif
 
 		<section class="card">
-			<div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-				<div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+			<div class="section-header">
+				<div class="section-title">
 					<h2 style="margin:0;">Configured URLs</h2>
 					<span class="badge">{{ $bidUrls->total() }} total</span>
 				</div>
-				<div class="header-actions" style="justify-content:flex-end;">
+				<div class="header-actions">
 					<button class="btn btn-primary" type="button" onclick="openAdd()">+ Add Bid URL</button>
 				</div>
 			</div>
@@ -331,11 +425,11 @@
 						<label style="display:flex; align-items:center; gap:0.35rem; margin:0;">
 							Show
 							<select id="showEntries">
-								<option value="5">5</option>
-								<option value="10" selected>10</option>
-								<option value="25">25</option>
-								<option value="50">50</option>
-								<option value="all">All</option>
+								<option value="5" {{ request('per_page') == 5 ? 'selected' : '' }}>5</option>
+								<option value="10" {{ request('per_page') == 10 ? 'selected' : '' }}>10</option>
+								<option value="25" {{ request('per_page') == 25 ? 'selected' : '' }}>25</option>
+								<option value="50" {{ request('per_page', 50) == 50 ? 'selected' : '' }}>50</option>
+								<option value="100" {{ request('per_page') == 100 ? 'selected' : '' }}>100</option>
 							</select>
 							entries
 						</label>
@@ -357,7 +451,7 @@
 						@forelse ($bidUrls as $bidUrl)
 							<tr>
 								<td><a href="{{ $bidUrl->url }}" target="_blank" rel="noreferrer">{{ $bidUrl->url }}</a></td>
-								<td>{{ $bidUrl->name ?? '—' }}</td>
+								<td>{{ $bidUrl->name ?? '-' }}</td>
 								<td>
 									@if ($bidUrl->last_scraped_at)
 										<span style="color: {{ $bidUrl->last_scraped_at->isToday() ? '#16a34a' : '#6b7280' }}; font-size:0.9rem;">
@@ -388,9 +482,9 @@
 				</table>
 			</div>
 
-			<div style="margin-top:0.75rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; color:#4b5563; font-size:0.95rem;">
-				<div>Showing <span id="showingCount">0</span> of <span id="totalCount">{{ $bidUrls->count() }}</span> entries</div>
-				{{ $bidUrls->links() }}
+			<div class="footer-bar">
+				<div>Showing <span id="showingCount">{{ $bidUrls->count() }}</span> of <span id="totalCount">{{ $bidUrls->total() }}</span> entries</div>
+				{{ $bidUrls->links('pagination.bidurl') }}
 			</div>
 		</section>
 	</main>
@@ -468,8 +562,6 @@
 		const showEntries = document.getElementById('showEntries');
 		const showingCount = document.getElementById('showingCount');
 		const totalCount = document.getElementById('totalCount');
-		let filteredRows = rows.slice();
-		let currentPage = 1;
 
 		function openAdd() {
 			document.getElementById('add_url').value = '';
@@ -483,16 +575,16 @@
 			detailsContent.innerHTML = `
         <ul>
           <li><strong>URL:</strong> <a href="${bidUrl.url}" target="_blank" rel="noreferrer">${bidUrl.url}</a></li>
-          <li><strong>Name:</strong> ${bidUrl.name ? bidUrl.name : '—'}</li>
+          <li><strong>Name:</strong> ${bidUrl.name ? bidUrl.name : '&mdash;'}</li>
           <li><strong>Valid:</strong> ${bidUrl.valid ? 'Yes' : 'No'}</li>
-          <li><strong>Start Time:</strong> ${bidUrl.start_time ? bidUrl.start_time : '—'}</li>
-          <li><strong>End Time:</strong> ${bidUrl.end_time ? bidUrl.end_time : '—'}</li>
-          <li><strong>Weight:</strong> ${bidUrl.weight ? bidUrl.weight : '—'}</li>
-          <li><strong>User ID:</strong> ${bidUrl.user_id ? bidUrl.user_id : '—'}</li>
-          <li><strong>Check Changes:</strong> ${bidUrl.check_changes ? bidUrl.check_changes : '—'}</li>
-          <li><strong>Visit Required:</strong> ${bidUrl.visit_required ? bidUrl.visit_required : '—'}</li>
-          <li><strong>Checksum:</strong> ${bidUrl.checksum ? bidUrl.checksum : '—'}</li>
-          <li><strong>Third Party URL ID:</strong> ${bidUrl.third_party_url_id ? bidUrl.third_party_url_id : '—'}</li>
+          <li><strong>Start Time:</strong> ${bidUrl.start_time ? bidUrl.start_time : '&mdash;'}</li>
+          <li><strong>End Time:</strong> ${bidUrl.end_time ? bidUrl.end_time : '&mdash;'}</li>
+          <li><strong>Weight:</strong> ${bidUrl.weight ? bidUrl.weight : '&mdash;'}</li>
+          <li><strong>User ID:</strong> ${bidUrl.user_id ? bidUrl.user_id : '&mdash;'}</li>
+          <li><strong>Check Changes:</strong> ${bidUrl.check_changes ? bidUrl.check_changes : '&mdash;'}</li>
+          <li><strong>Visit Required:</strong> ${bidUrl.visit_required ? bidUrl.visit_required : '&mdash;'}</li>
+          <li><strong>Checksum:</strong> ${bidUrl.checksum ? bidUrl.checksum : '&mdash;'}</li>
+          <li><strong>Third Party URL ID:</strong> ${bidUrl.third_party_url_id ? bidUrl.third_party_url_id : '&mdash;'}</li>
         </ul>
       `;
 			detailsModal.showModal();
@@ -510,37 +602,25 @@
 		function applyFilters() {
 			const search = (searchInput?.value || '').toLowerCase();
 
-			filteredRows = rows.filter((row) => {
+			const filteredRows = rows.filter((row) => {
 				const url = row.cells[0]?.innerText.toLowerCase() || '';
 				const name = row.cells[1]?.innerText.toLowerCase() || '';
 				const matchesSearch = !search || url.includes(search) || name.includes(search);
 				return matchesSearch;
 			});
 
-			totalCount.textContent = filteredRows.length;
-			currentPage = 1;
-			renderTable();
-		}
-
-		function renderTable() {
-			const limitVal = showEntries?.value || '10';
-			const limit = limitVal === 'all' ? filteredRows.length : parseInt(limitVal, 10);
-			const start = (currentPage - 1) * limit;
-			const end = start + limit;
-
 			rows.forEach((row) => (row.style.display = 'none'));
-			filteredRows.slice(start, end).forEach((row) => (row.style.display = ''));
-
-			const showing = filteredRows.slice(start, end).length;
-			if (showingCount) showingCount.textContent = showing;
-			if (totalCount) totalCount.textContent = filteredRows.length;
+			filteredRows.forEach((row) => (row.style.display = ''));
+			if (showingCount) showingCount.textContent = filteredRows.length;
 		}
 
 		if (table) {
 			searchInput?.addEventListener('input', applyFilters);
 			showEntries?.addEventListener('change', () => {
-				currentPage = 1;
-				renderTable();
+				const perPage = showEntries.value;
+				const url = new URL(window.location.href);
+				url.searchParams.set('per_page', perPage);
+				window.location.href = url.toString();
 			});
 			applyFilters();
 		}

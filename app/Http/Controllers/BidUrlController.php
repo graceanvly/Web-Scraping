@@ -35,9 +35,18 @@ class BidUrlController extends Controller
                 continue; // skip invalid lines
             }
 
+            $urlValue = trim($fields[0]);
+            $nameValue = trim($fields[1]);
+
+            if (BidUrl::where('url', $urlValue)
+                ->orWhere('name', $nameValue)
+                ->exists()) {
+                continue; // skip duplicates by url or name
+            }
+
             BidUrl::create([
-                'url' => trim($fields[0]),
-                'name' => trim($fields[1]),
+                'url' => $urlValue,
+                'name' => $nameValue,
                 'start_time' => !empty($fields[2]) ? $fields[2] : null,
                 'end_time' => !empty($fields[3]) ? $fields[3] : null,
                 'weight' => (int) $fields[4],
@@ -58,7 +67,15 @@ class BidUrlController extends Controller
      */
     public function index()
     {
-        $bidUrls = BidUrl::paginate(15);
+        $perPage = (int) request('per_page', 50);
+        if ($perPage < 5) {
+            $perPage = 5;
+        }
+        if ($perPage > 200) {
+            $perPage = 200;
+        }
+
+        $bidUrls = BidUrl::paginate($perPage)->withQueryString();
         return view('bidurl.index', compact('bidUrls'));
     }
 
@@ -75,7 +92,12 @@ class BidUrlController extends Controller
                 'regex:/^https?:\\/\\//i',
                 Rule::unique('bid_url', 'url'),
             ],
-            'name' => ['nullable', 'string', 'max:255'],
+            'name' => [
+                'nullable',
+                'string',
+                'max:255',
+                Rule::unique('bid_url', 'name'),
+            ],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:255'],
         ], [
@@ -83,6 +105,7 @@ class BidUrlController extends Controller
             'url.url' => 'Enter a valid URL (http or https).',
             'url.regex' => 'Only http:// or https:// links are supported.',
             'url.unique' => 'This URL is already in the list.',
+            'name.unique' => 'This name is already in the list.',
         ]);
 
         BidUrl::create($data);
@@ -103,7 +126,12 @@ class BidUrlController extends Controller
                 'regex:/^https?:\\/\\//i',
                 Rule::unique('bid_url', 'url')->ignore($bidUrl->id),
             ],
-            'name' => ['nullable', 'string', 'max:255'],
+            'name' => [
+                'nullable',
+                'string',
+                'max:255',
+                Rule::unique('bid_url', 'name')->ignore($bidUrl->id),
+            ],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:255'],
         ], [
@@ -111,6 +139,7 @@ class BidUrlController extends Controller
             'url.url' => 'Enter a valid URL (http or https).',
             'url.regex' => 'Only http:// or https:// links are supported.',
             'url.unique' => 'This URL is already in the list.',
+            'name.unique' => 'This name is already in the list.',
         ]);
 
         $bidUrl->update($data);
