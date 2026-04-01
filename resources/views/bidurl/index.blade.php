@@ -420,11 +420,11 @@
 				</div>
 			</div>
 			<div class="table-wrapper">
-				<div class="table-toolbar">
+				<form id="filtersForm" method="GET" action="{{ route('bidurl.index') }}" class="table-toolbar">
 					<div class="controls">
 						<label style="display:flex; align-items:center; gap:0.35rem; margin:0;">
 							Show
-							<select id="showEntries">
+							<select id="showEntries" name="per_page">
 								<option value="5" {{ request('per_page') == 5 ? 'selected' : '' }}>5</option>
 								<option value="10" {{ request('per_page') == 10 ? 'selected' : '' }}>10</option>
 								<option value="25" {{ request('per_page') == 25 ? 'selected' : '' }}>25</option>
@@ -435,9 +435,12 @@
 						</label>
 					</div>
 					<div class="controls">
-						<input type="search" id="searchInput" placeholder="Search URL or name">
+						<input type="search" id="searchInput" name="search" value="{{ $search }}" placeholder="Search URL or name">
+						@if ($search !== '')
+							<a href="{{ route('bidurl.index', ['per_page' => request('per_page', 50)]) }}" class="btn btn-secondary">Clear</a>
+						@endif
 					</div>
-				</div>
+				</form>
 				<table>
 					<thead>
 						<tr>
@@ -556,12 +559,12 @@
 		const addModal = document.getElementById('addModal');
 		const editModal = document.getElementById('editModal');
 		const editForm = document.getElementById('editForm');
+		const filtersForm = document.getElementById('filtersForm');
 		const table = document.querySelector('table tbody') ? document.querySelector('table') : null;
 		const rows = table ? Array.from(table.querySelectorAll('tbody tr')) : [];
 		const searchInput = document.getElementById('searchInput');
 		const showEntries = document.getElementById('showEntries');
 		const showingCount = document.getElementById('showingCount');
-		const totalCount = document.getElementById('totalCount');
 
 		function openAdd() {
 			document.getElementById('add_url').value = '';
@@ -599,30 +602,27 @@
 			editModal.showModal();
 		}
 
-		function applyFilters() {
-			const search = (searchInput?.value || '').toLowerCase();
-
-			const filteredRows = rows.filter((row) => {
-				const url = row.cells[0]?.innerText.toLowerCase() || '';
-				const name = row.cells[1]?.innerText.toLowerCase() || '';
-				const matchesSearch = !search || url.includes(search) || name.includes(search);
-				return matchesSearch;
-			});
-
-			rows.forEach((row) => (row.style.display = 'none'));
-			filteredRows.forEach((row) => (row.style.display = ''));
-			if (showingCount) showingCount.textContent = filteredRows.length;
-		}
-
 		if (table) {
-			searchInput?.addEventListener('input', applyFilters);
-			showEntries?.addEventListener('change', () => {
-				const perPage = showEntries.value;
-				const url = new URL(window.location.href);
-				url.searchParams.set('per_page', perPage);
-				window.location.href = url.toString();
+			if (showingCount) {
+				showingCount.textContent = rows.length;
+			}
+
+			let searchSubmitTimer;
+
+			searchInput?.addEventListener('input', () => {
+				clearTimeout(searchSubmitTimer);
+				searchSubmitTimer = setTimeout(() => {
+					filtersForm?.requestSubmit();
+				}, 300);
 			});
-			applyFilters();
+
+			showEntries?.addEventListener('change', () => {
+				const pageInput = filtersForm?.querySelector('input[name="page"]');
+				if (pageInput) {
+					pageInput.remove();
+				}
+				filtersForm?.requestSubmit();
+			});
 		}
 	</script>
 </body>

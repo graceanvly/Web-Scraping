@@ -20,6 +20,12 @@
 		}
 		table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 		th, td { padding: 0.75rem 1rem; text-align: left; vertical-align: top; }
+		.issues-table { table-layout: fixed; }
+		.issues-table th, .issues-table td { overflow-wrap: anywhere; word-break: break-word; }
+		.issues-table th:nth-child(1), .issues-table td:nth-child(1) { width: 120px; }
+		.issues-table th:nth-child(2), .issues-table td:nth-child(2) { width: 30%; }
+		.issues-table th:nth-child(3), .issues-table td:nth-child(3) { width: 40%; }
+		.issues-table th:nth-child(4), .issues-table td:nth-child(4) { width: 190px; }
 		thead { background: #f0f2f5; font-weight: 600; color: #1d4ed8; }
 		tbody tr:nth-child(even) { background: #fafafa; }
 		tbody tr:hover { background: #f1f5f9; }
@@ -32,16 +38,17 @@
 		.badge-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 		.badge-warning { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
 		.badge-success { background: #ecfdf3; color: #166534; border: 1px solid #bbf7d0; }
-		td.url-cell { max-width: 300px; word-break: break-all; font-size: 0.85rem; }
-		td.msg-cell { max-width: 400px; word-break: break-word; font-size: 0.85rem; }
+		td.url-cell { font-size: 0.85rem; white-space: normal; }
+		td.msg-cell { font-size: 0.85rem; white-space: normal; }
+		.url-link { color:#2563eb; display:inline-block; max-width:100%; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
 		.pagination-links { margin-top: 1rem; }
 		.pagination-links nav { margin-bottom: 0; }
 
 		@media (max-width: 768px) {
 			table { font-size: 0.75rem; }
 			th, td { padding: 0.4rem 0.5rem; }
-			td.url-cell { max-width: 140px; }
-			td.msg-cell { max-width: 180px; }
+			.issues-table th:nth-child(1), .issues-table td:nth-child(1) { width: 96px; }
+			.issues-table th:nth-child(4), .issues-table td:nth-child(4) { width: 150px; }
 		}
 	</style>
 </head>
@@ -74,7 +81,7 @@
 					Showing {{ $logs->firstItem() }}-{{ $logs->lastItem() }} of {{ $logs->total() }} issue(s)
 				</p>
 				<div style="overflow-x:auto;">
-					<table>
+					<table class="issues-table">
 						<thead>
 							<tr>
 								<th>Level</th>
@@ -90,7 +97,7 @@
 										<span class="badge badge-{{ $log->level }}">{{ $log->level }}</span>
 									</td>
 									<td class="url-cell">
-										<a href="{{ $log->url }}" target="_blank" rel="noopener" style="color:#2563eb;">{{ $log->url }}</a>
+										<a class="url-link" href="{{ $log->url }}" target="_blank" rel="noopener">{{ $log->url }}</a>
 									</td>
 									<td class="msg-cell">{{ $log->message }}</td>
 									<td style="white-space:nowrap; font-size:0.85rem; color:#6b7280;">

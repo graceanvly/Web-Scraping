@@ -181,6 +181,21 @@
 			width: auto;
 		}
 
+		.pagination-bar {
+			margin-top: 0.75rem;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			gap: 0.75rem;
+			flex-wrap: wrap;
+			color: #555;
+			font-size: 0.9rem;
+		}
+
+		.pagination-bar .pagination {
+			margin-left: auto;
+		}
+
 		/* Tabs */
 		.tab-btn {
 			padding: 0.6rem 1.4rem;
@@ -224,6 +239,40 @@
 			font-weight: 600;
 			text-transform: uppercase;
 			letter-spacing: 0.03em;
+		}
+		.issues-table {
+			table-layout: fixed;
+		}
+		.issues-table th,
+		.issues-table td {
+			white-space: normal;
+			vertical-align: top;
+			overflow-wrap: anywhere;
+			word-break: break-word;
+		}
+		.issues-table th:nth-child(1),
+		.issues-table td:nth-child(1) {
+			width: 120px;
+		}
+		.issues-table th:nth-child(2),
+		.issues-table td:nth-child(2) {
+			width: 30%;
+		}
+		.issues-table th:nth-child(3),
+		.issues-table td:nth-child(3) {
+			width: 40%;
+		}
+		.issues-table th:nth-child(4),
+		.issues-table td:nth-child(4) {
+			width: 190px;
+		}
+		.issues-url-link {
+			color: #2563eb;
+			display: inline-block;
+			max-width: 100%;
+			white-space: normal;
+			overflow-wrap: anywhere;
+			word-break: break-word;
 		}
 		.issue-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 		.issue-warning { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
@@ -393,32 +442,36 @@
 	<!-- Bids Tab -->
 	<section id="panelBids" class="card" style="border-top-left-radius:0;">
 			<!-- Toolbar -->
-			<div class="table-toolbar">
+			<form id="filtersForm" method="GET" action="{{ route('bids.index') }}" class="table-toolbar">
 				<div class="left-controls">
 					<label style="display:flex; align-items:center; gap:0.3rem;">
 						Show
-						<select id="showEntries">
-							<option value="5">5</option>
-							<option value="10">10</option>
-							<option value="25">25</option>
-							<option value="50" selected>50</option>
+						<select id="showEntries" name="per_page">
+							<option value="5" {{ request('per_page') == 5 ? 'selected' : '' }}>5</option>
+							<option value="10" {{ request('per_page') == 10 ? 'selected' : '' }}>10</option>
+							<option value="25" {{ request('per_page') == 25 ? 'selected' : '' }}>25</option>
+							<option value="50" {{ request('per_page', 50) == 50 ? 'selected' : '' }}>50</option>
+							<option value="100" {{ request('per_page') == 100 ? 'selected' : '' }}>100</option>
 						</select>
 						entries
 					</label>
 				</div>
 				<div class="right-controls">
-					<input type="text" id="searchInput" placeholder="Search…" />
-					<input type="date" id="filterDate" title="Filter by date scraped" />
-					<select id="filterNaics">
+					<input type="text" id="searchInput" name="search" value="{{ $search }}" placeholder="Search…" />
+					<input type="date" id="filterDate" name="date" value="{{ $filterDate }}" title="Filter by date scraped" />
+					<select id="filterNaics" name="naics">
 						<option value="">NAICS</option>
-						@foreach ($bids->pluck('NAICSCODE')->unique() as $code)
+						@foreach ($naicsCodes as $code)
 							@if ($code)
-								<option value="{{ $code }}">{{ $code }}</option>
+								<option value="{{ $code }}" {{ $filterNaics === $code ? 'selected' : '' }}>{{ $code }}</option>
 							@endif
 						@endforeach
 					</select>
+					@if ($search !== '' || $filterDate !== '' || $filterNaics !== '')
+						<a href="{{ route('bids.index', ['per_page' => request('per_page', 50)]) }}" class="secondary">Clear</a>
+					@endif
 				</div>
-			</div>
+			</form>
 
 			<div style="overflow-x:auto;">
 				<table role="grid" id="bidsTable">
@@ -478,14 +531,12 @@
 			</div>
 
 			<!-- Info + Pagination -->
-			<div
-				style="margin-top:0.75rem; font-size:0.9rem; color:#555; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; ;">
+			<div class="pagination-bar">
 				<div>
-					Showing <span id="showingCount">0</span> of <span id="totalCount">{{ count($bids) }}</span> entries
+					Showing <span id="showingCount">{{ $bids->count() }}</span> of <span id="totalCount">{{ $bids->total() }}</span> entries
 				</div>
-				<div style="display:flex; gap:0.5rem;">
-					<button id="prevPage" disabled>⬅ Back</button>
-					<button id="nextPage" disabled>Next ➡</button>
+				<div class="pagination">
+					{{ $bids->links('pagination.bidurl') }}
 				</div>
 			</div>
 		</section>
@@ -509,7 +560,7 @@
 			<p style="color:#6b7280; text-align:center; padding:2rem 0;">No issues recorded.</p>
 		@else
 			<div style="overflow-x:auto;">
-				<table>
+				<table class="issues-table">
 					<thead>
 						<tr>
 							<th>Level</th>
@@ -524,10 +575,10 @@
 								<td>
 									<span class="issue-badge issue-{{ $log->level }}">{{ $log->level }}</span>
 								</td>
-								<td style="max-width:300px; word-break:break-all; font-size:0.85rem;">
-									<a href="{{ $log->url }}" target="_blank" rel="noopener" style="color:#2563eb;">{{ $log->url }}</a>
+								<td style="font-size:0.85rem;">
+									<a class="issues-url-link" href="{{ $log->url }}" target="_blank" rel="noopener">{{ $log->url }}</a>
 								</td>
-								<td style="max-width:400px; word-break:break-word; font-size:0.85rem;">{{ $log->message }}</td>
+								<td style="font-size:0.85rem;">{{ $log->message }}</td>
 								<td style="white-space:nowrap; font-size:0.85rem; color:#6b7280;">
 									{{ $log->created_at->format('M d, Y h:i A') }}
 								</td>
@@ -696,66 +747,32 @@
 
 		const table = document.getElementById("bidsTable");
 		const rows = Array.from(table.querySelectorAll("tbody tr"));
+		const filtersForm = document.getElementById("filtersForm");
 		const searchInput = document.getElementById("searchInput");
 		const filterDate = document.getElementById("filterDate");
 		const filterNaics = document.getElementById("filterNaics");
 		const showEntries = document.getElementById("showEntries");
 		const showingCount = document.getElementById("showingCount");
-		const totalCount = document.getElementById("totalCount");
-		const prevPageBtn = document.getElementById("prevPage");
-		const nextPageBtn = document.getElementById("nextPage");
+		showingCount.textContent = rows.length;
 
-		let currentPage = 1;
-		let filteredRows = [];
+		let searchSubmitTimer;
 
-		function applyFilters() {
-			const search = searchInput.value.toLowerCase();
-			const naicsFilter = filterNaics.value;
-			const dateFilter = filterDate.value;
-
-			filteredRows = rows.filter(row => {
-				const TITLE = row.cells[0]?.innerText.toLowerCase() || "";
-				const NAICS = row.cells[2]?.innerText.toLowerCase() || "";
-				const scrapedDate = row.dataset.scraped || "";
-
-				const matchesSearch = !search || TITLE.includes(search) || NAICS.includes(search);
-				const matchesNaics = !naicsFilter || NAICS === naicsFilter.toLowerCase();
-				const matchesDate = !dateFilter || scrapedDate === dateFilter;
-				return matchesSearch && matchesNaics && matchesDate;
-			});
-
-			totalCount.textContent = filteredRows.length;
-			currentPage = 1;
-			renderTable();
-		}
-
-		function renderTable() {
-			const limit = parseInt(showEntries.value);
-			const start = (currentPage - 1) * limit;
-			const end = start + limit;
-
-			rows.forEach(row => row.style.display = "none");
-			filteredRows.slice(start, end).forEach(row => row.style.display = "");
-
-			showingCount.textContent = filteredRows.slice(start, end).length;
-			prevPageBtn.disabled = currentPage === 1;
-			nextPageBtn.disabled = end >= filteredRows.length;
-		}
-
-		prevPageBtn.addEventListener("click", () => {
-			if (currentPage > 1) { currentPage--; renderTable(); }
-		});
-		nextPageBtn.addEventListener("click", () => {
-			const limit = parseInt(showEntries.value);
-			if (currentPage * limit < filteredRows.length) { currentPage++; renderTable(); }
+		searchInput.addEventListener("input", () => {
+			clearTimeout(searchSubmitTimer);
+			searchSubmitTimer = setTimeout(() => {
+				filtersForm.requestSubmit();
+			}, 300);
 		});
 
-		searchInput.addEventListener("input", applyFilters);
-		filterDate.addEventListener("change", applyFilters);
-		filterNaics.addEventListener("change", applyFilters);
-		showEntries.addEventListener("change", applyFilters);
-
-		applyFilters();
+		filterDate.addEventListener("change", () => filtersForm.requestSubmit());
+		filterNaics.addEventListener("change", () => filtersForm.requestSubmit());
+		showEntries.addEventListener("change", () => {
+			const pageInput = filtersForm.querySelector('input[name="page"]');
+			if (pageInput) {
+				pageInput.remove();
+			}
+			filtersForm.requestSubmit();
+		});
 
 		function switchTab(tab) {
 			document.getElementById('panelBids').style.display = tab === 'bids' ? '' : 'none';

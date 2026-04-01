@@ -14,12 +14,45 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class BidController extends Controller
 {
-	public function index()
+	public function index(Request $request)
 	{
-		$bids = Bid::latest('CREATED')->paginate(50);
+		$perPage = (int) $request->integer('per_page', 50);
+		if (!in_array($perPage, [5, 10, 25, 50, 100], true)) {
+			$perPage = 50;
+		}
+
+		$search = trim((string) $request->query('search', ''));
+		$filterDate = trim((string) $request->query('date', ''));
+		$filterNaics = trim((string) $request->query('naics', ''));
+
+		$query = Bid::query();
+
+		if ($search !== '') {
+			$query->where(function ($q) use ($search) {
+				$q->where('TITLE', 'like', "%{$search}%")
+					->orWhere('NAICSCODE', 'like', "%{$search}%")
+					->orWhere('URL', 'like', "%{$search}%");
+			});
+		}
+
+		if ($filterDate !== '') {
+			$query->whereDate('CREATED', $filterDate);
+		}
+
+		if ($filterNaics !== '') {
+			$query->where('NAICSCODE', $filterNaics);
+		}
+
+		$bids = $query->latest('CREATED')->paginate($perPage)->withQueryString();
+		$naicsCodes = Bid::query()
+			->whereNotNull('NAICSCODE')
+			->where('NAICSCODE', '!=', '')
+			->distinct()
+			->orderBy('NAICSCODE')
+			->pluck('NAICSCODE');
 		$issueCount = ScrapeLog::count();
 		$scrapeLogs = ScrapeLog::latest('created_at')->limit(200)->get();
-		return view('bids.index', compact('bids', 'issueCount', 'scrapeLogs'));
+		return view('bids.index', compact('bids', 'naicsCodes', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterNaics'));
 	}
 
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
@@ -213,8 +246,7 @@ class BidController extends Controller
 
 	public function scrapeAll(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
-		@set_time_limit(600);
-		@ini_set('max_execution_time', '600');
+		@set_time_limit(0);
 		@ini_set('memory_limit', '1G');
 
 		$today = \Carbon\Carbon::today();
@@ -279,25 +311,25 @@ class BidController extends Controller
 					$result['bid_pages'] ?? []
 				);
 
-			$rawHtml = $result['html'] ?? '';
-			$extractedJson = json_encode($extracted, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+				$rawHtml = $result['html'] ?? '';
+				$extractedJson = json_encode($extracted, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-			$today = \Carbon\Carbon::today();
-			$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
-				if (!empty($bid['ENDDATE'])) {
-					try {
-						$end = \Carbon\Carbon::parse($bid['ENDDATE']);
-						if ($end->lt($today)) {
+				$today = \Carbon\Carbon::today();
+				$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
+					if (!empty($bid['ENDDATE'])) {
+						try {
+							$end = \Carbon\Carbon::parse($bid['ENDDATE']);
+							if ($end->lt($today)) {
+								return false;
+							}
+						} catch (\Exception $e) {
 							return false;
 						}
-					} catch (\Exception $e) {
-						return false;
 					}
-				}
-				return true;
-			})->values();
+					return true;
+				})->values();
 
-			$savedThisUrl = 0;
+				$savedThisUrl = 0;
 				$duplicatesThisUrl = 0;
 				$nonBidsThisUrl = 0;
 
@@ -350,25 +382,25 @@ class BidController extends Controller
 						continue;
 					}
 
-				$bid = new Bid();
-				$bid->URL = $detailUrl;
-				$bid->TITLE = $title;
-				$bid->ENDDATE = $endDate;
-				$bid->NAICSCODE = $this->normalizeNaicsCode(
-					$bidData['NAICSCODE'] ?? null,
-					$description,
-					$title,
-					$url
-				);
-				$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
-				$bid->CREATED = now();
-				$bid->LAST_MODIFIED = now();
-				$bid->BID_URL_ID = $bidUrl->id;
-				$bid->raw_html = $rawHtml;
-				$bid->extracted_json = $extractedJson;
-				$bid->save();
+					$bid = new Bid();
+					$bid->URL = $detailUrl;
+					$bid->TITLE = $title;
+					$bid->ENDDATE = $endDate;
+					$bid->NAICSCODE = $this->normalizeNaicsCode(
+						$bidData['NAICSCODE'] ?? null,
+						$description,
+						$title,
+						$url
+					);
+					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
+					$bid->CREATED = now();
+					$bid->LAST_MODIFIED = now();
+					$bid->BID_URL_ID = $bidUrl->id;
+					$bid->raw_html = $rawHtml;
+					$bid->extracted_json = $extractedJson;
+					$bid->save();
 
-				$savedThisUrl++;
+					$savedThisUrl++;
 				}
 
 				$totalSaved += $savedThisUrl;
@@ -436,8 +468,7 @@ class BidController extends Controller
 
 	public function scrapeStream(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
-		@set_time_limit(600);
-		@ini_set('max_execution_time', '600');
+		@set_time_limit(0);
 		@ini_set('memory_limit', '1G');
 
 		if (session()->isStarted()) {
@@ -447,7 +478,8 @@ class BidController extends Controller
 		return new StreamedResponse(function () use ($scraper, $ai) {
 			$send = function ($data) {
 				echo "data: " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
-				if (ob_get_level()) ob_flush();
+				if (ob_get_level())
+					ob_flush();
 				flush();
 			};
 
@@ -511,8 +543,12 @@ class BidController extends Controller
 					}
 
 					$extracted = $ai->extract(
-						$url, $result['html'], $result['text'],
-						$result['pdf_bids'] ?? [], $result['pdf_text'] ?? '', $result['bid_pages'] ?? []
+						$url,
+						$result['html'],
+						$result['text'],
+						$result['pdf_bids'] ?? [],
+						$result['pdf_text'] ?? '',
+						$result['bid_pages'] ?? []
 					);
 
 					$rawHtml = $result['html'] ?? '';
@@ -521,7 +557,11 @@ class BidController extends Controller
 					$today = \Carbon\Carbon::today();
 					$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
 						if (!empty($bid['ENDDATE'])) {
-							try { return !\Carbon\Carbon::parse($bid['ENDDATE'])->lt($today); } catch (\Exception $e) { return false; }
+							try {
+								return !\Carbon\Carbon::parse($bid['ENDDATE'])->lt($today);
+							} catch (\Exception $e) {
+								return false;
+							}
 						}
 						return true;
 					})->values();
@@ -536,7 +576,8 @@ class BidController extends Controller
 
 					foreach ($filteredBids as $bidData) {
 						$rawTitle = $bidData['TITLE'] ?? null;
-						if (!$rawTitle) continue;
+						if (!$rawTitle)
+							continue;
 						$title = $titleMap[$rawTitle] ?? $rawTitle;
 
 						$detailUrl = trim((string) ($bidData['URL'] ?? $url));
@@ -546,18 +587,29 @@ class BidController extends Controller
 						$exists = Bid::where('TITLE', $title)
 							->where(function ($q) use ($detailUrl, $endDate) {
 								$q->where('URL', $detailUrl);
-								if ($endDate) { $q->orWhere('ENDDATE', $endDate); }
+								if ($endDate) {
+									$q->orWhere('ENDDATE', $endDate);
+								}
 							})->exists();
 
-						if ($exists) { $duplicatesThisUrl++; continue; }
+						if ($exists) {
+							$duplicatesThisUrl++;
+							continue;
+						}
 
 						$description = $bidData['DESCRIPTION'] ?? '';
-						if (is_array($description)) $description = $this->formatDescriptionArray($description);
+						if (is_array($description))
+							$description = $this->formatDescriptionArray($description);
 						$description = $this->stripNotProvidedLines($description);
-						if (empty($description) && !empty($result['pdf_text'])) $description = $result['pdf_text'];
-						if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) $description = $result['pdf_bids'][0]['PDF_LINK'];
+						if (empty($description) && !empty($result['pdf_text']))
+							$description = $result['pdf_text'];
+						if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? ''))
+							$description = $result['pdf_bids'][0]['PDF_LINK'];
 
-						if (!$this->looksLikeBid($title, $description, $url, $endDate)) { $nonBidsThisUrl++; continue; }
+						if (!$this->looksLikeBid($title, $description, $url, $endDate)) {
+							$nonBidsThisUrl++;
+							continue;
+						}
 
 						$bid = new Bid();
 						$bid->URL = $detailUrl;
@@ -847,9 +899,30 @@ class BidController extends Controller
 		}
 
 		$validTwoDigit = [
-			'11', '21', '22', '23', '31', '32', '33', '42', '44', '45',
-			'48', '49', '51', '52', '53', '54', '55', '56', '61', '62',
-			'71', '72', '81', '92',
+			'11',
+			'21',
+			'22',
+			'23',
+			'31',
+			'32',
+			'33',
+			'42',
+			'44',
+			'45',
+			'48',
+			'49',
+			'51',
+			'52',
+			'53',
+			'54',
+			'55',
+			'56',
+			'61',
+			'62',
+			'71',
+			'72',
+			'81',
+			'92',
 		];
 
 		if (!in_array(substr($code, 0, 2), $validTwoDigit, true)) {
@@ -906,7 +979,7 @@ class BidController extends Controller
 			return 'The site took too long to respond. Please try again later.';
 		}
 		if (str_contains($message, 'ssl') || str_contains($message, 'certificate')) {
-				return 'We could not establish a secure connection to this site. Please verify the link or try another URL.';
+			return 'We could not establish a secure connection to this site. Please verify the link or try another URL.';
 		}
 
 		return 'Failed to scrape this URL. ' . $rawMessage;

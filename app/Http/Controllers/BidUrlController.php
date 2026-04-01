@@ -65,9 +65,9 @@ class BidUrlController extends Controller
     /**
      * Show all BidUrl records.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $perPage = (int) request('per_page', 50);
+        $perPage = (int) $request->integer('per_page', 50);
         if ($perPage < 5) {
             $perPage = 5;
         }
@@ -75,8 +75,19 @@ class BidUrlController extends Controller
             $perPage = 200;
         }
 
-        $bidUrls = BidUrl::paginate($perPage)->withQueryString();
-        return view('bidurl.index', compact('bidUrls'));
+        $search = trim((string) $request->query('search', ''));
+
+        $query = BidUrl::query();
+
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('url', 'like', "%{$search}%")
+                    ->orWhere('name', 'like', "%{$search}%");
+            });
+        }
+
+        $bidUrls = $query->paginate($perPage)->withQueryString();
+        return view('bidurl.index', compact('bidUrls', 'search'));
     }
 
     /**
