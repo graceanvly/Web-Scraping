@@ -48,6 +48,7 @@ Open http://127.0.0.1:8000 and submit a bidding URL.
 ### Notes
 - If `OPENAI_API_KEY` is empty, the app will still save the raw HTML but fields may be null.
 - Data stored in table `bids` includes `raw_html` and `extracted_json` for auditing.
+- For sites restricted by geolocation, firewall, or IP allowlisting, configure `SCRAPER_PROXY` so requests go through an approved outbound proxy or gateway. The scraper is intended to use an authorized network path, not bypass site controls.
 
 ### Login
 

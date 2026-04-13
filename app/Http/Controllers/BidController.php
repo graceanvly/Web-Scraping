@@ -687,6 +687,17 @@ class BidController extends Controller
 		return redirect()->route('bids.index')->with('success', 'All issues cleared.');
 	}
 
+	public function destroyIssue(Request $request, ScrapeLog $scrapeLog)
+	{
+		$scrapeLog->delete();
+
+		if ($request->expectsJson()) {
+			return response()->json(['ok' => true]);
+		}
+
+		return redirect()->route('scrape.issues')->with('success', 'Issue deleted.');
+	}
+
 	public function update(Request $request, Bid $bid)
 	{
 		$validated = $request->validate([

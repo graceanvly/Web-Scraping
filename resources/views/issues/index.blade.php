@@ -4,6 +4,7 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="csrf-token" content="{{ csrf_token() }}">
 	<title>Scrape Issues - Bid Scraper</title>
 	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 	<style>
@@ -26,6 +27,7 @@
 		.issues-table th:nth-child(2), .issues-table td:nth-child(2) { width: 30%; }
 		.issues-table th:nth-child(3), .issues-table td:nth-child(3) { width: 40%; }
 		.issues-table th:nth-child(4), .issues-table td:nth-child(4) { width: 190px; }
+		.issues-table th:nth-child(5), .issues-table td:nth-child(5) { width: 110px; }
 		thead { background: #f0f2f5; font-weight: 600; color: #1d4ed8; }
 		tbody tr:nth-child(even) { background: #fafafa; }
 		tbody tr:hover { background: #f1f5f9; }
@@ -43,12 +45,24 @@
 		.url-link { color:#2563eb; display:inline-block; max-width:100%; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
 		.pagination-links { margin-top: 1rem; }
 		.pagination-links nav { margin-bottom: 0; }
+		.issue-delete-btn {
+			padding: 0.15rem 0.45rem;
+			min-width: auto;
+			line-height: 1;
+			font-size: 0.85rem;
+			border-radius: 999px;
+			border: 1px solid #fecaca;
+			background: #fff5f5;
+			color: #b91c1c;
+		}
+		.issue-delete-btn:hover { background: #fee2e2; }
 
 		@media (max-width: 768px) {
 			table { font-size: 0.75rem; }
 			th, td { padding: 0.4rem 0.5rem; }
 			.issues-table th:nth-child(1), .issues-table td:nth-child(1) { width: 96px; }
 			.issues-table th:nth-child(4), .issues-table td:nth-child(4) { width: 150px; }
+			.issues-table th:nth-child(5), .issues-table td:nth-child(5) { width: 92px; }
 		}
 	</style>
 </head>
@@ -75,24 +89,25 @@
 
 		<section class="card">
 			@if ($logs->total() === 0)
-				<p style="color:#6b7280; text-align:center; padding:2rem 0;">No issues recorded.</p>
+				<p id="issuesEmptyState" style="color:#6b7280; text-align:center; padding:2rem 0;">No issues recorded.</p>
 			@else
-				<p style="color:#6b7280; font-size:0.85rem; margin-bottom:0.75rem;">
+				<p id="issuesCountLabel" style="color:#6b7280; font-size:0.85rem; margin-bottom:0.75rem;">
 					Showing {{ $logs->firstItem() }}-{{ $logs->lastItem() }} of {{ $logs->total() }} issue(s)
 				</p>
-				<div style="overflow-x:auto;">
-					<table class="issues-table">
+				<div id="issuesTableWrap" style="overflow-x:auto;">
+					<table id="issuesTable" class="issues-table">
 						<thead>
 							<tr>
 								<th>Level</th>
 								<th>URL</th>
 								<th>Message</th>
 								<th>Date</th>
+								<th></th>
 							</tr>
 						</thead>
 						<tbody>
 							@foreach ($logs as $log)
-								<tr>
+								<tr class="issue-row" data-issue-id="{{ $log->id }}">
 									<td>
 										<span class="badge badge-{{ $log->level }}">{{ $log->level }}</span>
 									</td>
@@ -102,6 +117,13 @@
 									<td class="msg-cell">{{ $log->message }}</td>
 									<td style="white-space:nowrap; font-size:0.85rem; color:#6b7280;">
 										{{ $log->created_at->format('M d, Y h:i A') }}
+									</td>
+									<td>
+										<form method="POST" action="{{ route('scrape.destroyIssue', $log) }}" class="issue-delete-form" style="margin:0;">
+											@csrf
+											@method('DELETE')
+											<button type="submit" class="issue-delete-btn" aria-label="Delete issue" title="Delete issue">X</button>
+										</form>
 									</td>
 								</tr>
 							@endforeach
@@ -115,6 +137,67 @@
 			@endif
 		</section>
 	</main>
+	<script>
+		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+		function updateIssueUiAfterDelete() {
+			const remainingRows = document.querySelectorAll('.issue-row').length;
+			const countLabel = document.getElementById('issuesCountLabel');
+			const tableWrap = document.getElementById('issuesTableWrap');
+			let emptyState = document.getElementById('issuesEmptyState');
+
+			if (countLabel) {
+				countLabel.textContent = `${remainingRows} issue(s)`;
+			}
+
+			if (remainingRows === 0) {
+				tableWrap?.remove();
+				countLabel?.remove();
+
+				if (!emptyState) {
+					emptyState = document.createElement('p');
+					emptyState.id = 'issuesEmptyState';
+					emptyState.style.color = '#6b7280';
+					emptyState.style.textAlign = 'center';
+					emptyState.style.padding = '2rem 0';
+					emptyState.textContent = 'No issues recorded.';
+					document.querySelector('.card')?.appendChild(emptyState);
+				}
+			}
+		}
+
+		document.addEventListener('submit', async function (event) {
+			const form = event.target.closest('.issue-delete-form');
+			if (!form) return;
+
+			event.preventDefault();
+
+			const row = form.closest('.issue-row');
+			const button = form.querySelector('button[type="submit"]');
+			if (button) button.disabled = true;
+
+			try {
+				const response = await fetch(form.action, {
+					method: 'POST',
+					headers: {
+						'X-CSRF-TOKEN': csrfToken,
+						'X-Requested-With': 'XMLHttpRequest',
+						'Accept': 'application/json',
+					},
+					body: new FormData(form),
+				});
+
+				if (!response.ok) {
+					throw new Error('Delete failed');
+				}
+
+				row?.remove();
+				updateIssueUiAfterDelete();
+			} catch (error) {
+				if (button) button.disabled = false;
+			}
+		});
+	</script>
 </body>
 
 </html>

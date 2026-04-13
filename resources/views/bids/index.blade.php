@@ -4,6 +4,7 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="csrf-token" content="{{ csrf_token() }}">
 	<title>Bid Scraper</title>
 	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 	<style>
@@ -266,6 +267,10 @@
 		.issues-table td:nth-child(4) {
 			width: 190px;
 		}
+		.issues-table th:nth-child(5),
+		.issues-table td:nth-child(5) {
+			width: 110px;
+		}
 		.issues-url-link {
 			color: #2563eb;
 			display: inline-block;
@@ -277,6 +282,17 @@
 		.issue-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 		.issue-warning { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
 		.issue-success { background: #ecfdf3; color: #166534; border: 1px solid #bbf7d0; }
+		.issue-delete-btn {
+			padding: 0.15rem 0.45rem;
+			min-width: auto;
+			line-height: 1;
+			font-size: 0.85rem;
+			border-radius: 999px;
+			border: 1px solid #fecaca;
+			background: #fff5f5;
+			color: #b91c1c;
+		}
+		.issue-delete-btn:hover { background: #fee2e2; }
 
 		/* Responsive table for mobile */
 		@media (max-width: 768px) {
@@ -544,11 +560,11 @@
 	<!-- Issues Tab -->
 	<section id="panelIssues" class="card" style="display:none; border-top-left-radius:0;">
 		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-			<span style="color:#6b7280; font-size:0.85rem;">
+			<span id="issuesCountLabel" style="color:#6b7280; font-size:0.85rem;">
 				{{ $issueCount ?? 0 }} issue(s) recorded
 			</span>
 			@if (($issueCount ?? 0) > 0)
-				<form method="POST" action="{{ route('scrape.clearIssues') }}" onsubmit="return confirm('Clear all issues?')">
+				<form id="clearIssuesForm" method="POST" action="{{ route('scrape.clearIssues') }}" onsubmit="return confirm('Clear all issues?')">
 					@csrf
 					@method('DELETE')
 					<button type="submit" class="outline contrast" style="padding:0.4rem 0.8rem; font-size:0.8rem;">Clear All</button>
@@ -557,21 +573,22 @@
 		</div>
 
 		@if (($issueCount ?? 0) === 0)
-			<p style="color:#6b7280; text-align:center; padding:2rem 0;">No issues recorded.</p>
+			<p id="issuesEmptyState" style="color:#6b7280; text-align:center; padding:2rem 0;">No issues recorded.</p>
 		@else
-			<div style="overflow-x:auto;">
-				<table class="issues-table">
+			<div id="issuesTableWrap" style="overflow-x:auto;">
+				<table id="issuesTable" class="issues-table">
 					<thead>
 						<tr>
 							<th>Level</th>
 							<th>URL</th>
 							<th>Message</th>
 							<th>Date</th>
+							<th></th>
 						</tr>
 					</thead>
 					<tbody>
 						@foreach ($scrapeLogs as $log)
-							<tr>
+							<tr class="issue-row" data-issue-id="{{ $log->id }}">
 								<td>
 									<span class="issue-badge issue-{{ $log->level }}">{{ $log->level }}</span>
 								</td>
@@ -581,6 +598,13 @@
 								<td style="font-size:0.85rem;">{{ $log->message }}</td>
 								<td style="white-space:nowrap; font-size:0.85rem; color:#6b7280;">
 									{{ $log->created_at->format('M d, Y h:i A') }}
+								</td>
+								<td>
+									<form method="POST" action="{{ route('scrape.destroyIssue', $log) }}" class="issue-delete-form" style="margin:0;">
+										@csrf
+										@method('DELETE')
+										<button type="submit" class="issue-delete-btn" aria-label="Delete issue" title="Delete issue">X</button>
+									</form>
 								</td>
 							</tr>
 						@endforeach
@@ -669,6 +693,7 @@
 	@endphp
 	<script>
 		const bidsData = @json($bidsModalData);
+		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
 		document.addEventListener('click', function(e) {
 			const link = e.target.closest('.bid-detail-link');
@@ -780,6 +805,74 @@
 			document.getElementById('tabBids').classList.toggle('tab-active', tab === 'bids');
 			document.getElementById('tabIssues').classList.toggle('tab-active', tab === 'issues');
 		}
+
+		function updateIssueUiAfterDelete() {
+			const remainingRows = document.querySelectorAll('#panelIssues .issue-row').length;
+			const countLabel = document.getElementById('issuesCountLabel');
+			const tabBadge = document.querySelector('#tabIssues .tab-badge');
+			const tableWrap = document.getElementById('issuesTableWrap');
+			const clearForm = document.getElementById('clearIssuesForm');
+			let emptyState = document.getElementById('issuesEmptyState');
+
+			if (countLabel) {
+				countLabel.textContent = `${remainingRows} issue(s) recorded`;
+			}
+
+			if (tabBadge) {
+				if (remainingRows > 0) {
+					tabBadge.textContent = String(remainingRows);
+				} else {
+					tabBadge.remove();
+				}
+			}
+
+			if (remainingRows === 0) {
+				tableWrap?.remove();
+				clearForm?.remove();
+
+				if (!emptyState) {
+					emptyState = document.createElement('p');
+					emptyState.id = 'issuesEmptyState';
+					emptyState.style.color = '#6b7280';
+					emptyState.style.textAlign = 'center';
+					emptyState.style.padding = '2rem 0';
+					emptyState.textContent = 'No issues recorded.';
+					document.getElementById('panelIssues')?.appendChild(emptyState);
+				}
+			}
+		}
+
+		document.addEventListener('submit', async function (event) {
+			const form = event.target.closest('.issue-delete-form');
+			if (!form) return;
+
+			event.preventDefault();
+
+			const row = form.closest('.issue-row');
+			const button = form.querySelector('button[type="submit"]');
+			if (button) button.disabled = true;
+
+			try {
+				const response = await fetch(form.action, {
+					method: 'POST',
+					headers: {
+						'X-CSRF-TOKEN': csrfToken,
+						'X-Requested-With': 'XMLHttpRequest',
+						'Accept': 'application/json',
+					},
+					body: new FormData(form),
+				});
+
+				if (!response.ok) {
+					throw new Error('Delete failed');
+				}
+
+				row?.remove();
+				updateIssueUiAfterDelete();
+			} catch (error) {
+				if (button) button.disabled = false;
+			}
+		});
 
 		function startScrapeAll() {
 			const btn = document.getElementById('scrapeAllBtn');

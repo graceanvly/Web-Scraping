@@ -33,6 +33,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/scrape-stream', [BidController::class, 'scrapeStream'])->name('bidurl.scrapeStream');
     Route::get('/issues', [BidController::class, 'issues'])->name('scrape.issues');
     Route::delete('/issues', [BidController::class, 'clearIssues'])->name('scrape.clearIssues');
+    Route::delete('/issues/{scrapeLog}', [BidController::class, 'destroyIssue'])->name('scrape.destroyIssue');
 
     Route::get('/bidurl/upload', [BidUrlController::class, 'create'])->name('bidurl.create');
     Route::post('/bidurl/upload', [BidUrlController::class, 'store'])->name('bidurl.store');
