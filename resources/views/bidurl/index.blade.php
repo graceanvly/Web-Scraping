@@ -490,6 +490,71 @@
 				{{ $bidUrls->links('pagination.bidurl') }}
 			</div>
 		</section>
+
+		<section class="card">
+			<div class="section-header">
+				<div class="section-title">
+					<h2 style="margin:0;">Scrape Failed URLs</h2>
+					<span class="badge">{{ $failedCount }} total</span>
+				</div>
+			</div>
+			<div class="table-wrapper">
+				<table>
+					<thead>
+						<tr>
+							<th>URL</th>
+							<th>Name</th>
+							<th>Last Error</th>
+							<th>Failed At</th>
+							<th>Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						@forelse ($failedBidUrls as $bidUrl)
+							<tr>
+								<td><a href="{{ $bidUrl->url }}" target="_blank" rel="noreferrer">{{ $bidUrl->url }}</a></td>
+								<td>{{ $bidUrl->name ?? '-' }}</td>
+								<td>{{ $bidUrl->failure_message ?? '-' }}</td>
+								<td>
+									@if ($bidUrl->failed_at)
+										<span style="color:#b91c1c; font-size:0.9rem;">
+											{{ $bidUrl->failed_at->format('M d, Y g:i A') }}
+										</span>
+									@else
+										<span style="color:#9ca3af; font-size:0.9rem;">-</span>
+									@endif
+								</td>
+								<td>
+									<div class="actions">
+										<button class="btn btn-secondary" type="button" onclick='openDetails(@json($bidUrl))'>View</button>
+										<form method="POST" action="{{ route('failed-bidurl.restore', $bidUrl) }}" onsubmit="return confirm('Restore this failed URL to the Bid URL list?')" style="display:inline-flex;">
+											@csrf
+											<button class="btn btn-secondary" type="submit">Restore</button>
+										</form>
+										<form method="POST" action="{{ route('failed-bidurl.destroy', $bidUrl) }}" onsubmit="return confirm('Delete this failed URL?')" style="display:inline-flex;">
+											@csrf
+											@method('DELETE')
+											<button class="btn btn-primary" type="submit">Delete</button>
+										</form>
+									</div>
+								</td>
+							</tr>
+						@empty
+							<tr>
+								<td colspan="5" style="text-align:center; color:#6b7280;">No failed scrape URLs.</td>
+							</tr>
+						@endforelse
+					</tbody>
+				</table>
+			</div>
+
+			@if ($failedCount > 0)
+				<div class="footer-bar">
+					<div>Showing {{ $failedBidUrls->count() }} of {{ $failedBidUrls->total() }} failed entries</div>
+					{{ $failedBidUrls->links('pagination.bidurl') }}
+				</div>
+			@endif
+		</section>
 	</main>
 
 	<dialog id="detailsModal">
@@ -575,6 +640,10 @@
 		}
 
 		function openDetails(bidUrl) {
+			const failureFields = bidUrl.failure_message ? `
+          <li><strong>Failure Message:</strong> ${bidUrl.failure_message}</li>
+          <li><strong>Failed At:</strong> ${bidUrl.failed_at ? bidUrl.failed_at : '&mdash;'}</li>
+      ` : '';
 			detailsContent.innerHTML = `
         <ul>
           <li><strong>URL:</strong> <a href="${bidUrl.url}" target="_blank" rel="noreferrer">${bidUrl.url}</a></li>
@@ -588,6 +657,7 @@
           <li><strong>Visit Required:</strong> ${bidUrl.visit_required ? bidUrl.visit_required : '&mdash;'}</li>
           <li><strong>Checksum:</strong> ${bidUrl.checksum ? bidUrl.checksum : '&mdash;'}</li>
           <li><strong>Third Party URL ID:</strong> ${bidUrl.third_party_url_id ? bidUrl.third_party_url_id : '&mdash;'}</li>
+          ${failureFields}
         </ul>
       `;
 			detailsModal.showModal();

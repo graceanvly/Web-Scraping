@@ -42,4 +42,6 @@ Route::middleware('auth')->group(function () {
     Route::get('/bidurl/{bidUrl}', [BidUrlController::class, 'show'])->name('bidurl.show');
     Route::put('/bidurl/{bidUrl}', [BidUrlController::class, 'update'])->name('bidurl.update');
     Route::delete('/bidurl/{bidUrl}', [BidUrlController::class, 'destroy'])->name('bidurl.destroy');
+    Route::post('/failed-bidurl/{failedBidUrl}/restore', [BidUrlController::class, 'restoreFailed'])->name('failed-bidurl.restore');
+    Route::delete('/failed-bidurl/{failedBidUrl}', [BidUrlController::class, 'destroyFailed'])->name('failed-bidurl.destroy');
 });

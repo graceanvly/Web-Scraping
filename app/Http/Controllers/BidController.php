@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Bid;
 use App\Models\BidUrl;
+use App\Models\FailedBidUrl;
 use App\Models\ScrapeLog;
 use App\Services\AIExtractor;
 use App\Services\ScraperService;
@@ -281,6 +282,7 @@ class BidController extends Controller
 				if (!empty($result['blocked'])) {
 					$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
 					$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by geolocation/firewall.' . $reason);
+					$this->moveBidUrlToFailed($bidUrl, 'Blocked by geolocation/firewall.' . $reason);
 					$scrapeIssues[] = "{$url} - blocked by geolocation/firewall." . $reason;
 					continue;
 				}
@@ -291,6 +293,7 @@ class BidController extends Controller
 				}
 				if (empty($result['html']) && empty($result['pdf_bids']) && empty($result['bid_pages'])) {
 					$this->logIssue($bidUrl->id, $url, 'error', 'Page content could not be read.');
+					$this->moveBidUrlToFailed($bidUrl, 'Page content could not be read.');
 					$scrapeIssues[] = "{$url} - page content could not be read.";
 					continue;
 				}
@@ -428,6 +431,9 @@ class BidController extends Controller
 					'trace' => $e->getTraceAsString(),
 				]);
 				$this->logIssue($bidUrl->id ?? null, $url ?? 'unknown', 'error', $this->friendlyExceptionMessage($e));
+				if (isset($bidUrl) && $bidUrl instanceof BidUrl) {
+					$this->moveBidUrlToFailed($bidUrl, $this->friendlyExceptionMessage($e));
+				}
 				$failedUrls[] = $url;
 				$scrapeIssues[] = "{$url} - " . $this->friendlyExceptionMessage($e);
 			}
@@ -523,6 +529,7 @@ class BidController extends Controller
 					if (!empty($result['blocked'])) {
 						$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
 						$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by geolocation/firewall.' . $reason);
+						$this->moveBidUrlToFailed($bidUrl, 'Blocked by geolocation/firewall.' . $reason);
 						$totalIssues++;
 						$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => 'Blocked by site']);
 						continue;
@@ -537,6 +544,7 @@ class BidController extends Controller
 					}
 					if (empty($result['html']) && empty($result['pdf_bids']) && empty($result['bid_pages'])) {
 						$this->logIssue($bidUrl->id, $url, 'error', 'Page content could not be read.');
+						$this->moveBidUrlToFailed($bidUrl, 'Page content could not be read.');
 						$totalIssues++;
 						$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => 'Could not read content']);
 						continue;
@@ -644,6 +652,7 @@ class BidController extends Controller
 				} catch (\Throwable $e) {
 					Log::error('Scrape failed for URL: ' . $url, ['error' => $e->getMessage()]);
 					$this->logIssue($bidUrl->id, $url, 'error', $this->friendlyExceptionMessage($e));
+					$this->moveBidUrlToFailed($bidUrl, $this->friendlyExceptionMessage($e));
 					$totalIssues++;
 					$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => $this->friendlyExceptionMessage($e)]);
 				}
@@ -673,6 +682,36 @@ class BidController extends Controller
 			'message' => $message,
 			'created_at' => now(),
 		]);
+	}
+
+	private function moveBidUrlToFailed(BidUrl $bidUrl, string $message): void
+	{
+		$failedBidUrl = FailedBidUrl::firstOrNew([
+			'url' => $bidUrl->url,
+		]);
+
+		$failedBidUrl->fill([
+			'original_bid_url_id' => $bidUrl->id,
+			'url' => $bidUrl->url,
+			'name' => $bidUrl->name,
+			'start_time' => $bidUrl->start_time,
+			'end_time' => $bidUrl->end_time,
+			'weight' => $bidUrl->weight,
+			'user_id' => $bidUrl->user_id,
+			'check_changes' => $bidUrl->check_changes,
+			'visit_required' => $bidUrl->visit_required,
+			'checksum' => $bidUrl->checksum,
+			'valid' => $bidUrl->valid,
+			'third_party_url_id' => $bidUrl->third_party_url_id,
+			'username' => $bidUrl->username,
+			'password' => $bidUrl->password,
+			'last_scraped_at' => $bidUrl->last_scraped_at,
+			'failure_message' => $message,
+			'failed_at' => now(),
+		]);
+		$failedBidUrl->save();
+
+		$bidUrl->delete();
 	}
 
 	public function issues()

@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\BidUrl;
+use App\Models\FailedBidUrl;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 class BidUrlController extends Controller
 {
@@ -38,9 +38,7 @@ class BidUrlController extends Controller
             $urlValue = trim($fields[0]);
             $nameValue = trim($fields[1]);
 
-            if (BidUrl::where('url', $urlValue)
-                ->orWhere('name', $nameValue)
-                ->exists()) {
+            if ($this->urlOrNameExists($urlValue, $nameValue)) {
                 continue; // skip duplicates by url or name
             }
 
@@ -77,17 +75,30 @@ class BidUrlController extends Controller
 
         $search = trim((string) $request->query('search', ''));
 
-        $query = BidUrl::query();
+        $query = BidUrl::query()->orderBy('id');
+        $failedQuery = FailedBidUrl::query()->orderByDesc('failed_at')->orderByDesc('id');
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
                 $q->where('url', 'like', "%{$search}%")
                     ->orWhere('name', 'like', "%{$search}%");
             });
+            $failedQuery->where(function ($q) use ($search) {
+                $q->where('url', 'like', "%{$search}%")
+                    ->orWhere('name', 'like', "%{$search}%")
+                    ->orWhere('failure_message', 'like', "%{$search}%");
+            });
         }
 
-        $bidUrls = $query->paginate($perPage)->withQueryString();
-        return view('bidurl.index', compact('bidUrls', 'search'));
+        $bidUrls = $query->paginate($perPage, ['*'], 'page')->withQueryString();
+        $failedBidUrls = $failedQuery->paginate($perPage, ['*'], 'failed_page')->withQueryString();
+
+        return view('bidurl.index', [
+            'bidUrls' => $bidUrls,
+            'failedBidUrls' => $failedBidUrls,
+            'search' => $search,
+            'failedCount' => $failedBidUrls->total(),
+        ]);
     }
 
     /**
@@ -101,13 +112,11 @@ class BidUrlController extends Controller
                 'url',
                 'max:2048',
                 'regex:/^https?:\\/\\//i',
-                Rule::unique('bid_url', 'url'),
             ],
             'name' => [
                 'nullable',
                 'string',
                 'max:255',
-                Rule::unique('bid_url', 'name'),
             ],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:255'],
@@ -118,6 +127,8 @@ class BidUrlController extends Controller
             'url.unique' => 'This URL is already in the list.',
             'name.unique' => 'This name is already in the list.',
         ]);
+
+        $this->ensureUrlAndNameAreAvailable($data['url'], $data['name'] ?? null);
 
         BidUrl::create($data);
 
@@ -135,13 +146,11 @@ class BidUrlController extends Controller
                 'url',
                 'max:2048',
                 'regex:/^https?:\\/\\//i',
-                Rule::unique('bid_url', 'url')->ignore($bidUrl->id),
             ],
             'name' => [
                 'nullable',
                 'string',
                 'max:255',
-                Rule::unique('bid_url', 'name')->ignore($bidUrl->id),
             ],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:255'],
@@ -152,6 +161,8 @@ class BidUrlController extends Controller
             'url.unique' => 'This URL is already in the list.',
             'name.unique' => 'This name is already in the list.',
         ]);
+
+        $this->ensureUrlAndNameAreAvailable($data['url'], $data['name'] ?? null, $bidUrl->id);
 
         $bidUrl->update($data);
 
@@ -176,5 +187,88 @@ class BidUrlController extends Controller
         return view('bidurl.show', compact('bidUrl'));
     }
 
-    
+    public function restoreFailed(FailedBidUrl $failedBidUrl)
+    {
+        $this->ensureUrlAndNameAreAvailable($failedBidUrl->url, $failedBidUrl->name, null, $failedBidUrl->id);
+
+        BidUrl::create([
+            'url' => $failedBidUrl->url,
+            'name' => $failedBidUrl->name,
+            'start_time' => $failedBidUrl->start_time,
+            'end_time' => $failedBidUrl->end_time,
+            'weight' => $failedBidUrl->weight,
+            'user_id' => $failedBidUrl->user_id,
+            'check_changes' => $failedBidUrl->check_changes,
+            'visit_required' => $failedBidUrl->visit_required,
+            'checksum' => $failedBidUrl->checksum,
+            'valid' => $failedBidUrl->valid,
+            'third_party_url_id' => $failedBidUrl->third_party_url_id,
+            'username' => $failedBidUrl->username,
+            'password' => $failedBidUrl->password,
+            'last_scraped_at' => $failedBidUrl->last_scraped_at,
+        ]);
+
+        $failedBidUrl->delete();
+
+        return redirect()->route('bidurl.index')->with('success', 'Failed URL restored to Bid URLs.');
+    }
+
+    public function destroyFailed(FailedBidUrl $failedBidUrl)
+    {
+        $failedBidUrl->delete();
+
+        return redirect()->route('bidurl.index')->with('success', 'Failed URL deleted.');
+    }
+
+    private function ensureUrlAndNameAreAvailable(string $url, ?string $name = null, ?int $ignoreBidUrlId = null, ?int $ignoreFailedBidUrlId = null): void
+    {
+        if ($this->urlExists($url, $ignoreBidUrlId, $ignoreFailedBidUrlId)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'url' => 'This URL already exists in the active or failed URL list.',
+            ]);
+        }
+
+        if ($name !== null && $name !== '') {
+            if ($this->nameExists($name, $ignoreBidUrlId, $ignoreFailedBidUrlId)) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'name' => 'This name already exists in the active or failed URL list.',
+                ]);
+            }
+        }
+    }
+
+    private function urlOrNameExists(string $url, ?string $name = null): bool
+    {
+        return $this->urlExists($url) || ($name !== null && $name !== '' && $this->nameExists($name));
+    }
+
+    private function urlExists(string $url, ?int $ignoreBidUrlId = null, ?int $ignoreFailedBidUrlId = null): bool
+    {
+        $activeUrlQuery = BidUrl::where('url', $url);
+        if ($ignoreBidUrlId) {
+            $activeUrlQuery->where('id', '!=', $ignoreBidUrlId);
+        }
+
+        $failedUrlQuery = FailedBidUrl::where('url', $url);
+        if ($ignoreFailedBidUrlId) {
+            $failedUrlQuery->where('id', '!=', $ignoreFailedBidUrlId);
+        }
+
+        return $activeUrlQuery->exists() || $failedUrlQuery->exists();
+    }
+
+    private function nameExists(string $name, ?int $ignoreBidUrlId = null, ?int $ignoreFailedBidUrlId = null): bool
+    {
+        $activeNameQuery = BidUrl::where('name', $name);
+        if ($ignoreBidUrlId) {
+            $activeNameQuery->where('id', '!=', $ignoreBidUrlId);
+        }
+
+        $failedNameQuery = FailedBidUrl::where('name', $name);
+        if ($ignoreFailedBidUrlId) {
+            $failedNameQuery->where('id', '!=', $ignoreFailedBidUrlId);
+        }
+
+        return $activeNameQuery->exists() || $failedNameQuery->exists();
+    }
 }
