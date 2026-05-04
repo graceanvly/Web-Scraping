@@ -11,7 +11,7 @@ class Bid extends Model
 
 	protected $table = "bid";
 	public $timestamps = false;
-	protected $primaryKey = 'ID';
+	protected $primaryKey = 'id';
 	protected $fillable = [
 		'TITLE',
 		'DESCRIPTION',
@@ -47,4 +47,29 @@ class Bid extends Model
 		'CREATED' => 'datetime',
 		'LAST_MODIFIED' => 'datetime',
 	];
+
+	/**
+	 * Case-insensitive attribute access so both Oracle (lowercase)
+	 * and MySQL (uppercase) column names resolve correctly.
+	 */
+	public function getAttribute($key)
+	{
+		$value = parent::getAttribute($key);
+		if ($value === null && $key !== strtolower($key)) {
+			$value = parent::getAttribute(strtolower($key));
+		}
+		if ($value === null && $key !== strtoupper($key)) {
+			$value = parent::getAttribute(strtoupper($key));
+		}
+		return $value;
+	}
+
+	public function setAttribute($key, $value)
+	{
+		$lower = strtolower($key);
+		if ($lower !== $key && array_key_exists($lower, $this->attributes)) {
+			return parent::setAttribute($lower, $value);
+		}
+		return parent::setAttribute($key, $value);
+	}
 }

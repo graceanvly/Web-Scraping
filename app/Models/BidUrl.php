@@ -35,4 +35,25 @@ class BidUrl extends Model
         'end_time' => 'datetime',
 		'last_scraped_at' => 'datetime',
 	];
+
+	public function getAttribute($key)
+	{
+		$value = parent::getAttribute($key);
+		if ($value === null && $key !== strtolower($key)) {
+			$value = parent::getAttribute(strtolower($key));
+		}
+		if ($value === null && $key !== strtoupper($key)) {
+			$value = parent::getAttribute(strtoupper($key));
+		}
+		return $value;
+	}
+
+	public function setAttribute($key, $value)
+	{
+		$lower = strtolower($key);
+		if ($lower !== $key && array_key_exists($lower, $this->attributes)) {
+			return parent::setAttribute($lower, $value);
+		}
+		return parent::setAttribute($key, $value);
+	}
 }
