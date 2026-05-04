@@ -76,9 +76,9 @@ class BidController extends Controller
 			$result = $scraper->fetch($validated['URL']);
 			if (!empty($result['blocked'])) {
 				$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
-				$this->logIssue(null, $validated['URL'], 'error', 'Blocked by geolocation/firewall.' . $reason);
+				$this->logIssue(null, $validated['URL'], 'error', 'Blocked by site protection/firewall.' . $reason);
 				return back()->withErrors([
-					'URL' => 'The site blocked our request due to geolocation/firewall rules.' . $reason . ' Please try with a proxy/VPN or different source.'
+					'URL' => 'The site blocked our request with site protection/firewall rules.' . $reason . ' Please try a different source URL, browser session cookie, or an approved API/feed for this site.'
 				])->withInput();
 			}
 			if (!empty($result['no_open_bids'])) {
@@ -281,9 +281,9 @@ class BidController extends Controller
 				$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null);
 				if (!empty($result['blocked'])) {
 					$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
-					$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by geolocation/firewall.' . $reason);
-					$this->moveBidUrlToFailed($bidUrl, 'Blocked by geolocation/firewall.' . $reason);
-					$scrapeIssues[] = "{$url} - blocked by geolocation/firewall." . $reason;
+					$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by site protection/firewall.' . $reason);
+					$this->moveBidUrlToFailed($bidUrl, 'Blocked by site protection/firewall.' . $reason);
+					$scrapeIssues[] = "{$url} - blocked by site protection/firewall." . $reason;
 					continue;
 				}
 				if (!empty($result['no_open_bids'])) {
@@ -528,10 +528,10 @@ class BidController extends Controller
 
 					if (!empty($result['blocked'])) {
 						$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
-						$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by geolocation/firewall.' . $reason);
-						$this->moveBidUrlToFailed($bidUrl, 'Blocked by geolocation/firewall.' . $reason);
+						$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by site protection/firewall.' . $reason);
+						$this->moveBidUrlToFailed($bidUrl, 'Blocked by site protection/firewall.' . $reason);
 						$totalIssues++;
-						$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => 'Blocked by site']);
+						$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => 'Blocked by site protection']);
 						continue;
 					}
 					if (!empty($result['no_open_bids'])) {

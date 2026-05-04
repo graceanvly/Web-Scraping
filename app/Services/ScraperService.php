@@ -12,9 +12,12 @@ use Illuminate\Support\Facades\Log;
 class ScraperService
 {
 	private Client $httpClient;
-	private int $maxPdfBytes = 15728640; // 15 MB limit per PDF to avoid timeouts on large files.
+	private int $maxPdfBytes = 5242880; // 5 MB limit per PDF to avoid parser memory failures.
+	private int $maxPdfParseBytes = 3145728; // Smalot can expand some PDFs heavily in memory.
 	private int $pdfTimeout = 30; // Seconds per PDF download.
-	private int $maxPdfDownloads = 8; // Avoid excessive parallel PDF processing per page.
+	private int $maxPdfDownloads = 5; // Avoid excessive PDF processing per page.
+	private int $maxInteractivePages = 8; // Browser-clicked states to feed into AI.
+	private int $maxInteractivePdfDownloads = 3; // PDFs discovered after UI clicks.
 	private int $maxPerUrlSeconds = 200; // Hard cap per URL scrape to avoid controller timeouts.
 	private int $requestTimeout = 60; // General HTTP request timeout.
 
@@ -25,7 +28,7 @@ class ScraperService
 			'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
 			'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
 			'Accept-Language' => 'en-US,en;q=0.9',
-			'Accept-Encoding' => 'gzip, deflate, br',
+			'Accept-Encoding' => 'gzip, deflate',
 			'Connection' => 'keep-alive',
 			'Upgrade-Insecure-Requests' => '1',
 			'Sec-Fetch-Dest' => 'document',
@@ -57,7 +60,7 @@ class ScraperService
 			'curl' => [
 				CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
 				CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_2,
-				CURLOPT_ENCODING => '',
+				CURLOPT_ENCODING => 'gzip,deflate',
 			],
 		]);
 	}
@@ -94,7 +97,7 @@ class ScraperService
 			$bestHtml = (string) ($response->getBody() ?? '');
 			$bestText = $this->htmlToText($bestHtml);
 		} catch (ConnectException $e) {
-			Log::warning('SCRAPER CONNECT/TIMEOUT ERROR — falling back to headless Chrome', ['url' => $url, 'error' => $e->getMessage()]);
+			Log::warning('SCRAPER CONNECT/TIMEOUT ERROR - falling back to headless Chrome', ['url' => $url, 'error' => $e->getMessage()]);
 			$httpFailed = true;
 			$httpFailReason = 'Connection timed out';
 		} catch (RequestException $e) {
@@ -106,25 +109,41 @@ class ScraperService
 				stripos($e->getMessage(), 'timeout') !== false ||
 				stripos($e->getMessage(), 'cURL error 28') !== false
 			);
+			$isRecoverableTransportError = $this->isRecoverableTransportError($e);
 
-			if ($httpStatus === 403 || $isTimeout) {
+			if ($isRecoverableTransportError && str_starts_with($url, 'http://')) {
+				$httpsUrl = 'https://' . substr($url, 7);
+				try {
+					$this->ensureWithinBudget($startedAt, 'https fallback request');
+					$response = $this->requestWithAuth($httpsUrl, $requestOptions, $authProvided);
+					$url = $httpsUrl;
+					$finalUrl = $url;
+					$bestHtml = (string) ($response->getBody() ?? '');
+					$bestText = $this->htmlToText($bestHtml);
+				} catch (TransferException $e2) {
+					$httpFailed = true;
+					$httpFailReason = $this->transportFailureReason($e2);
+					Log::info("{$httpFailReason} on HTTPS fallback - trying headless Chrome", ['url' => $httpsUrl]);
+				}
+			} elseif ($httpStatus === 403 || $isTimeout || $isRecoverableTransportError) {
 				$httpFailed = true;
-				$httpFailReason = $httpStatus === 403 ? '403 Forbidden' : 'Request timed out';
-				Log::info("{$httpFailReason} — falling back to headless Chrome", ['url' => $url]);
+				$httpFailReason = $httpStatus === 403 ? '403 Forbidden' : ($isTimeout ? 'Request timed out' : $this->transportFailureReason($e));
+				Log::info("{$httpFailReason} - falling back to headless Chrome", ['url' => $url]);
 			} elseif (str_starts_with($url, 'https://')) {
 				$httpUrl = 'http://' . substr($url, 8);
 				try {
 					$this->ensureWithinBudget($startedAt, 'http fallback request');
 					$response = $this->requestWithAuth($httpUrl, $requestOptions, $authProvided);
 					$url = $httpUrl;
+					$finalUrl = $url;
 					$bestHtml = (string) ($response->getBody() ?? '');
 					$bestText = $this->htmlToText($bestHtml);
 				} catch (TransferException $e2) {
 					$status2 = ($e2 instanceof RequestException) ? $e2->getResponse()?->getStatusCode() : null;
-					if ($status2 === 403 || $e2 instanceof ConnectException || stripos($e2->getMessage(), 'timeout') !== false) {
+					if ($status2 === 403 || $e2 instanceof ConnectException || stripos($e2->getMessage(), 'timeout') !== false || $this->isRecoverableTransportError($e2)) {
 						$httpFailed = true;
-						$httpFailReason = $status2 === 403 ? '403 Forbidden' : 'Request timed out';
-						Log::info("{$httpFailReason} on HTTP fallback — trying headless Chrome", ['url' => $url]);
+						$httpFailReason = $status2 === 403 ? '403 Forbidden' : $this->transportFailureReason($e2);
+						Log::info("{$httpFailReason} on HTTP fallback - trying headless Chrome", ['url' => $url]);
 					} else {
 						throw $e2;
 					}
@@ -134,20 +153,22 @@ class ScraperService
 			}
 		}
 
-		// 2b. Use headless Chrome when HTTP failed (403/timeout), detected SPA, or thin content
+		// 2b. Use headless Chrome when HTTP failed, detected SPA/browser check, or thin content
 		$isSpa = false;
+		$isBrowserCheck = false;
 		$needsHeadless = $httpFailed;
 		if (!$needsHeadless) {
 			$isSpa = $this->detectSpa($bestHtml, $bestText);
-			$needsHeadless = $isSpa || strlen($bestText) < 500;
+			$isBrowserCheck = $this->detectBrowserCheck($bestHtml, $bestText);
+			$needsHeadless = $isBrowserCheck || $isSpa || strlen($bestText) < 500;
 		}
 
 		if ($needsHeadless) {
-			$reason = $httpFailed ? $httpFailReason : ($isSpa ? 'SPA detected' : 'thin content');
+			$reason = $httpFailed ? $httpFailReason : ($isBrowserCheck ? 'browser check detected' : ($isSpa ? 'SPA detected' : 'thin content'));
 			Log::info("HEADLESS CHROME TRIGGERED ({$reason})", ['url' => $url, 'text_length' => strlen($bestText)]);
 			try {
 				$this->ensureWithinBudget($startedAt, 'headless chrome fetch');
-				$renderedHtml = $this->renderWithPuppeteer($url, ($httpFailed || $isSpa) ? 8000 : 2000);
+				$renderedHtml = $this->renderWithPuppeteer($url, $isBrowserCheck ? 10000 : (($httpFailed || $isSpa) ? 8000 : 2000));
 
 				if ($renderedHtml !== null) {
 					$renderedText = $this->htmlToText($renderedHtml);
@@ -175,6 +196,14 @@ class ScraperService
 			Log::info('NO OPEN BIDS FLAGGED', ['url' => $url]);
 		}
 
+		if (!$blocked && !$noOpenBids && $this->shouldCollectInteractivePages($bestHtml, $bestText)) {
+			$interactivePages = $this->collectInteractivePages($url, $startedAt, $requestOptions, $authProvided);
+			if (!empty($interactivePages)) {
+				$bidPages = array_merge($bidPages, $interactivePages);
+				Log::info('INTERACTIVE BID STATES FOUND', ['url' => $url, 'count' => count($interactivePages)]);
+			}
+		}
+
 		// 3. Find PDF links (bids)
 		$pdfBids = $noOpenBids ? [] : $this->findPdfLink($bestHtml, $url);
 
@@ -187,12 +216,15 @@ class ScraperService
 			Log::info('PDF LINKS FOUND', ['url' => $url, 'count' => count($pdfBids)]);
 
 			$pdfTexts = [];
-			foreach ($pdfBids as $bid) {
+			foreach ($pdfBids as $idx => $bid) {
 				if (!empty($bid['PDF_LINK'])) {
 					$this->ensureWithinBudget($startedAt, 'pdf download loop');
 					$pdfResult = $this->fetchPdf($bid['PDF_LINK'], $requestOptions, $authProvided, $startedAt);
 					if (!empty($pdfResult['text'])) {
 						$pdfTexts[] = $pdfResult['text'];
+					} else {
+						$pdfBids[$idx]['SKIP_PDF_PARSE'] = true;
+						$pdfBids[$idx]['PDF_ERROR'] = $pdfResult['error'] ?? 'PDF text could not be extracted safely.';
 					}
 				}
 			}
@@ -282,6 +314,53 @@ class ScraperService
 	private function hasAuthCredentials(?string $username, ?string $password): bool
 	{
 		return !empty($username) && !empty($password);
+	}
+
+	private function isRecoverableTransportError(\Throwable $e): bool
+	{
+		$message = strtolower($e->getMessage());
+
+		$signals = [
+			'curl error 28',
+			'curl error 52',
+			'curl error 56',
+			'curl error 61',
+			'recv failure',
+			'connection was reset',
+			'connection reset',
+			'empty reply from server',
+			'unrecognized content encoding',
+			'timed out',
+			'timeout',
+		];
+
+		foreach ($signals as $signal) {
+			if (str_contains($message, $signal)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function transportFailureReason(\Throwable $e): string
+	{
+		$message = strtolower($e->getMessage());
+
+		if (str_contains($message, 'unrecognized content encoding')) {
+			return 'Unsupported response encoding';
+		}
+		if (str_contains($message, 'curl error 56') || str_contains($message, 'connection reset') || str_contains($message, 'recv failure')) {
+			return 'Connection was reset';
+		}
+		if (str_contains($message, 'timed out') || str_contains($message, 'timeout') || str_contains($message, 'curl error 28')) {
+			return 'Request timed out';
+		}
+		if (str_contains($message, 'empty reply') || str_contains($message, 'curl error 52')) {
+			return 'Empty reply from server';
+		}
+
+		return 'Transport error';
 	}
 
 	private function requestWithAuth(string $url, array $options, bool $authProvided)
@@ -402,8 +481,15 @@ class ScraperService
 			$attr = $node->getAttribute('href') ?: $node->getAttribute('src');
 			if (preg_match('/\.pdf($|\?)/i', $attr)) {
 				$pdfUrl = $this->resolveUrl($attr, $baseUrl);
+				$linkText = $this->normalizeWhitespace($node->textContent ?? '');
+				$parentText = $this->nearbyText($node);
+				$context = trim($linkText . ' ' . $parentText . ' ' . $attr . ' ' . $pdfUrl);
+				if (!$this->looksLikeBidDocument($context, $baseUrl)) {
+					continue;
+				}
+
 				$bids[] = [
-					'TITLE' => $this->extractTitleFromUrl($pdfUrl),
+					'TITLE' => strlen($linkText) > 4 ? $linkText : $this->extractTitleFromUrl($pdfUrl),
 					'PDF_LINK' => $pdfUrl,
 				];
 			}
@@ -412,6 +498,10 @@ class ScraperService
 		// fallback: detect raw .pdf URLs in text
 		if (empty($bids) && preg_match_all('/https?:\/\/[^\\s"\']+\.pdf/i', $html, $matches)) {
 			foreach ($matches[0] as $pdfUrl) {
+				if (!$this->looksLikeBidDocument($pdfUrl, $baseUrl)) {
+					continue;
+				}
+
 				$bids[] = [
 					'TITLE' => $this->extractTitleFromUrl($pdfUrl),
 					'PDF_LINK' => $pdfUrl,
@@ -434,6 +524,93 @@ class ScraperService
 		$title = trim(ucwords(strtolower($title)));
 
 		return $title ?: 'Document';
+	}
+
+	private function normalizeWhitespace(string $text): string
+	{
+		return trim(preg_replace('/\s+/', ' ', $text) ?? '');
+	}
+
+	private function nearbyText(\DOMNode $node): string
+	{
+		$text = '';
+		$current = $node->parentNode;
+		for ($i = 0; $i < 3 && $current; $i++, $current = $current->parentNode) {
+			$text = $this->normalizeWhitespace($current->textContent ?? '');
+			if (strlen($text) > 20) {
+				break;
+			}
+		}
+
+		return mb_substr($text, 0, 500);
+	}
+
+	private function looksLikeBidDocument(string $context, string $baseUrl): bool
+	{
+		$haystack = strtolower($context . ' ' . $baseUrl);
+
+		$negativeSignals = [
+			'accessibility',
+			'americans with disabilities',
+			'annual report',
+			'ap contacts',
+			'ap-contact',
+			'background check',
+			'brochure',
+			'code report',
+			'contact guide',
+			'ethics',
+			'manual',
+			'mission',
+			'policy',
+			'procedure',
+			'procurement code',
+			'responsible contractor policy',
+			'social media',
+			'standard terms',
+			'suspended',
+			'debarred',
+			'terms and conditions',
+			'vendor guide',
+			'vision',
+			'w-9',
+			'w9',
+		];
+
+		foreach ($negativeSignals as $signal) {
+			if (str_contains($haystack, $signal)) {
+				return false;
+			}
+		}
+
+		$positiveSignals = [
+			'addendum',
+			'amendment',
+			'bid',
+			'bids',
+			'formalbid',
+			'formal bid',
+			'ifb',
+			'invitation',
+			'itb',
+			'proposal',
+			'quote',
+			'request for',
+			'rfi',
+			'rfp',
+			'rfq',
+			'solicitation',
+			'specification',
+			'tender',
+		];
+
+		foreach ($positiveSignals as $signal) {
+			if (str_contains($haystack, $signal)) {
+				return true;
+			}
+		}
+
+		return (bool) preg_match('/\b[a-z]{1,6}\d{2,}[-_a-z0-9]*\b/i', $context);
 	}
 
 	/**
@@ -486,8 +663,133 @@ class ScraperService
 		return $deduped;
 	}
 
+	private function shouldCollectInteractivePages(string $html, string $text): bool
+	{
+		$enabled = strtolower(trim((string) env('SCRAPER_INTERACTIONS', 'true')));
+		if (in_array($enabled, ['0', 'false', 'no', 'off'], true)) {
+			return false;
+		}
+
+		if ($html === '' || $this->detectBrowserCheck($html, $text)) {
+			return false;
+		}
+
+		$hasControls = preg_match('/<(button|select|summary)\b|role=["\'](?:button|tab|combobox)|aria-expanded=|data-toggle=|accordion|dropdown|tab/i', $html);
+		if (!$hasControls) {
+			return false;
+		}
+
+		$haystack = strtolower($text . ' ' . strip_tags(mb_substr($html, 0, 80000)));
+		return (bool) preg_match('/bid|bids|rfp|rfq|rfi|ifb|itb|solicitation|opportunit|procurement|proposal|quote|tender|addendum|attachment|document|due date|closing date/', $haystack);
+	}
+
+	private function collectInteractivePages(string $url, float $startedAt, array $requestOptions, bool $authProvided): array
+	{
+		try {
+			$this->ensureWithinBudget($startedAt, 'interactive browser scan');
+
+			$script = base_path('bin/collect-interactions.cjs');
+			if (!file_exists($script)) {
+				return [];
+			}
+
+			$nodeBin = trim((string) env('NODE_BINARY', ''));
+			if ($nodeBin === '' || ((str_contains($nodeBin, '\\') || str_contains($nodeBin, '/')) && !file_exists($nodeBin))) {
+				$nodeBin = $this->findNodeBinary() ?? 'node';
+			}
+
+			$process = new \Symfony\Component\Process\Process(
+				[$nodeBin, $script, $url, '2500', (string) $this->maxInteractivePages],
+				base_path(),
+				$this->nodeProcessEnv($nodeBin),
+				null,
+				100
+			);
+			$process->run();
+
+			if (!$process->isSuccessful()) {
+				Log::warning('INTERACTIVE SCAN FAILED', ['url' => $url, 'error' => trim($process->getErrorOutput())]);
+				return [];
+			}
+
+			$data = json_decode($process->getOutput(), true);
+			if (!is_array($data) || empty($data['pages']) || !is_array($data['pages'])) {
+				return [];
+			}
+
+			$pages = [];
+			$seen = [];
+			$pdfDownloads = 0;
+
+			foreach ($data['pages'] as $page) {
+				$html = (string) ($page['html'] ?? '');
+				$text = $this->htmlToText($html);
+				if ($text === '') {
+					$text = trim((string) ($page['text'] ?? ''));
+				}
+				if (strlen($text) < 80 || $this->detectBlockedPage($html, $text)) {
+					continue;
+				}
+
+				$fingerprint = md5(mb_substr($text, 0, 20000));
+				if (isset($seen[$fingerprint])) {
+					continue;
+				}
+				$seen[$fingerprint] = true;
+
+				$pageUrl = filter_var($page['url'] ?? '', FILTER_VALIDATE_URL) ? (string) $page['url'] : $url;
+				$pdfLinks = $this->findPdfLink($html, $pageUrl);
+				$pagePdfText = '';
+				$pdfTexts = [];
+
+				foreach ($pdfLinks as $idx => $link) {
+					if ($pdfDownloads >= $this->maxInteractivePdfDownloads) {
+						break;
+					}
+					if (empty($link['PDF_LINK'])) {
+						continue;
+					}
+
+					$this->ensureWithinBudget($startedAt, 'interactive pdf loop');
+					$pdfResult = $this->fetchPdf($link['PDF_LINK'], $requestOptions, $authProvided, $startedAt);
+					$pdfDownloads++;
+					if (!empty($pdfResult['text'])) {
+						$pdfTexts[] = $pdfResult['text'];
+					} else {
+						$pdfLinks[$idx]['SKIP_PDF_PARSE'] = true;
+						$pdfLinks[$idx]['PDF_ERROR'] = $pdfResult['error'] ?? 'PDF text could not be extracted safely.';
+					}
+				}
+
+				$pagePdfText = implode("\n\n----- NEXT DOCUMENT -----\n\n", $pdfTexts);
+				$label = trim((string) ($page['label'] ?? 'Interactive page state'));
+
+				$pages[] = [
+					'title' => $label !== '' ? $label : 'Interactive page state',
+					'url' => $pageUrl,
+					'html' => $html,
+					'text' => $text,
+					'pdf_links' => $pdfLinks,
+					'pdf_text' => $pagePdfText,
+					'source' => 'browser_interaction',
+					'interaction_type' => $page['interaction_type'] ?? '',
+				];
+
+				if (count($pages) >= $this->maxInteractivePages) {
+					break;
+				}
+			}
+
+			return $pages;
+		} catch (\Throwable $e) {
+			Log::warning('INTERACTIVE SCAN ERROR', ['url' => $url, 'error' => $e->getMessage()]);
+			return [];
+		}
+	}
+
 	private function fetchPdf(string $url, array $requestOptions, bool $authProvided, float $startedAt): array
 	{
+		$tempFile = null;
 		try {
 			$this->ensureWithinBudget($startedAt, 'pdf download');
 			$options = array_merge($requestOptions, [
@@ -504,6 +806,9 @@ class ScraperService
 			if (!empty($lenHeader) && (int) $lenHeader > $this->maxPdfBytes) {
 				throw new \RuntimeException("PDF is larger than allowed (" . $this->formatBytes($this->maxPdfBytes) . ").");
 			}
+			if (!empty($lenHeader) && (int) $lenHeader > $this->maxPdfParseBytes) {
+				throw new \RuntimeException("PDF is larger than the safe parser limit (" . $this->formatBytes($this->maxPdfParseBytes) . ").");
+			}
 
 			$tempFile = tmpfile();
 			$meta = stream_get_meta_data($tempFile);
@@ -515,6 +820,9 @@ class ScraperService
 				$downloaded += strlen($chunk);
 				if ($downloaded > $this->maxPdfBytes) {
 					throw new \RuntimeException("PDF exceeds size limit (" . $this->formatBytes($this->maxPdfBytes) . ").");
+				}
+				if ($downloaded > $this->maxPdfParseBytes) {
+					throw new \RuntimeException("PDF exceeds safe parser limit (" . $this->formatBytes($this->maxPdfParseBytes) . ").");
 				}
 				fwrite($tempFile, $chunk);
 			}
@@ -529,6 +837,7 @@ class ScraperService
 			}
 
 			fclose($tempFile);
+			$tempFile = null;
 
 			return [
 				'final_url' => $url,
@@ -536,6 +845,9 @@ class ScraperService
 				'is_pdf' => true,
 			];
 		} catch (\Throwable $e) {
+			if (is_resource($tempFile)) {
+				fclose($tempFile);
+			}
 			Log::error('PDF FETCH ERROR', ['url' => $url, 'error' => $e->getMessage()]);
 			return [
 				'final_url' => $url,
@@ -549,24 +861,15 @@ class ScraperService
 	private function renderWithPuppeteer(string $url, int $delayMs = 3000): ?string
 	{
 		$script = base_path('bin/render-page.cjs');
-		$nodeBin = env('NODE_BINARY', 'C:\\Program Files\\nodejs\\node.exe');
-
-		$env = [
-			'SystemRoot' => getenv('SystemRoot') ?: 'C:\\WINDOWS',
-			'LOCALAPPDATA' => getenv('LOCALAPPDATA') ?: '',
-			'USERPROFILE' => getenv('USERPROFILE') ?: '',
-			'Path' => getenv('Path') ?: getenv('PATH') ?: '',
-			'TEMP' => getenv('TEMP') ?: sys_get_temp_dir(),
-			'TMP' => getenv('TMP') ?: sys_get_temp_dir(),
-			'APPDATA' => getenv('APPDATA') ?: '',
-			'HOME' => getenv('USERPROFILE') ?: '',
-			'NODE_PATH' => base_path('node_modules'),
-		];
+		$nodeBin = trim((string) env('NODE_BINARY', ''));
+		if ($nodeBin === '' || ((str_contains($nodeBin, '\\') || str_contains($nodeBin, '/')) && !file_exists($nodeBin))) {
+			$nodeBin = $this->findNodeBinary() ?? 'node';
+		}
 
 		$process = new \Symfony\Component\Process\Process(
 			[$nodeBin, $script, $url, (string) $delayMs],
 			base_path(),
-			$env,
+			$this->nodeProcessEnv($nodeBin),
 			null,
 			120
 		);
@@ -584,6 +887,63 @@ class ScraperService
 		}
 
 		return $html;
+	}
+
+	private function findNodeBinary(): ?string
+	{
+		$binaryName = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' ? 'node.exe' : 'node';
+		$candidates = [
+			'C:\\nvm4w\\nodejs\\node.exe',
+			'C:\\Program Files\\nodejs\\node.exe',
+			'C:\\Program Files (x86)\\nodejs\\node.exe',
+		];
+
+		foreach ($candidates as $candidate) {
+			if (file_exists($candidate)) {
+				return $candidate;
+			}
+		}
+
+		$path = getenv('Path') ?: getenv('PATH') ?: '';
+		foreach (explode(PATH_SEPARATOR, $path) as $dir) {
+			$dir = trim($dir);
+			if ($dir === '') {
+				continue;
+			}
+
+			$candidate = rtrim($dir, "\\/") . DIRECTORY_SEPARATOR . $binaryName;
+			if (file_exists($candidate)) {
+				return $candidate;
+			}
+		}
+
+		return null;
+	}
+
+	private function nodeProcessEnv(string $nodeBin): array
+	{
+		$env = [
+			'SystemRoot' => getenv('SystemRoot') ?: 'C:\\WINDOWS',
+			'LOCALAPPDATA' => getenv('LOCALAPPDATA') ?: '',
+			'USERPROFILE' => getenv('USERPROFILE') ?: '',
+			'Path' => getenv('Path') ?: getenv('PATH') ?: '',
+			'TEMP' => getenv('TEMP') ?: sys_get_temp_dir(),
+			'TMP' => getenv('TMP') ?: sys_get_temp_dir(),
+			'APPDATA' => getenv('APPDATA') ?: '',
+			'HOME' => getenv('USERPROFILE') ?: '',
+			'NODE_PATH' => base_path('node_modules'),
+		];
+
+		if ((str_contains($nodeBin, '\\') || str_contains($nodeBin, '/')) && file_exists($nodeBin)) {
+			$env['Path'] = dirname($nodeBin) . PATH_SEPARATOR . $env['Path'];
+		}
+
+		$cookieHeader = trim((string) env('SCRAPER_COOKIE', ''));
+		if ($cookieHeader !== '') {
+			$env['SCRAPER_COOKIE'] = $cookieHeader;
+		}
+
+		return $env;
 	}
 
 	private function htmlToText(string $html): string
@@ -623,6 +983,10 @@ class ScraperService
 
 	private function detectBlockedPage(string $html, string $text): ?string
 	{
+		if ($this->detectBrowserCheck($html, $text)) {
+			return 'browser check/captcha';
+		}
+
 		$haystack = strtolower($text . ' ' . strip_tags($html));
 		$signals = [
 			'blocked country',
@@ -632,6 +996,8 @@ class ScraperService
 			'geolocation setting',
 			'connection was denied because this country',
 			'watchguard',
+			'wrong captcha answer',
+			'recaptcha',
 		];
 
 		foreach ($signals as $signal) {
@@ -641,6 +1007,27 @@ class ScraperService
 		}
 
 		return null;
+	}
+
+	private function detectBrowserCheck(string $html, string $text): bool
+	{
+		$haystack = strtolower($text . ' ' . strip_tags($html));
+
+		$signals = [
+			'please wait while we are checking your browser',
+			'browser check',
+			'checking your browser',
+			'dom is busy',
+		];
+
+		$matched = 0;
+		foreach ($signals as $signal) {
+			if (str_contains($haystack, $signal)) {
+				$matched++;
+			}
+		}
+
+		return $matched >= 2;
 	}
 
 	private function detectSpa(string $html, string $text): bool

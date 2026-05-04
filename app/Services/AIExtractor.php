@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use Smalot\PdfParser\Parser;
 use GuzzleHttp\Client;
 
 class AIExtractor
@@ -29,7 +28,8 @@ class AIExtractor
 			$pdfLinks = [['PDF_LINK' => $pdfLinks]];
 		}
 
-		// If scraper hasn't parsed the PDFs yet, try to parse them here to feed the AI
+		// PDF parsing is handled by ScraperService with size and timeout limits.
+		// Re-parsing here can exhaust memory on large procurement PDFs.
 		$parsedPdfTexts = [];
 		if (empty($pdfText)) {
 			foreach ($pdfLinks as $pdf) {
@@ -37,32 +37,10 @@ class AIExtractor
 					continue;
 				}
 
-				try {
-					$tempFile = tempnam(sys_get_temp_dir(), 'bidpdf_');
-					$pdfUrl = preg_replace('/\s+/', '', $pdf['PDF_LINK']);
-					$pdfUrl = str_replace(' ', '%20', $pdfUrl);
-
-					$this->httpClient->request('GET', $pdfUrl, ['sink' => $tempFile]);
-
-					$parser = new Parser();
-					$pdfObj = $parser->parseFile($tempFile);
-					$pdfTextRaw = trim($pdfObj->getText());
-					$pdfTextRaw = preg_replace("/\n{3,}/", "\n\n", $pdfTextRaw);
-
-					if (!empty($pdfTextRaw)) {
-						$parsedPdfTexts[] = [
-							'PDF_LINK' => $pdf['PDF_LINK'],
-							'PDF_TEXT' => mb_substr($pdfTextRaw, 0, 20000),
-						];
-					}
-
-					@unlink($tempFile);
-				} catch (\Throwable $e) {
-					$parsedPdfTexts[] = [
-						'PDF_LINK' => $pdf['PDF_LINK'],
-						'PDF_TEXT' => '',
-					];
-				}
+				$parsedPdfTexts[] = [
+					'PDF_LINK' => $pdf['PDF_LINK'],
+					'PDF_TEXT' => '',
+				];
 			}
 		}
 
@@ -86,21 +64,22 @@ class AIExtractor
 
 		$promptSystem = <<<SYS
 You are an expert bid data extraction assistant.
-You receive a listing page plus detail pages that were "clicked" from bid titles and any PDF text already retrieved for those bids.
-Extract all open/active bids and capture the full contact and schedule details.
+You receive a listing page, browser interaction states gathered after clicking bid-relevant buttons/tabs/dropdowns, detail pages clicked from bid titles, and any PDF text already retrieved for those bids.
+Extract all open/active bids and capture the full operational details needed to understand and respond to each bid.
 
 For each bid you return, include:
 - TITLE (exact title from detail page or listing)
 - ENDDATE (YYYY-MM-DD when present)
 - NAICSCODE (best guess if not explicitly provided)
 - URL (detail page URL or PDF URL where the bid was found; otherwise the listing URL)
-- DESCRIPTION (A labeled block that includes: Bid Title; Description / Scope / Specification; End Date / Due Date; Pre-bid Meeting Date; Questions relating to the Bid; Contact Person with roles (Purchasing Agent, Finance Officer, Bid Clerk, County/City/Town Clerk, Officer in Charge, School Administrator, District Engineer, Commissioner, Accounting if applicable); Phone Number; Email Address; Mailing Address; Physical Address; Correct geographic location/state and category.)
+- DESCRIPTION (A labeled block that includes: Bid Title; Solicitation/Bid Number; Agency/Department; Status; Description / Scope / Specification; Issue Date; End Date / Due Date including time and timezone; Pre-bid Meeting Date and location/link; Site Visit; Questions Deadline; Contact Person with roles (Purchasing Agent, Finance Officer, Bid Clerk, County/City/Town Clerk, Officer in Charge, School Administrator, District Engineer, Commissioner, Accounting if applicable); Phone Number; Email Address; Mailing Address; Physical Address; Submission Instructions; Required Documents / Attachments / Addenda; Bonding / Insurance / License Requirements; Correct geographic location/state; Commodity/category.)
 
 Rules:
-1) Use PDF text when present; otherwise use clicked detail page text and listing text.
+1) Prefer the most specific source: PDF text first, then clicked detail pages and browser interaction states, then listing text.
 2) If a value is missing, write "Not provided" for that label instead of leaving it blank.
 3) Respond with strict JSON only in the format: {"bids":[{...}]} with the fields above.
-4) Do your best to find the bids: some sites require clicking links (e.g., "see all open bid opportunities") before listings appear. Only return actual bids; do not treat generic portal/home pages or unrelated content as bids.
+4) Browser interaction states are page snapshots captured after the scraper clicked likely controls. Use them to find content revealed by buttons, tabs, accordions, dropdowns, "view details", "documents", "attachments", and similar controls.
+5) Do your best to find the bids: some sites require clicking links (e.g., "see all open bid opportunities") before listings appear. Only return actual bids; do not treat generic portal/home pages or unrelated content as bids.
 SYS;
 
 		$promptUser = [
@@ -114,6 +93,8 @@ SYS;
 				return [
 					'url' => $page['url'] ?? '',
 					'title' => $page['title'] ?? '',
+					'source' => $page['source'] ?? 'detail_or_interaction_page',
+					'interaction_type' => $page['interaction_type'] ?? '',
 					'text_excerpt' => mb_substr($page['text'] ?? '', 0, 6000),
 					'html_excerpt' => mb_substr($page['html'] ?? '', 0, 4000),
 					'pdf_links' => array_column($page['pdf_links'] ?? [], 'PDF_LINK'),
