@@ -25,6 +25,7 @@ class BidController extends Controller
 		$search = trim((string) $request->query('search', ''));
 		$filterDate = trim((string) $request->query('date', ''));
 		$filterNaics = trim((string) $request->query('naics', ''));
+		$showAll = $request->boolean('all');
 
 		$query = Bid::query();
 
@@ -38,6 +39,12 @@ class BidController extends Controller
 
 		if ($filterDate !== '') {
 			$query->whereDate('CREATED', $filterDate);
+		} elseif (!$showAll && $search === '' && $filterNaics === '') {
+			$latestDate = Bid::max('CREATED');
+			if ($latestDate) {
+				$latestDateOnly = \Carbon\Carbon::parse($latestDate)->toDateString();
+				$query->whereDate('CREATED', $latestDateOnly);
+			}
 		}
 
 		if ($filterNaics !== '') {
@@ -53,7 +60,16 @@ class BidController extends Controller
 			->pluck('NAICSCODE');
 		$issueCount = ScrapeLog::count();
 		$scrapeLogs = ScrapeLog::latest('created_at')->limit(200)->get();
-		return view('bids.index', compact('bids', 'naicsCodes', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterNaics'));
+
+		$latestDateLabel = null;
+		if ($filterDate === '' && !$showAll && $search === '' && $filterNaics === '') {
+			$latestRaw = Bid::max('CREATED');
+			if ($latestRaw) {
+				$latestDateLabel = \Carbon\Carbon::parse($latestRaw)->format('M. d, Y');
+			}
+		}
+
+		return view('bids.index', compact('bids', 'naicsCodes', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterNaics', 'showAll', 'latestDateLabel'));
 	}
 
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)

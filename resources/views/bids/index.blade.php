@@ -489,6 +489,13 @@
 				</div>
 			</form>
 
+			@if (!empty($latestDateLabel))
+				<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem; padding:0.5rem 0.75rem; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:0.85rem; color:#1e40af;">
+					Showing bids scraped on <strong>{{ $latestDateLabel }}</strong>
+					<a href="{{ route('bids.index', array_merge(request()->query(), ['all' => 1])) }}" style="margin-left:0.25rem; color:#2563eb; font-weight:600;">Show All Dates</a>
+				</div>
+			@endif
+
 			<div style="overflow-x:auto;">
 				<table role="grid" id="bidsTable">
 					<thead>
