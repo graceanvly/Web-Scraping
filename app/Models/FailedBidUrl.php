@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\CaseInsensitiveAttributes;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class FailedBidUrl extends Model
 {
-    use HasFactory;
+    use HasFactory, CaseInsensitiveAttributes;
 
     protected $table = 'failed_bid_urls';
 
