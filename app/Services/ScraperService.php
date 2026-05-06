@@ -18,7 +18,7 @@ class ScraperService
 	private int $maxPdfDownloads = 5; // Avoid excessive PDF processing per page.
 	private int $maxInteractivePages = 8; // Browser-clicked states to feed into AI.
 	private int $maxInteractivePdfDownloads = 3; // PDFs discovered after UI clicks.
-	private int $maxPerUrlSeconds = 200; // Hard cap per URL scrape to avoid controller timeouts.
+	private int $maxPerUrlSeconds = 120; // Hard cap per URL scrape to avoid controller timeouts.
 	private int $requestTimeout = 60; // General HTTP request timeout.
 
 	// app/Services/ScraperService.php

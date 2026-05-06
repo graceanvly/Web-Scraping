@@ -540,6 +540,9 @@ class BidController extends Controller
 				$send(['type' => 'processing', 'index' => $idx + 1, 'url' => $url]);
 
 				try {
+					$urlStartedAt = microtime(true);
+
+					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Fetching page...']);
 					$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null);
 
 					if (!empty($result['blocked'])) {
@@ -566,6 +569,7 @@ class BidController extends Controller
 						continue;
 					}
 
+					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Extracting bids with AI...']);
 					$extracted = $ai->extract(
 						$url,
 						$result['html'],
@@ -595,8 +599,14 @@ class BidController extends Controller
 					$nonBidsThisUrl = 0;
 
 					$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
+					if (!empty($rawTitles)) {
+						$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Rewriting ' . count($rawTitles) . ' title(s)...']);
+					}
 					$rewrittenTitles = $ai->rewriteTitles($rawTitles);
 					$titleMap = array_combine($rawTitles, $rewrittenTitles);
+
+					$this->guardUrlBudget($urlStartedAt, 300, $url);
+					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Saving bids...']);
 
 					foreach ($filteredBids as $bidData) {
 						$rawTitle = $bidData['TITLE'] ?? null;
@@ -1049,6 +1059,21 @@ class BidController extends Controller
 		}
 
 		return 'Failed to scrape this URL. ' . $rawMessage;
+	}
+
+	private function guardUrlBudget(float $startedAt, int $maxSeconds, string $url): void
+	{
+		$elapsed = microtime(true) - $startedAt;
+		if ($elapsed > $maxSeconds) {
+			throw new \RuntimeException("Processing this URL took too long ({$this->formatElapsed($elapsed)}). Skipping to avoid blocking other URLs.");
+		}
+	}
+
+	private function formatElapsed(float $seconds): string
+	{
+		$m = (int) floor($seconds / 60);
+		$s = (int) ($seconds - $m * 60);
+		return $m > 0 ? "{$m}m {$s}s" : "{$s}s";
 	}
 
 	private function looksLikeBid(?string $title, ?string $description, ?string $url, ?string $endDate): bool

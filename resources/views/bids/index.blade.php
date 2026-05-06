@@ -951,6 +951,10 @@
 						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtml(ev.url);
 						break;
 
+					case 'status':
+						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtml(ev.step);
+						break;
+
 					case 'skip':
 						progressCounter.textContent = ev.index + ' / ' + total;
 						progressBar.style.width = Math.round((ev.index / total) * 100) + '%';
