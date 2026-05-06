@@ -521,7 +521,16 @@
 								<td style="font-size:0.85rem; color:#6b7280;">
 									{{ $bid->CREATED ? \Carbon\Carbon::parse($bid->CREATED)->format('M. d, Y') : '—' }}
 								</td>
-								<td><a href="{{ $bid->URL }}" target="_blank" rel="noreferrer">Open</a></td>
+								<td>
+									@if ($bid->URL)
+										<a href="{{ $bid->URL }}" target="_blank" rel="noopener noreferrer"
+											style="display:inline-block; padding:0.3rem 0.7rem; font-size:0.8rem; background:#2563eb; color:#fff; border-radius:4px; text-decoration:none; white-space:nowrap;">
+											Open ↗
+										</a>
+									@else
+										<span style="color:#9ca3af;">—</span>
+									@endif
+								</td>
 								<td>
 									<div class="action-buttons">
 										<button type="button" class="secondary" onclick="openEditModal(
