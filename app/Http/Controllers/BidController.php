@@ -27,7 +27,10 @@ class BidController extends Controller
 		$filterNaics = trim((string) $request->query('naics', ''));
 		$showAll = $request->boolean('all');
 
+		$scrapedOnly = fn($q) => $q->whereNotNull('extracted_json');
+
 		$query = Bid::query();
+		$scrapedOnly($query);
 
 		if ($search !== '') {
 			$query->where(function ($q) use ($search) {
@@ -40,7 +43,7 @@ class BidController extends Controller
 		if ($filterDate !== '') {
 			$query->whereDate('CREATED', $filterDate);
 		} elseif (!$showAll && $search === '' && $filterNaics === '') {
-			$latestDate = Bid::max('CREATED');
+			$latestDate = Bid::whereNotNull('extracted_json')->max('CREATED');
 			if ($latestDate) {
 				$latestDateOnly = \Carbon\Carbon::parse($latestDate)->toDateString();
 				$query->whereDate('CREATED', $latestDateOnly);
@@ -53,6 +56,7 @@ class BidController extends Controller
 
 		$bids = $query->latest('CREATED')->paginate($perPage)->withQueryString();
 		$naicsCodes = Bid::query()
+			->whereNotNull('extracted_json')
 			->whereNotNull('NAICSCODE')
 			->where('NAICSCODE', '!=', '')
 			->distinct()
@@ -63,7 +67,7 @@ class BidController extends Controller
 
 		$latestDateLabel = null;
 		if ($filterDate === '' && !$showAll && $search === '' && $filterNaics === '') {
-			$latestRaw = Bid::max('CREATED');
+			$latestRaw = Bid::whereNotNull('extracted_json')->max('CREATED');
 			if ($latestRaw) {
 				$latestDateLabel = \Carbon\Carbon::parse($latestRaw)->format('M. d, Y');
 			}
