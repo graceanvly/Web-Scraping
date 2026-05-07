@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Models\Concerns\CaseInsensitiveAttributes;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 class Bid extends Model
 {
@@ -14,6 +15,16 @@ class Bid extends Model
 	public $timestamps = false;
 	protected $primaryKey = 'id';
 	protected $sequence = 'BID_SEQ';
+
+	protected static function booted(): void
+	{
+		static::creating(function (Bid $bid) {
+			if (empty($bid->id) && empty($bid->ID)) {
+				$result = DB::select("SELECT BID_SEQ.NEXTVAL AS NEXT_ID FROM DUAL");
+				$bid->ID = $result[0]->next_id ?? $result[0]->NEXT_ID;
+			}
+		});
+	}
 	protected $fillable = [
 		'TITLE',
 		'DESCRIPTION',

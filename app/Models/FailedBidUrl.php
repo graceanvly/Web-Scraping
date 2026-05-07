@@ -15,6 +15,16 @@ class FailedBidUrl extends Model
     public $timestamps = false;
     protected $sequence = 'FAILED_BID_URLS_ID_SEQ';
 
+    protected static function booted(): void
+    {
+        static::creating(function (FailedBidUrl $model) {
+            if (empty($model->id) && empty($model->ID)) {
+                $result = \Illuminate\Support\Facades\DB::select("SELECT FAILED_BID_URLS_ID_SEQ.NEXTVAL AS NEXT_ID FROM DUAL");
+                $model->ID = $result[0]->next_id ?? $result[0]->NEXT_ID;
+            }
+        });
+    }
+
     protected $fillable = [
         'original_bid_url_id',
         'url',
