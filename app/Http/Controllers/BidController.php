@@ -27,9 +27,7 @@ class BidController extends Controller
 		$filterNaics = trim((string) $request->query('naics', ''));
 		$showAll = $request->boolean('all');
 
-		$scrapedBidUrlIds = BidUrl::pluck('id');
-
-		$query = Bid::whereIn('BID_URL_ID', $scrapedBidUrlIds);
+		$query = Bid::where('BID_URL_ID', '>', 0);
 
 		if ($search !== '') {
 			$query->where(function ($q) use ($search) {
@@ -39,15 +37,8 @@ class BidController extends Controller
 			});
 		}
 
-		$latestDateOnly = null;
 		if ($filterDate !== '') {
 			$query->whereDate('CREATED', $filterDate);
-		} elseif (!$showAll && $search === '' && $filterNaics === '') {
-			$latestDate = (clone $query)->max('CREATED');
-			if ($latestDate) {
-				$latestDateOnly = \Carbon\Carbon::parse($latestDate)->toDateString();
-				$query->whereDate('CREATED', $latestDateOnly);
-			}
 		}
 
 		if ($filterNaics !== '') {
@@ -58,13 +49,17 @@ class BidController extends Controller
 
 		$naicsCodes = $bids->pluck('NAICSCODE')->filter(fn($v) => !empty($v))->unique()->sort()->values();
 
-		$issueCount = ScrapeLog::count();
-		$scrapeLogs = ScrapeLog::latest('created_at')->limit(200)->get();
+		$issueCount = 0;
+		$scrapeLogs = collect();
+		try {
+			$issueCount = ScrapeLog::count();
+			$scrapeLogs = ScrapeLog::latest('created_at')->limit(200)->get();
+		} catch (\Throwable $e) {
+			Log::warning('Could not load scrape logs', ['error' => $e->getMessage()]);
+		}
 
 		$latestDateLabel = null;
-		if ($latestDateOnly) {
-			$latestDateLabel = \Carbon\Carbon::parse($latestDateOnly)->format('M. d, Y');
-		}
+		$showAll = true;
 
 		return view('bids.index', compact('bids', 'naicsCodes', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterNaics', 'showAll', 'latestDateLabel'));
 	}
