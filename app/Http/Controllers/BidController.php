@@ -130,9 +130,6 @@ class BidController extends Controller
 				$result['bid_pages'] ?? []
 			);
 
-			$rawHtml = $result['html'] ?? '';
-			$extractedJson = json_encode($extracted, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
 			$today = \Carbon\Carbon::today();
 			$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
 				if (!empty($bid['ENDDATE'])) {
@@ -214,8 +211,6 @@ class BidController extends Controller
 				$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
 				$bid->CREATED = now();
 				$bid->LAST_MODIFIED = now();
-				$bid->raw_html = $rawHtml;
-				$bid->extracted_json = $extractedJson;
 				$bid->save();
 
 				$saved[] = $bid->id;
@@ -334,9 +329,6 @@ class BidController extends Controller
 					$result['bid_pages'] ?? []
 				);
 
-				$rawHtml = $result['html'] ?? '';
-				$extractedJson = json_encode($extracted, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
 				$today = \Carbon\Carbon::today();
 				$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
 					if (!empty($bid['ENDDATE'])) {
@@ -419,8 +411,6 @@ class BidController extends Controller
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
 					$bid->BID_URL_ID = $bidUrl->id;
-					$bid->raw_html = $rawHtml;
-					$bid->extracted_json = $extractedJson;
 					$bid->save();
 
 					$savedThisUrl++;
@@ -583,9 +573,6 @@ class BidController extends Controller
 						$result['bid_pages'] ?? []
 					);
 
-					$rawHtml = $result['html'] ?? '';
-					$extractedJson = json_encode($extracted, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
 					$today = \Carbon\Carbon::today();
 					$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
 						if (!empty($bid['ENDDATE'])) {
@@ -658,8 +645,6 @@ class BidController extends Controller
 						$bid->CREATED = now();
 						$bid->LAST_MODIFIED = now();
 						$bid->BID_URL_ID = $bidUrl->id;
-						$bid->raw_html = $rawHtml;
-						$bid->extracted_json = $extractedJson;
 						$bid->save();
 						$savedThisUrl++;
 					}

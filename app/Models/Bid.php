@@ -40,8 +40,6 @@ class Bid extends Model
 		'UNDERREVIEW',
 		'NAICSCODE_INT',
 		'NSN',
-		'raw_html',
-		'extracted_json',
 	];
 
 	protected $casts = [
