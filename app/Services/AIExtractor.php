@@ -47,19 +47,8 @@ class AIExtractor
 		$fullPdfText = $pdfText ?: implode("\n\n", array_column($parsedPdfTexts, 'PDF_TEXT'));
 		$fullPdfText = preg_replace("/\n{3,}/", "\n\n", (string) $fullPdfText);
 
-		// Fallback when no API key is configured: at least return the text we have
 		if (empty($this->apiKey)) {
-			return [
-				'bids' => [
-					[
-						'TITLE' => $this->extractTitleFromUrl($URL),
-						'ENDDATE' => '',
-						'NAICSCODE' => '',
-						'URL' => $URL,
-						'DESCRIPTION' => $fullPdfText ?: ($text ?: 'No description or PDF link found.'),
-					],
-				],
-			];
+			throw new \RuntimeException('AI is not configured: the OPENAI_API_KEY environment variable is missing or empty. Please set it in the .env file.');
 		}
 
 		$promptSystem = <<<SYS
@@ -113,13 +102,35 @@ SYS;
 			'temperature' => 0.1,
 		];
 
-		$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', [
-			'headers' => [
-				'Authorization' => 'Bearer ' . $this->apiKey,
-				'Content-Type' => 'application/json',
-			],
-			'body' => json_encode($body),
-		]);
+		try {
+			$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $this->apiKey,
+					'Content-Type' => 'application/json',
+				],
+				'body' => json_encode($body),
+			]);
+		} catch (\GuzzleHttp\Exception\ClientException $e) {
+			$status = $e->getResponse()?->getStatusCode();
+			$responseBody = (string) ($e->getResponse()?->getBody() ?? '');
+			$errorData = json_decode($responseBody, true);
+			$apiMessage = $errorData['error']['message'] ?? '';
+
+			if ($status === 401) {
+				throw new \RuntimeException('AI error: Invalid OpenAI API key. Please check the OPENAI_API_KEY value in your .env file.');
+			}
+			if ($status === 429) {
+				throw new \RuntimeException('AI error: OpenAI rate limit or quota exceeded. ' . ($apiMessage ?: 'Please check your billing/usage at platform.openai.com.'));
+			}
+			if ($status === 404) {
+				throw new \RuntimeException("AI error: Model \"{$this->model}\" not found. Please check the OPENAI_MODEL value in your .env file.");
+			}
+			throw new \RuntimeException('AI error: OpenAI returned HTTP ' . $status . '. ' . ($apiMessage ?: $e->getMessage()));
+		} catch (\GuzzleHttp\Exception\ConnectException $e) {
+			throw new \RuntimeException('AI error: Could not connect to OpenAI API. Please check your server\'s internet connection.');
+		} catch (\Throwable $e) {
+			throw new \RuntimeException('AI error: ' . $e->getMessage());
+		}
 
 		$json = json_decode((string) $response->getBody(), true);
 		$content = $json['choices'][0]['message']['content'] ?? '{}';
@@ -185,7 +196,11 @@ SYS;
 	 */
 	public function rewriteTitles(array $titles): array
 	{
-		if (empty($titles) || empty($this->apiKey)) {
+		if (empty($titles)) {
+			return $titles;
+		}
+		if (empty($this->apiKey)) {
+			\Illuminate\Support\Facades\Log::warning('AI title rewrite skipped: OPENAI_API_KEY is not configured.');
 			return $titles;
 		}
 
