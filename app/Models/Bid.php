@@ -23,6 +23,24 @@ class Bid extends Model
 				$result = DB::select("SELECT BID_SEQ.NEXTVAL AS NEXT_ID FROM DUAL");
 				$bid->ID = $result[0]->next_id ?? $result[0]->NEXT_ID;
 			}
+
+			$defaults = [
+				'SOURCE_ID' => 0,
+				'CATEGORYID' => 0,
+				'ENTITYID' => 0,
+				'SUBSCRIPTIONTYPEID' => 0,
+				'USERID' => 0,
+				'STATEID' => 0,
+				'NEEDS_REVIEW' => 0,
+				'UNDERREVIEW' => 0,
+				'COUNTRY_ID' => 0,
+			];
+
+			foreach ($defaults as $col => $default) {
+				if (is_null($bid->getAttribute($col))) {
+					$bid->setAttribute($col, $default);
+				}
+			}
 		});
 	}
 	protected $fillable = [
