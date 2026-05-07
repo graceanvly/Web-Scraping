@@ -13,6 +13,7 @@ class FailedBidUrl extends Model
     protected $table = 'failed_bid_urls';
 
     public $timestamps = false;
+    protected $sequence = 'FAILED_BID_URLS_ID_SEQ';
 
     protected $fillable = [
         'original_bid_url_id',

@@ -13,6 +13,7 @@ class BidUrl extends Model
     protected $table = "bid_url";
 
     public $timestamps = false;
+    protected $sequence = 'BIDURL_SEQ';
 
 	protected $fillable = [
 		'url',

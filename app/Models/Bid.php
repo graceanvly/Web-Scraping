@@ -13,6 +13,7 @@ class Bid extends Model
 	protected $table = "bid";
 	public $timestamps = false;
 	protected $primaryKey = 'id';
+	protected $sequence = 'BID_SEQ';
 	protected $fillable = [
 		'TITLE',
 		'DESCRIPTION',
