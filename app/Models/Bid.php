@@ -25,16 +25,12 @@ class Bid extends Model
 			}
 
 			$defaults = [
-				'SOURCE_ID' => 0,
 				'CATEGORYID' => 0,
 				'ENTITYID' => 0,
 				'SUBSCRIPTIONTYPEID' => 0,
-				'USERID' => 0,
-				'STATEID' => 0,
 				'NEEDS_REVIEW' => 0,
-				'UNDERREVIEW' => 0,
-				'COUNTRY_ID' => 0,
 				'INLINEURL' => 0,
+				'SOURCE_ID' => 0,
 			];
 
 			foreach ($defaults as $col => $default) {
