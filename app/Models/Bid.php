@@ -34,6 +34,7 @@ class Bid extends Model
 				'NEEDS_REVIEW' => 0,
 				'UNDERREVIEW' => 0,
 				'COUNTRY_ID' => 0,
+				'INLINEURL' => 0,
 			];
 
 			foreach ($defaults as $col => $default) {
