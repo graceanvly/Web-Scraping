@@ -27,10 +27,9 @@ class BidController extends Controller
 		$filterNaics = trim((string) $request->query('naics', ''));
 		$showAll = $request->boolean('all');
 
-		$scrapedOnly = fn($q) => $q->whereNotNull('BID_URL_ID');
+		$scrapedBidUrlIds = BidUrl::pluck('id');
 
-		$query = Bid::query();
-		$scrapedOnly($query);
+		$query = Bid::whereIn('BID_URL_ID', $scrapedBidUrlIds);
 
 		if ($search !== '') {
 			$query->where(function ($q) use ($search) {
@@ -40,10 +39,11 @@ class BidController extends Controller
 			});
 		}
 
+		$latestDateOnly = null;
 		if ($filterDate !== '') {
 			$query->whereDate('CREATED', $filterDate);
 		} elseif (!$showAll && $search === '' && $filterNaics === '') {
-			$latestDate = Bid::where(fn($q) => $scrapedOnly($q))->max('CREATED');
+			$latestDate = (clone $query)->max('CREATED');
 			if ($latestDate) {
 				$latestDateOnly = \Carbon\Carbon::parse($latestDate)->toDateString();
 				$query->whereDate('CREATED', $latestDateOnly);
@@ -55,22 +55,15 @@ class BidController extends Controller
 		}
 
 		$bids = $query->latest('CREATED')->paginate($perPage)->withQueryString();
-		$naicsCodes = Bid::query()
-			->whereNotNull('BID_URL_ID')
-			->whereNotNull('NAICSCODE')
-			->where('NAICSCODE', '!=', '')
-			->distinct()
-			->orderBy('NAICSCODE')
-			->pluck('NAICSCODE');
+
+		$naicsCodes = $bids->pluck('NAICSCODE')->filter(fn($v) => !empty($v))->unique()->sort()->values();
+
 		$issueCount = ScrapeLog::count();
 		$scrapeLogs = ScrapeLog::latest('created_at')->limit(200)->get();
 
 		$latestDateLabel = null;
-		if ($filterDate === '' && !$showAll && $search === '' && $filterNaics === '') {
-			$latestRaw = Bid::where(fn($q) => $scrapedOnly($q))->max('CREATED');
-			if ($latestRaw) {
-				$latestDateLabel = \Carbon\Carbon::parse($latestRaw)->format('M. d, Y');
-			}
+		if ($latestDateOnly) {
+			$latestDateLabel = \Carbon\Carbon::parse($latestDateOnly)->format('M. d, Y');
 		}
 
 		return view('bids.index', compact('bids', 'naicsCodes', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterNaics', 'showAll', 'latestDateLabel'));
