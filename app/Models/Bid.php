@@ -31,7 +31,19 @@ class Bid extends Model
 				'NEEDS_REVIEW' => 0,
 				'INLINEURL' => 0,
 				'SOURCE_ID' => 0,
+				'STATEID' => 0,
+				'USERID' => 0,
+				'UNDERREVIEW' => 0,
 			];
+
+			if (is_null($bid->getAttribute('COUNTRY_ID'))) {
+				try {
+					$country = DB::selectOne("SELECT ID FROM COUNTRY WHERE ROWNUM = 1");
+					$bid->setAttribute('COUNTRY_ID', $country->id ?? $country->ID ?? 1);
+				} catch (\Throwable $e) {
+					$bid->setAttribute('COUNTRY_ID', 1);
+				}
+			}
 
 			foreach ($defaults as $col => $default) {
 				if (is_null($bid->getAttribute($col))) {
