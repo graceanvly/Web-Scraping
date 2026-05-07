@@ -416,12 +416,11 @@
 				</div>
 			</div>
 
-			<form method="POST" action="{{ route('bids.store') }}"
+			<form id="singleScrapeForm" onsubmit="return startSingleScrape(event)"
 				style="display:flex; gap:0.5rem; flex:1; max-width:600px;">
-				@csrf
-				<input type="URL" id="URL" name="URL" value="{{ old('URL') }}" placeholder="Enter bidding URL to scrape"
+				<input type="URL" id="singleScrapeUrl" placeholder="Enter bidding URL to scrape"
 					required style="flex:1; min-width:80px; padding:0.6rem 0.75rem; font-size:0.95rem;">
-				<button type="submit"
+				<button type="submit" id="singleScrapeBtn"
 					style="flex:0; width:auto; padding:0.45rem 0.9rem; font-size:0.85rem; white-space:nowrap;">
 					Scrape
 				</button>
@@ -1012,6 +1011,120 @@
 				d.textContent = s;
 				return d.innerHTML;
 			}
+		}
+
+		function startSingleScrape(e) {
+			e.preventDefault();
+			const url = document.getElementById('singleScrapeUrl').value.trim();
+			if (!url) return false;
+
+			const btn = document.getElementById('singleScrapeBtn');
+			const panel = document.getElementById('scrapeProgress');
+			const progressTitle = document.getElementById('progressTitle');
+			const progressCounter = document.getElementById('progressCounter');
+			const progressBar = document.getElementById('progressBar');
+			const progressUrl = document.getElementById('progressUrl');
+			const progressLog = document.getElementById('progressLog');
+
+			btn.disabled = true;
+			btn.textContent = 'Scraping...';
+			panel.style.display = 'block';
+			progressTitle.textContent = 'Scraping URL...';
+			progressCounter.textContent = '';
+			progressBar.style.width = '30%';
+			progressBar.style.background = '#2563eb';
+			progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtmlGlobal(url);
+			progressLog.innerHTML = '';
+
+			const streamUrl = "{{ route('bids.scrapeUrlStream') }}?url=" + encodeURIComponent(url);
+
+			fetch(streamUrl, {
+				method: 'GET',
+				headers: { 'Accept': 'text/event-stream' },
+			}).then(response => {
+				const reader = response.body.getReader();
+				const decoder = new TextDecoder();
+				let buffer = '';
+
+				function read() {
+					reader.read().then(({ done, value }) => {
+						if (done) {
+							btn.disabled = false;
+							btn.textContent = 'Scrape';
+							return;
+						}
+						buffer += decoder.decode(value, { stream: true });
+						const lines = buffer.split('\n');
+						buffer = lines.pop();
+
+						lines.forEach(line => {
+							if (!line.startsWith('data: ')) return;
+							try {
+								const ev = JSON.parse(line.substring(6));
+								handleSingleScrapeEvent(ev);
+							} catch (ex) {}
+						});
+						read();
+					});
+				}
+				read();
+			}).catch(err => {
+				progressTitle.textContent = 'Error: ' + err.message;
+				progressBar.style.background = '#dc2626';
+				btn.disabled = false;
+				btn.textContent = 'Scrape';
+			});
+
+			function handleSingleScrapeEvent(ev) {
+				switch (ev.type) {
+					case 'status':
+						progressBar.style.width = '50%';
+						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtmlGlobal(ev.step);
+						break;
+					case 'saved_bid':
+						addSingleLogLine('Saved: ' + ev.title, '#16a34a');
+						break;
+					case 'error':
+						addSingleLogLine('Error: ' + ev.message, '#dc2626');
+						break;
+					case 'complete':
+						progressBar.style.width = '100%';
+						let msg = ev.saved + ' bid(s) saved.';
+						if (ev.duplicates > 0) msg += ' ' + ev.duplicates + ' duplicate(s).';
+						if (ev.saved > 0) {
+							progressBar.style.background = '#16a34a';
+							progressTitle.textContent = 'Done! ' + msg;
+							setTimeout(() => location.reload(), 2000);
+						} else if (ev.duplicates > 0) {
+							progressBar.style.background = '#f59e0b';
+							progressTitle.textContent = msg;
+						} else {
+							progressBar.style.background = '#dc2626';
+							progressTitle.textContent = msg || 'No bids found.';
+						}
+						progressUrl.textContent = '';
+						btn.disabled = false;
+						btn.textContent = 'Scrape';
+						break;
+				}
+			}
+
+			function addSingleLogLine(text, color) {
+				const div = document.createElement('div');
+				div.style.color = color || '#6b7280';
+				div.style.padding = '1px 0';
+				div.textContent = text;
+				progressLog.appendChild(div);
+				progressLog.scrollTop = progressLog.scrollHeight;
+			}
+
+			return false;
+		}
+
+		function escapeHtmlGlobal(s) {
+			const d = document.createElement('div');
+			d.textContent = s;
+			return d.innerHTML;
 		}
 	</script>
 </body>

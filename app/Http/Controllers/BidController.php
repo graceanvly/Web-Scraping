@@ -248,6 +248,130 @@ class BidController extends Controller
 		}
 	}
 
+	public function scrapeUrlStream(Request $request, ScraperService $scraper, AIExtractor $ai)
+	{
+		@set_time_limit(0);
+		@ini_set('memory_limit', '1G');
+
+		$url = trim((string) $request->query('url', ''));
+
+		if (session()->isStarted()) {
+			session()->save();
+		}
+
+		return new StreamedResponse(function () use ($url, $scraper, $ai) {
+			$send = function ($data) {
+				echo "data: " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
+				if (ob_get_level()) ob_flush();
+				flush();
+			};
+
+			if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL) || !preg_match('/^https?:\\/\\//i', $url)) {
+				$send(['type' => 'error', 'message' => 'Please enter a valid http/https URL.']);
+				$send(['type' => 'complete', 'saved' => 0, 'duplicates' => 0]);
+				return;
+			}
+
+			try {
+				$send(['type' => 'status', 'step' => 'Fetching page...']);
+				$result = $scraper->fetch($url);
+
+				if (!empty($result['blocked'])) {
+					$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
+					$this->logIssue(null, $url, 'error', 'Blocked by site protection/firewall.' . $reason);
+					$send(['type' => 'error', 'message' => 'Blocked by site protection/firewall.' . $reason]);
+					$send(['type' => 'complete', 'saved' => 0, 'duplicates' => 0]);
+					return;
+				}
+				if (!empty($result['no_open_bids'])) {
+					$this->logIssue(null, $url, 'warning', 'No open bids found on this page.');
+					$send(['type' => 'error', 'message' => 'No open bids found on this page.']);
+					$send(['type' => 'complete', 'saved' => 0, 'duplicates' => 0]);
+					return;
+				}
+				if (empty($result['html']) && empty($result['pdf_bids']) && empty($result['bid_pages'])) {
+					$this->logIssue(null, $url, 'error', 'Could not read any content from this link.');
+					$send(['type' => 'error', 'message' => 'Could not read any content. Please confirm the page is publicly accessible.']);
+					$send(['type' => 'complete', 'saved' => 0, 'duplicates' => 0]);
+					return;
+				}
+
+				$send(['type' => 'status', 'step' => 'Extracting bids with AI...']);
+				$extracted = $ai->extract($url, $result['html'], $result['text'], $result['pdf_bids'] ?? [], $result['pdf_text'] ?? '', $result['bid_pages'] ?? []);
+
+				$today = \Carbon\Carbon::today();
+				$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
+					if (!empty($bid['ENDDATE'])) {
+						try { return !\Carbon\Carbon::parse($bid['ENDDATE'])->lt($today); } catch (\Exception $e) { return false; }
+					}
+					return true;
+				})->values();
+
+				$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
+				if (!empty($rawTitles)) {
+					$send(['type' => 'status', 'step' => 'Rewriting ' . count($rawTitles) . ' title(s)...']);
+				}
+				$rewrittenTitles = $ai->rewriteTitles($rawTitles);
+				$titleMap = array_combine($rawTitles, $rewrittenTitles);
+
+				$send(['type' => 'status', 'step' => 'Saving bids...']);
+				$savedCount = 0;
+				$duplicateCount = 0;
+
+				foreach ($filteredBids as $bidData) {
+					$rawTitle = $bidData['TITLE'] ?? null;
+					if (!$rawTitle) continue;
+					$title = $titleMap[$rawTitle] ?? $rawTitle;
+
+					$detailUrl = trim((string) ($bidData['URL'] ?? $url));
+					$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
+					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
+
+					$exists = Bid::where('TITLE', $title)
+						->where(function ($q) use ($detailUrl, $endDate) {
+							$q->where('URL', $detailUrl);
+							if ($endDate) { $q->orWhere('ENDDATE', $endDate); }
+						})->exists();
+
+					if ($exists) { $duplicateCount++; continue; }
+
+					$description = $bidData['DESCRIPTION'] ?? '';
+					if (is_array($description)) $description = $this->formatDescriptionArray($description);
+					$description = $this->stripNotProvidedLines($description);
+					if (empty($description) && !empty($result['pdf_text'])) $description = $result['pdf_text'];
+					if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) $description = $result['pdf_bids'][0]['PDF_LINK'];
+
+					if (!$this->looksLikeBid($title, $description, $url, $endDate)) continue;
+
+					$bid = new Bid();
+					$bid->URL = $detailUrl;
+					$bid->TITLE = $title;
+					$bid->ENDDATE = $endDate;
+					$bid->NAICSCODE = $this->normalizeNaicsCode($bidData['NAICSCODE'] ?? null, $description, $title, $url);
+					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
+					$bid->CREATED = now();
+					$bid->LAST_MODIFIED = now();
+					$bid->save();
+					$savedCount++;
+
+					$send(['type' => 'saved_bid', 'title' => $title]);
+				}
+
+				$send(['type' => 'complete', 'saved' => $savedCount, 'duplicates' => $duplicateCount]);
+			} catch (\Throwable $e) {
+				Log::error('Single URL scrape failed', ['url' => $url, 'error' => $e->getMessage()]);
+				$this->logIssue(null, $url, 'error', $this->friendlyExceptionMessage($e));
+				$send(['type' => 'error', 'message' => $this->friendlyExceptionMessage($e)]);
+				$send(['type' => 'complete', 'saved' => 0, 'duplicates' => 0]);
+			}
+		}, 200, [
+			'Content-Type' => 'text/event-stream',
+			'Cache-Control' => 'no-cache',
+			'Connection' => 'keep-alive',
+			'X-Accel-Buffering' => 'no',
+		]);
+	}
+
 	public function show(Bid $bid)
 	{
 		return view('bids.show', compact('bid'));

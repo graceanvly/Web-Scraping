@@ -31,6 +31,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/bids/{bid}', [BidController::class, 'destroy'])->name('bids.destroy');
     Route::post('/bidurl/scrape-all', [BidController::class, 'scrapeAll'])->name('bidurl.scrapeAll');
     Route::get('/scrape-stream', [BidController::class, 'scrapeStream'])->name('bidurl.scrapeStream');
+    Route::get('/scrape-url-stream', [BidController::class, 'scrapeUrlStream'])->name('bids.scrapeUrlStream');
     Route::get('/issues', [BidController::class, 'issues'])->name('scrape.issues');
     Route::delete('/issues', [BidController::class, 'clearIssues'])->name('scrape.clearIssues');
     Route::delete('/issues/{scrapeLog}', [BidController::class, 'destroyIssue'])->name('scrape.destroyIssue');
