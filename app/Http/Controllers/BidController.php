@@ -27,25 +27,30 @@ class BidController extends Controller
 		$filterNaics = trim((string) $request->query('naics', ''));
 		$showAll = $request->boolean('all');
 
-		$query = Bid::where('BID_URL_ID', '>', 0);
+		$scrapedUrlIds = BidUrl::whereNotNull('last_scraped_at')->pluck('id')->all();
 
-		if ($search !== '') {
-			$query->where(function ($q) use ($search) {
-				$q->where('TITLE', 'like', "%{$search}%")
-					->orWhere('NAICSCODE', 'like', "%{$search}%")
-					->orWhere('URL', 'like', "%{$search}%");
-			});
+		if (empty($scrapedUrlIds)) {
+			$bids = new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage);
+			$bids->withQueryString();
+		} else {
+			$query = Bid::whereIn('BID_URL_ID', $scrapedUrlIds);
+
+			if ($search !== '') {
+				$query->where(function ($q) use ($search) {
+					$q->where('TITLE', 'like', "%{$search}%")
+						->orWhere('NAICSCODE', 'like', "%{$search}%")
+						->orWhere('URL', 'like', "%{$search}%");
+				});
+			}
+			if ($filterDate !== '') {
+				$query->whereDate('CREATED', $filterDate);
+			}
+			if ($filterNaics !== '') {
+				$query->where('NAICSCODE', $filterNaics);
+			}
+
+			$bids = $query->latest('CREATED')->paginate($perPage)->withQueryString();
 		}
-
-		if ($filterDate !== '') {
-			$query->whereDate('CREATED', $filterDate);
-		}
-
-		if ($filterNaics !== '') {
-			$query->where('NAICSCODE', $filterNaics);
-		}
-
-		$bids = $query->latest('CREATED')->paginate($perPage)->withQueryString();
 
 		$naicsCodes = $bids->pluck('NAICSCODE')->filter(fn($v) => !empty($v))->unique()->sort()->values();
 
