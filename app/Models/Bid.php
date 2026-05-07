@@ -37,12 +37,7 @@ class Bid extends Model
 			];
 
 			if (is_null($bid->getAttribute('COUNTRY_ID'))) {
-				try {
-					$country = DB::selectOne("SELECT ID FROM COUNTRY WHERE ROWNUM = 1");
-					$bid->setAttribute('COUNTRY_ID', $country->id ?? $country->ID ?? 1);
-				} catch (\Throwable $e) {
-					$bid->setAttribute('COUNTRY_ID', 1);
-				}
+				$bid->setAttribute('COUNTRY_ID', 'us');
 			}
 
 			foreach ($defaults as $col => $default) {
