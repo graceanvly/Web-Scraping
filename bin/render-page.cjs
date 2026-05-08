@@ -18,9 +18,20 @@ if (!url) {
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-breakpad',
+                '--disable-crash-reporter',
+                '--no-first-run',
+                '--no-default-browser-check',
                 '--disable-blink-features=AutomationControlled',
                 '--window-size=1280,900',
             ],
+            env: {
+                ...process.env,
+                // EC2/Docker: avoid crashpad helper socket errors with bundled Chrome
+                CHROME_CRASHPAD_DISABLED: '1',
+            },
         });
         const page = await browser.newPage();
 

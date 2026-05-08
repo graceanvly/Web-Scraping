@@ -643,6 +643,8 @@ class ScraperService
 			'w9',
 			'protest protocol',
 			'pc_protest',
+			'spirit airlines shutdown',
+			'shutdown flymco',
 		];
 
 		foreach ($negativeSignals as $signal) {
@@ -874,11 +876,15 @@ class ScraperService
 		$tempFile = null;
 		try {
 			$this->ensureWithinBudget($startedAt, 'pdf download');
+			// Buffered download: some CDNs reset chunked streams; avoid gzip on binary.
 			$options = array_merge($requestOptions, [
-				'stream' => true,
 				'timeout' => $this->pdfTimeout,
 				'read_timeout' => $this->pdfTimeout,
 				'connect_timeout' => 20,
+				'decode_content' => false,
+				'headers' => [
+					'Accept' => 'application/pdf,*/*;q=0.9',
+				],
 			]);
 
 			$response = $this->requestWithAuth($url, $options, $authProvided);
@@ -892,25 +898,19 @@ class ScraperService
 				throw new \RuntimeException("PDF is larger than the safe parser limit (" . $this->formatBytes($this->maxPdfParseBytes) . ").");
 			}
 
-			$tempFile = tmpfile();
-			$meta = stream_get_meta_data($tempFile);
-			$body = $response->getBody();
-			$downloaded = 0;
-
-			while (!$body->eof()) {
-				$this->ensureWithinBudget($startedAt, 'pdf stream read');
-				$chunk = $body->read(8192);
-				$downloaded += strlen($chunk);
-				if ($downloaded > $this->maxPdfBytes) {
-					throw new \RuntimeException("PDF exceeds size limit (" . $this->formatBytes($this->maxPdfBytes) . ").");
-				}
-				if ($downloaded > $this->maxPdfParseBytes) {
-					throw new \RuntimeException("PDF exceeds safe parser limit (" . $this->formatBytes($this->maxPdfParseBytes) . ").");
-				}
-				fwrite($tempFile, $chunk);
+			$this->ensureWithinBudget($startedAt, 'pdf body read');
+			$raw = $response->getBody()->getContents();
+			if (strlen($raw) > $this->maxPdfBytes) {
+				throw new \RuntimeException("PDF exceeds size limit (" . $this->formatBytes($this->maxPdfBytes) . ").");
+			}
+			if (strlen($raw) > $this->maxPdfParseBytes) {
+				throw new \RuntimeException("PDF exceeds safe parser limit (" . $this->formatBytes($this->maxPdfParseBytes) . ").");
 			}
 
-			$parser = new Parser();
+			$tempFile = tmpfile();
+			$meta = stream_get_meta_data($tempFile);
+			fwrite($tempFile, $raw);
+			rewind($tempFile);
 			$pdf = $parser->parseFile($meta['uri']);
 			$text = trim($pdf->getText());
 
@@ -1071,6 +1071,8 @@ class ScraperService
 		if ($puppeteerCache !== '') {
 			$env['PUPPETEER_CACHE_DIR'] = $puppeteerCache;
 		}
+
+		$env['CHROME_CRASHPAD_DISABLED'] = '1';
 
 		$cookieHeader = trim((string) env('SCRAPER_COOKIE', ''));
 		if ($cookieHeader !== '') {
