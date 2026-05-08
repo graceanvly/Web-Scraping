@@ -637,6 +637,8 @@ class ScraperService
 			'vision',
 			'w-9',
 			'w9',
+			'protest protocol',
+			'pc_protest',
 		];
 
 		foreach ($negativeSignals as $signal) {
