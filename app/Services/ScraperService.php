@@ -70,6 +70,7 @@ class ScraperService
 		$this->maxPerUrlSeconds = max(60, (int) env('SCRAPER_MAX_PER_URL_SECONDS', 180));
 		$this->maxHtmlBytes = max(524288, (int) env('SCRAPER_MAX_HTML_BYTES', 3145728));
 		$this->htmlToTextMaxChars = max(100000, (int) env('SCRAPER_HTML_TO_TEXT_CAP', 400000));
+		$this->pdfTimeout = max(15, min(180, (int) env('SCRAPER_PDF_TIMEOUT', 60)));
 	}
 
 
@@ -245,9 +246,11 @@ class ScraperService
 			Log::info('PDF LINKS FOUND', ['url' => $url, 'count' => count($pdfBids)]);
 
 			$pdfTexts = [];
+			$pdfTotal = count($pdfBids);
 			foreach ($pdfBids as $idx => $bid) {
 				if (!empty($bid['PDF_LINK'])) {
 					$this->ensureWithinBudget($startedAt, 'pdf download loop');
+					$report('Listing PDF ' . ((int) $idx + 1) . '/' . $pdfTotal . '…');
 					$pdfResult = $this->fetchPdf($bid['PDF_LINK'], $requestOptions, $authProvided, $startedAt);
 					if (!empty($pdfResult['text'])) {
 						$pdfTexts[] = $pdfResult['text'];
@@ -287,9 +290,10 @@ class ScraperService
 				}
 
 				$pdfTexts = [];
-				foreach ($pagePdfLinks as $link) {
+				foreach ($pagePdfLinks as $i => $link) {
 					if (!empty($link['PDF_LINK'])) {
 						$this->ensureWithinBudget($startedAt, 'detail pdf loop');
+						$report('Detail PDF ' . ((int) $i + 1) . '/' . count($pagePdfLinks) . '…');
 						$pdfResult = $this->fetchPdf($link['PDF_LINK'], $requestOptions, $authProvided, $startedAt);
 						if (!empty($pdfResult['text'])) {
 							$pdfTexts[] = $pdfResult['text'];
@@ -779,7 +783,11 @@ class ScraperService
 			$process->run();
 
 			if (!$process->isSuccessful()) {
-				Log::warning('INTERACTIVE SCAN FAILED', ['url' => $url, 'error' => trim($process->getErrorOutput())]);
+				$err = trim($process->getErrorOutput());
+				Log::warning('INTERACTIVE SCAN FAILED', ['url' => $url, 'error' => $err]);
+				if (str_contains($err, 'libxkbcommon') || str_contains($err, 'error while loading shared libraries') || str_contains($err, 'Code: 127')) {
+					Log::warning('PUPPETEER MISSING OS LIBS', ['url' => $url, 'hint' => 'On Amazon Linux EC2 run: bash bin/install-puppeteer-chrome-deps-amzn.sh (then restart php-fpm).']);
+				}
 				return [];
 			}
 
@@ -923,12 +931,17 @@ class ScraperService
 			if (is_resource($tempFile)) {
 				fclose($tempFile);
 			}
-			Log::error('PDF FETCH ERROR', ['url' => $url, 'error' => $e->getMessage()]);
+			$msg = $e->getMessage();
+			$hint = '';
+			if (stripos($msg, 'stream') !== false || stripos($msg, 'timeout') !== false) {
+				$hint = ' (try SCRAPER_PDF_TIMEOUT in .env; CDN may throttle server IPs)';
+			}
+			Log::warning('PDF FETCH ERROR', ['url' => $url, 'error' => $msg, 'hint' => $hint]);
 			return [
 				'final_url' => $url,
 				'text' => '',
 				'is_pdf' => true,
-				'error' => $e->getMessage(),
+				'error' => $msg . $hint,
 			];
 		}
 	}
@@ -983,6 +996,9 @@ class ScraperService
 		if (!$process->isSuccessful()) {
 			$error = trim($process->getErrorOutput());
 			Log::warning('PUPPETEER PROCESS FAILED', ['url' => $url, 'error' => $error]);
+			if (str_contains($error, 'libxkbcommon') || str_contains($error, 'error while loading shared libraries') || str_contains($error, 'Code: 127')) {
+				Log::warning('PUPPETEER MISSING OS LIBS', ['url' => $url, 'hint' => 'On Amazon Linux EC2 run: bash bin/install-puppeteer-chrome-deps-amzn.sh (then restart php-fpm).']);
+			}
 			return null;
 		}
 
