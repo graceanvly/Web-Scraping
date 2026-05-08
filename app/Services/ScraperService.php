@@ -6,8 +6,9 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException;
 use GuzzleHttp\Exception\TransferException;
-use Smalot\PdfParser\Parser;
 use Illuminate\Support\Facades\Log;
+use Psr\Http\Message\ResponseInterface;
+use Smalot\PdfParser\Parser;
 
 class ScraperService
 {
@@ -18,8 +19,10 @@ class ScraperService
 	private int $maxPdfDownloads = 5; // Avoid excessive PDF processing per page.
 	private int $maxInteractivePages = 8; // Browser-clicked states to feed into AI.
 	private int $maxInteractivePdfDownloads = 3; // PDFs discovered after UI clicks.
-	private int $maxPerUrlSeconds = 120; // Hard cap per URL scrape to avoid controller timeouts.
+	private int $maxPerUrlSeconds = 180; // Hard cap per URL scrape (HTTP + Puppeteer + follow-ups).
 	private int $requestTimeout = 60; // General HTTP request timeout.
+	private int $maxHtmlBytes = 3145728; // Max raw HTML stored per response (3 MB).
+	private int $htmlToTextMaxChars = 400000; // Cap DOM parsing to avoid multi-minute hangs on huge pages.
 
 	// app/Services/ScraperService.php
 	public function __construct()
@@ -63,6 +66,10 @@ class ScraperService
 				CURLOPT_ENCODING => 'gzip,deflate',
 			],
 		]);
+
+		$this->maxPerUrlSeconds = max(60, (int) env('SCRAPER_MAX_PER_URL_SECONDS', 180));
+		$this->maxHtmlBytes = max(524288, (int) env('SCRAPER_MAX_HTML_BYTES', 3145728));
+		$this->htmlToTextMaxChars = max(100000, (int) env('SCRAPER_HTML_TO_TEXT_CAP', 400000));
 	}
 
 
@@ -92,9 +99,9 @@ class ScraperService
 
 		try {
 			$this->ensureWithinBudget($startedAt, 'initial page request');
-			$shortOpts = array_merge($requestOptions, ['timeout' => 30, 'connect_timeout' => 15]);
+			$shortOpts = array_merge($requestOptions, ['timeout' => 30, 'read_timeout' => 30, 'connect_timeout' => 15]);
 			$response = $this->requestWithAuth($url, $shortOpts, $authProvided);
-			$bestHtml = (string) ($response->getBody() ?? '');
+			$bestHtml = $this->limitedResponseBody($response, $startedAt);
 			$bestText = $this->htmlToText($bestHtml);
 		} catch (ConnectException $e) {
 			Log::warning('SCRAPER CONNECT/TIMEOUT ERROR - falling back to headless Chrome', ['url' => $url, 'error' => $e->getMessage()]);
@@ -118,7 +125,7 @@ class ScraperService
 					$response = $this->requestWithAuth($httpsUrl, $requestOptions, $authProvided);
 					$url = $httpsUrl;
 					$finalUrl = $url;
-					$bestHtml = (string) ($response->getBody() ?? '');
+					$bestHtml = $this->limitedResponseBody($response, $startedAt);
 					$bestText = $this->htmlToText($bestHtml);
 				} catch (TransferException $e2) {
 					$httpFailed = true;
@@ -136,7 +143,7 @@ class ScraperService
 					$response = $this->requestWithAuth($httpUrl, $requestOptions, $authProvided);
 					$url = $httpUrl;
 					$finalUrl = $url;
-					$bestHtml = (string) ($response->getBody() ?? '');
+					$bestHtml = $this->limitedResponseBody($response, $startedAt);
 					$bestText = $this->htmlToText($bestHtml);
 				} catch (TransferException $e2) {
 					$status2 = ($e2 instanceof RequestException) ? $e2->getResponse()?->getStatusCode() : null;
@@ -168,7 +175,8 @@ class ScraperService
 			Log::info("HEADLESS CHROME TRIGGERED ({$reason})", ['url' => $url, 'text_length' => strlen($bestText)]);
 			try {
 				$this->ensureWithinBudget($startedAt, 'headless chrome fetch');
-				$renderedHtml = $this->renderWithPuppeteer($url, $isBrowserCheck ? 10000 : (($httpFailed || $isSpa) ? 8000 : 2000));
+				$puppetDelay = $isBrowserCheck ? 5000 : (($httpFailed || $isSpa) ? 4000 : 1500);
+				$renderedHtml = $this->renderWithPuppeteer($url, $puppetDelay, $startedAt);
 
 				if ($renderedHtml !== null) {
 					$renderedText = $this->htmlToText($renderedHtml);
@@ -245,7 +253,7 @@ class ScraperService
 
 				$this->ensureWithinBudget($startedAt, 'detail page request');
 				$response = $this->requestWithAuth($detail['URL'], $requestOptions, $authProvided);
-				$pageHtml = (string) $response->getBody();
+				$pageHtml = $this->limitedResponseBody($response, $startedAt);
 				$pageText = $this->htmlToText($pageHtml);
 				$this->guardLoginRequirement($pageHtml, $pageText, $authProvided);
 				$pagePdfLinks = $this->findPdfLink($pageHtml, $detail['URL']);
@@ -698,12 +706,15 @@ class ScraperService
 				$nodeBin = $this->findNodeBinary() ?? 'node';
 			}
 
+			$elapsed = microtime(true) - $startedAt;
+			$subTimeout = (int) max(25, min(90, floor($this->maxPerUrlSeconds - $elapsed - 5)));
+
 			$process = new \Symfony\Component\Process\Process(
 				[$nodeBin, $script, $url, '2500', (string) $this->maxInteractivePages],
 				base_path(),
 				$this->nodeProcessEnv($nodeBin),
 				null,
-				100
+				$subTimeout
 			);
 			$process->run();
 
@@ -723,6 +734,9 @@ class ScraperService
 
 			foreach ($data['pages'] as $page) {
 				$html = (string) ($page['html'] ?? '');
+				if (strlen($html) > $this->maxHtmlBytes) {
+					$html = substr($html, 0, $this->maxHtmlBytes);
+				}
 				$text = $this->htmlToText($html);
 				if ($text === '') {
 					$text = trim((string) ($page['text'] ?? ''));
@@ -858,8 +872,38 @@ class ScraperService
 		}
 	}
 
-	private function renderWithPuppeteer(string $url, int $delayMs = 3000): ?string
+	private function limitedResponseBody(ResponseInterface $response, float $startedAt): string
 	{
+		$stream = $response->getBody();
+		$buf = '';
+		while (!$stream->eof()) {
+			$this->ensureWithinBudget($startedAt, 'downloading HTML');
+			$chunk = $stream->read(65536);
+			if ($chunk === '') {
+				break;
+			}
+			$buf .= $chunk;
+			if (strlen($buf) >= $this->maxHtmlBytes) {
+				Log::warning('SCRAPER HTML TRUNCATED', ['max_bytes' => $this->maxHtmlBytes]);
+				break;
+			}
+		}
+
+		return $buf;
+	}
+
+	private function renderWithPuppeteer(string $url, int $delayMs, float $startedAt): ?string
+	{
+		$this->ensureWithinBudget($startedAt, 'before headless chrome');
+		$elapsed = microtime(true) - $startedAt;
+		$remaining = $this->maxPerUrlSeconds - $elapsed - 3;
+		if ($remaining < 12) {
+			Log::warning('PUPPETEER SKIPPED (no time left in budget)', ['url' => $url, 'remaining_sec' => $remaining]);
+			return null;
+		}
+		$processTimeout = (int) max(20, min(85, $remaining));
+		$delayMs = min(max(0, $delayMs), 6000);
+
 		$script = base_path('bin/render-page.cjs');
 		$nodeBin = trim((string) env('NODE_BINARY', ''));
 		if ($nodeBin === '' || ((str_contains($nodeBin, '\\') || str_contains($nodeBin, '/')) && !file_exists($nodeBin))) {
@@ -867,11 +911,11 @@ class ScraperService
 		}
 
 		$process = new \Symfony\Component\Process\Process(
-			[$nodeBin, $script, $url, (string) $delayMs],
+			[$nodeBin, $script, $url, (string) $delayMs, (string) min(45000, $processTimeout * 1000)],
 			base_path(),
 			$this->nodeProcessEnv($nodeBin),
 			null,
-			120
+			$processTimeout
 		);
 		$process->run();
 
@@ -886,7 +930,7 @@ class ScraperService
 			return null;
 		}
 
-		return $html;
+		return strlen($html) > $this->maxHtmlBytes ? substr($html, 0, $this->maxHtmlBytes) : $html;
 	}
 
 	private function findNodeBinary(): ?string
@@ -948,6 +992,10 @@ class ScraperService
 
 	private function htmlToText(string $html): string
 	{
+		if (strlen($html) > $this->htmlToTextMaxChars) {
+			$html = substr($html, 0, $this->htmlToTextMaxChars);
+		}
+
 		libxml_use_internal_errors(true);
 		$dom = new \DOMDocument();
 		if (!$dom->loadHTML($html)) {

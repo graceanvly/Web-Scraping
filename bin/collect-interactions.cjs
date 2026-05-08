@@ -12,16 +12,8 @@ if (!url) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function stableGoto(page, targetUrl) {
-    try {
-        await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-    } catch (navErr) {
-        if (navErr.message && navErr.message.includes('timeout')) {
-            await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-            await sleep(3000);
-            return;
-        }
-        throw navErr;
-    }
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await sleep(1500);
 }
 
 function trimHtml(html) {

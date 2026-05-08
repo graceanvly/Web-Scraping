@@ -1,10 +1,11 @@
 const puppeteer = require('puppeteer');
 
 const url = process.argv[2];
-const delay = parseInt(process.argv[3] || '5000', 10);
+const delay = parseInt(process.argv[3] || '3000', 10);
+const navTimeout = parseInt(process.argv[4] || '45000', 10);
 
 if (!url) {
-    process.stderr.write('Usage: node render-page.cjs <url> [delay_ms]\n');
+    process.stderr.write('Usage: node render-page.cjs <url> [delay_ms] [nav_timeout_ms]\n');
     process.exit(1);
 }
 
@@ -39,23 +40,16 @@ if (!url) {
             Object.defineProperty(navigator, 'webdriver', { get: () => false });
         });
 
-        try {
-            await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-        } catch (navErr) {
-            if (navErr.message && navErr.message.includes('timeout')) {
-                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                await new Promise(r => setTimeout(r, 3000));
-            } else {
-                throw navErr;
-            }
-        }
+        const safeNavMs = Math.min(Math.max(15000, navTimeout), 120000);
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: safeNavMs });
 
-        if (delay > 0) {
-            await new Promise(r => setTimeout(r, delay));
+        const settleMs = Math.min(Math.max(0, delay), 8000);
+        if (settleMs > 0) {
+            await new Promise((r) => setTimeout(r, settleMs));
         }
 
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 800));
 
         const html = await page.content();
         process.stdout.write(html);
