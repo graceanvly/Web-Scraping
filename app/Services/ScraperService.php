@@ -78,7 +78,7 @@ class ScraperService
 		$startedAt = microtime(true);
 		$onProgress = $options['on_progress'] ?? null;
 		$batchMode = !empty($options['batch']);
-		$maxDetailLinks = $batchMode ? max(1, min(8, (int) env('SCRAPER_BATCH_MAX_DETAIL_PAGES', 3))) : 8;
+		$maxDetailLinks = $batchMode ? max(0, min(8, (int) env('SCRAPER_BATCH_MAX_DETAIL_PAGES', 3))) : 8;
 		$maxListingPdfs = $batchMode ? max(0, min($this->maxPdfDownloads, (int) env('SCRAPER_BATCH_MAX_LISTING_PDFS', 2))) : $this->maxPdfDownloads;
 		$maxDetailPdfsPerPage = $batchMode ? max(0, min(3, (int) env('SCRAPER_BATCH_MAX_DETAIL_PDFS', 1))) : PHP_INT_MAX;
 
@@ -263,7 +263,7 @@ class ScraperService
 		}
 
 		// 3b. Follow clickable bid titles (detail pages) to pull richer data and PDFs
-		$detailLinks = $noOpenBids ? [] : $this->findBidDetailLinks($bestHtml, $url);
+		$detailLinks = ($noOpenBids || $maxDetailLinks === 0) ? [] : $this->findBidDetailLinks($bestHtml, $url);
 		$detailLinks = array_slice($detailLinks, 0, $maxDetailLinks);
 		$detailTotal = count($detailLinks);
 		$detailIdx = 0;
@@ -335,6 +335,32 @@ class ScraperService
 			'blocked_reason' => $blockedReason,
 			'no_open_bids' => $noOpenBids,
 		];
+	}
+
+	/**
+	 * OpenGov "portal" URLs with department filters return Cloudflare interstitials to server-side clients (403 + "Just a moment…"), not bid detail pages.
+	 */
+	private function isOpenGovPortalListingUrl(string $url): bool
+	{
+		if (filter_var(env('SCRAPER_ALLOW_OPENGOV_PORTAL_DETAIL_LINKS', false), FILTER_VALIDATE_BOOLEAN)) {
+			return false;
+		}
+
+		$parts = parse_url($url);
+		if (empty($parts['host'])) {
+			return false;
+		}
+
+		$host = strtolower($parts['host']);
+		if ($host !== 'procurement.opengov.com' && !str_ends_with($host, '.procurement.opengov.com')) {
+			return false;
+		}
+
+		$path = strtolower($parts['path'] ?? '');
+		$query = $parts['query'] ?? '';
+
+		return str_contains($path, '/portal/')
+			&& (str_contains($query, 'departmentId=') || str_contains($query, 'departmentid='));
 	}
 
 	private function buildRequestOptions(?string $username, ?string $password): array
@@ -675,6 +701,10 @@ class ScraperService
 				continue;
 
 			$resolved = $this->resolveUrl($href, $baseUrl);
+			if ($this->isOpenGovPortalListingUrl($resolved)) {
+				continue;
+			}
+
 			$lower = strtolower($text . ' ' . $resolved);
 			if (!preg_match('/bid|rfp|rfq|tender|solicitation|proposal/', $lower)) {
 				continue;
@@ -858,6 +888,7 @@ class ScraperService
 			$downloaded = 0;
 
 			while (!$body->eof()) {
+				$this->ensureWithinBudget($startedAt, 'pdf stream read');
 				$chunk = $body->read(8192);
 				$downloaded += strlen($chunk);
 				if ($downloaded > $this->maxPdfBytes) {
@@ -994,6 +1025,11 @@ class ScraperService
 
 	private function nodeProcessEnv(string $nodeBin): array
 	{
+		$isWindows = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
+		$home = $isWindows
+			? (getenv('USERPROFILE') ?: getenv('HOME') ?: '')
+			: (getenv('HOME') ?: '');
+
 		$env = [
 			'SystemRoot' => getenv('SystemRoot') ?: 'C:\\WINDOWS',
 			'LOCALAPPDATA' => getenv('LOCALAPPDATA') ?: '',
@@ -1002,12 +1038,20 @@ class ScraperService
 			'TEMP' => getenv('TEMP') ?: sys_get_temp_dir(),
 			'TMP' => getenv('TMP') ?: sys_get_temp_dir(),
 			'APPDATA' => getenv('APPDATA') ?: '',
-			'HOME' => getenv('USERPROFILE') ?: '',
+			'HOME' => $home,
 			'NODE_PATH' => base_path('node_modules'),
 		];
 
 		if ((str_contains($nodeBin, '\\') || str_contains($nodeBin, '/')) && file_exists($nodeBin)) {
 			$env['Path'] = dirname($nodeBin) . PATH_SEPARATOR . $env['Path'];
+		}
+
+		$puppeteerCache = trim((string) env('PUPPETEER_CACHE_DIR', ''));
+		if ($puppeteerCache === '' && !$isWindows) {
+			$puppeteerCache = storage_path('app/puppeteer-cache');
+		}
+		if ($puppeteerCache !== '') {
+			$env['PUPPETEER_CACHE_DIR'] = $puppeteerCache;
 		}
 
 		$cookieHeader = trim((string) env('SCRAPER_COOKIE', ''));
