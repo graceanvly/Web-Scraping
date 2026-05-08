@@ -911,6 +911,7 @@ class ScraperService
 			$meta = stream_get_meta_data($tempFile);
 			fwrite($tempFile, $raw);
 			rewind($tempFile);
+			$parser = new Parser();
 			$pdf = $parser->parseFile($meta['uri']);
 			$text = trim($pdf->getText());
 
