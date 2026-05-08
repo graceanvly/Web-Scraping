@@ -409,8 +409,8 @@ class BidController extends Controller
 					continue;
 				}
 
-				// 1) Fetch data for each bid URL
-				$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null);
+				// 1) Fetch data for each bid URL (batch: skip interactive scan, tighter PDF/detail caps)
+				$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null, ['batch' => true]);
 				if (!empty($result['blocked'])) {
 					$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
 					$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by site protection/firewall.' . $reason);
@@ -654,7 +654,12 @@ class BidController extends Controller
 					$urlStartedAt = microtime(true);
 
 					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Fetching page...']);
-					$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null);
+					$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null, [
+						'batch' => true,
+						'on_progress' => function (string $message) use ($send, $idx) {
+							$send(['type' => 'status', 'index' => $idx + 1, 'step' => $message]);
+						},
+					]);
 
 					if (!empty($result['blocked'])) {
 						$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';

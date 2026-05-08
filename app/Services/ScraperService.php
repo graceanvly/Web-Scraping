@@ -73,9 +73,24 @@ class ScraperService
 	}
 
 
-	public function fetch(string $url, ?string $username = null, ?string $password = null): array
+	public function fetch(string $url, ?string $username = null, ?string $password = null, array $options = []): array
 	{
 		$startedAt = microtime(true);
+		$onProgress = $options['on_progress'] ?? null;
+		$batchMode = !empty($options['batch']);
+		$maxDetailLinks = $batchMode ? max(1, min(8, (int) env('SCRAPER_BATCH_MAX_DETAIL_PAGES', 3))) : 8;
+		$maxListingPdfs = $batchMode ? max(0, min($this->maxPdfDownloads, (int) env('SCRAPER_BATCH_MAX_LISTING_PDFS', 2))) : $this->maxPdfDownloads;
+		$maxDetailPdfsPerPage = $batchMode ? max(0, min(3, (int) env('SCRAPER_BATCH_MAX_DETAIL_PDFS', 1))) : PHP_INT_MAX;
+
+		$report = function (string $message) use ($onProgress): void {
+			if ($onProgress !== null) {
+				try {
+					($onProgress)($message);
+				} catch (\Throwable) {
+				}
+			}
+		};
+
 		$pdfText = '';
 		$bidPages = [];
 		$noOpenBids = false;
@@ -170,9 +185,12 @@ class ScraperService
 			$needsHeadless = $isBrowserCheck || $isSpa || strlen($bestText) < 500;
 		}
 
+		$report($needsHeadless ? 'Listing page needs browser render…' : 'Listing page loaded…');
+
 		if ($needsHeadless) {
 			$reason = $httpFailed ? $httpFailReason : ($isBrowserCheck ? 'browser check detected' : ($isSpa ? 'SPA detected' : 'thin content'));
 			Log::info("HEADLESS CHROME TRIGGERED ({$reason})", ['url' => $url, 'text_length' => strlen($bestText)]);
+			$report('Headless browser (Puppeteer)… this can take 1–2 minutes.');
 			try {
 				$this->ensureWithinBudget($startedAt, 'headless chrome fetch');
 				$puppetDelay = $isBrowserCheck ? 5000 : (($httpFailed || $isSpa) ? 4000 : 1500);
@@ -204,7 +222,8 @@ class ScraperService
 			Log::info('NO OPEN BIDS FLAGGED', ['url' => $url]);
 		}
 
-		if (!$blocked && !$noOpenBids && $this->shouldCollectInteractivePages($bestHtml, $bestText)) {
+		if (!$blocked && !$noOpenBids && !$batchMode && $this->shouldCollectInteractivePages($bestHtml, $bestText)) {
+			$report('Interactive page scan (clicks/tabs)…');
 			$interactivePages = $this->collectInteractivePages($url, $startedAt, $requestOptions, $authProvided);
 			if (!empty($interactivePages)) {
 				$bidPages = array_merge($bidPages, $interactivePages);
@@ -216,10 +235,12 @@ class ScraperService
 		$pdfBids = $noOpenBids ? [] : $this->findPdfLink($bestHtml, $url);
 
 		if (!empty($pdfBids)) {
-			if (count($pdfBids) > $this->maxPdfDownloads) {
-				Log::info('PDF DOWNLOADS CAPPED', ['url' => $url, 'found' => count($pdfBids), 'capped_at' => $this->maxPdfDownloads]);
-				$pdfBids = array_slice($pdfBids, 0, $this->maxPdfDownloads);
+			if (count($pdfBids) > $maxListingPdfs) {
+				Log::info('PDF DOWNLOADS CAPPED', ['url' => $url, 'found' => count($pdfBids), 'capped_at' => $maxListingPdfs, 'batch' => $batchMode]);
+				$pdfBids = array_slice($pdfBids, 0, $maxListingPdfs);
 			}
+
+			$report('Downloading PDFs from listing (' . count($pdfBids) . ')…');
 
 			Log::info('PDF LINKS FOUND', ['url' => $url, 'count' => count($pdfBids)]);
 
@@ -243,9 +264,13 @@ class ScraperService
 
 		// 3b. Follow clickable bid titles (detail pages) to pull richer data and PDFs
 		$detailLinks = $noOpenBids ? [] : $this->findBidDetailLinks($bestHtml, $url);
-		$detailLinks = array_slice($detailLinks, 0, 8);
+		$detailLinks = array_slice($detailLinks, 0, $maxDetailLinks);
+		$detailTotal = count($detailLinks);
+		$detailIdx = 0;
 		foreach ($detailLinks as $detail) {
+			$detailIdx++;
 			try {
+				$report("Detail page {$detailIdx}/{$detailTotal}…");
 				$pageHtml = '';
 				$pageText = '';
 				$pagePdfText = '';
@@ -257,6 +282,9 @@ class ScraperService
 				$pageText = $this->htmlToText($pageHtml);
 				$this->guardLoginRequirement($pageHtml, $pageText, $authProvided);
 				$pagePdfLinks = $this->findPdfLink($pageHtml, $detail['URL']);
+				if ($maxDetailPdfsPerPage >= 0 && count($pagePdfLinks) > $maxDetailPdfsPerPage) {
+					$pagePdfLinks = array_slice($pagePdfLinks, 0, $maxDetailPdfsPerPage);
+				}
 
 				$pdfTexts = [];
 				foreach ($pagePdfLinks as $link) {
