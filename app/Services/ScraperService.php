@@ -564,6 +564,19 @@ class ScraperService
 		}
 	}
 
+	private function logPuppeteerDiagnostics(string $url, string $stderr): void
+	{
+		if ($stderr === '') {
+			return;
+		}
+		if (str_contains($stderr, 'Could not find Chrome') || str_contains($stderr, 'chrome-headless-shell')) {
+			Log::warning('PUPPETEER BROWSER BINARIES MISSING', [
+				'url' => $url,
+				'hint' => 'As php-fpm user: bash bin/install-puppeteer-browsers.sh (Chrome + chrome-headless-shell into storage/app/puppeteer-cache). SCRAPER_CHROME_HEADLESS=shell requires chrome-headless-shell; omit shell if you only installed full Chrome.',
+			]);
+		}
+	}
+
 	private function findPdfLink(string $html, string $baseUrl): array
 	{
 		if (empty($html))
@@ -871,8 +884,9 @@ class ScraperService
 					Log::warning('PUPPETEER CRASHPAD', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_SINGLE_PROCESS=true and/or SCRAPER_CHROME_USER_DATA_DIR=/tmp/chrome-scraper (writable by php-fpm user) in .env.']);
 				}
 				if (str_contains($err, 'Target closed') || str_contains($err, 'Protocol error')) {
-					Log::warning('PUPPETEER PROTOCOL', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_HEADLESS=shell in .env, leave SCRAPER_CHROME_PIPE unset/false, or set PUPPETEER_EXECUTABLE_PATH to system Chromium (e.g. /usr/bin/chromium-browser).']);
+					Log::warning('PUPPETEER PROTOCOL', ['url' => $url, 'hint' => 'Try leaving SCRAPER_CHROME_PIPE unset; SCRAPER_CHROME_HEADLESS=shell after bin/install-puppeteer-browsers.sh; or PUPPETEER_EXECUTABLE_PATH to system Chromium.']);
 				}
+				$this->logPuppeteerDiagnostics($url, $err);
 				return [];
 			}
 
@@ -1091,8 +1105,9 @@ class ScraperService
 				Log::warning('PUPPETEER CRASHPAD', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_SINGLE_PROCESS=true and/or SCRAPER_CHROME_USER_DATA_DIR=/tmp/chrome-scraper in .env.']);
 			}
 			if (str_contains($error, 'Target closed') || str_contains($error, 'Protocol error')) {
-				Log::warning('PUPPETEER PROTOCOL', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_HEADLESS=shell, leave SCRAPER_CHROME_PIPE unset/false, or set PUPPETEER_EXECUTABLE_PATH to system Chromium.']);
+				Log::warning('PUPPETEER PROTOCOL', ['url' => $url, 'hint' => 'Leave SCRAPER_CHROME_PIPE unset; use SCRAPER_CHROME_HEADLESS=shell only after install-puppeteer-browsers.sh; or set PUPPETEER_EXECUTABLE_PATH.']);
 			}
+			$this->logPuppeteerDiagnostics($url, $error);
 			return null;
 		}
 

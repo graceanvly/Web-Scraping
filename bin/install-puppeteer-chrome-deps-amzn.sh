@@ -42,4 +42,5 @@ fi
 	nss-util \
 	pango
 
-echo "Done. Restart PHP-FPM (e.g. sudo systemctl reload php-fpm) and retry scraping."
+echo "Done OS libraries. Restart PHP-FPM (e.g. sudo systemctl reload php-fpm)."
+echo "Then from scraper project dir, as php-fpm user: sudo -u apache bash bin/install-puppeteer-browsers.sh"
