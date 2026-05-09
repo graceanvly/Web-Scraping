@@ -195,6 +195,9 @@ class ScraperService
 			try {
 				$this->ensureWithinBudget($startedAt, 'headless chrome fetch');
 				$puppetDelay = $isBrowserCheck ? 5000 : (($httpFailed || $isSpa) ? 4000 : 1500);
+				if ($this->isHeavyJsProcurementPortal($url)) {
+					$puppetDelay = max($puppetDelay, (int) env('SCRAPER_HEAVY_PORTAL_SETTLE_MS', 22000));
+				}
 				$renderedHtml = $this->renderWithPuppeteer($url, $puppetDelay, $startedAt);
 
 				if ($renderedHtml !== null) {
@@ -223,7 +226,7 @@ class ScraperService
 			Log::info('NO OPEN BIDS FLAGGED', ['url' => $url]);
 		}
 
-		if (!$blocked && !$noOpenBids && !$batchMode && $this->shouldCollectInteractivePages($bestHtml, $bestText)) {
+		if (!$blocked && !$noOpenBids && (!$batchMode || $this->isHeavyJsProcurementPortal($url)) && $this->shouldCollectInteractivePages($bestHtml, $bestText)) {
 			$report('Interactive page scan (clicks/tabs)…');
 			$interactivePages = $this->collectInteractivePages($url, $startedAt, $requestOptions, $authProvided);
 			if (!empty($interactivePages)) {
@@ -339,6 +342,36 @@ class ScraperService
 			'blocked_reason' => $blockedReason,
 			'no_open_bids' => $noOpenBids,
 		];
+	}
+
+	/**
+	 * Hosts known to need long headless settle / higher process budget (React/Angular portals).
+	 * Extend via SCRAPER_HEAVY_PORTAL_HOST_SUFFIXES=comma,separated
+	 */
+	private function isHeavyJsProcurementPortal(string $url): bool
+	{
+		$host = strtolower((string) parse_url($url, PHP_URL_HOST));
+		if ($host === '') {
+			return false;
+		}
+
+		$suffixes = ['bonfirehub.com'];
+		foreach (array_filter(array_map('trim', explode(',', (string) env('SCRAPER_HEAVY_PORTAL_HOST_SUFFIXES', '')))) as $s) {
+			if ($s !== '') {
+				$suffixes[] = strtolower($s);
+			}
+		}
+
+		foreach (array_unique($suffixes) as $s) {
+			if ($s === '') {
+				continue;
+			}
+			if ($host === $s || str_ends_with($host, '.' . $s)) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -714,7 +747,7 @@ class ScraperService
 			}
 
 			$lower = strtolower($text . ' ' . $resolved);
-			if (!preg_match('/bid|rfp|rfq|tender|solicitation|proposal/', $lower)) {
+			if (!preg_match('/bid|rfp|rfq|tender|solicitation|proposal|opportunit/i', $lower)) {
 				continue;
 			}
 
@@ -773,7 +806,8 @@ class ScraperService
 			}
 
 			$elapsed = microtime(true) - $startedAt;
-			$subTimeout = (int) max(25, min(90, floor($this->maxPerUrlSeconds - $elapsed - 5)));
+			$interactiveCap = $this->isHeavyJsProcurementPortal($url) ? 120 : 90;
+			$subTimeout = (int) max(25, min($interactiveCap, floor($this->maxPerUrlSeconds - $elapsed - 5)));
 
 			$process = new \Symfony\Component\Process\Process(
 				[$nodeBin, $script, $url, '2500', (string) $this->maxInteractivePages],
@@ -976,8 +1010,10 @@ class ScraperService
 			Log::warning('PUPPETEER SKIPPED (no time left in budget)', ['url' => $url, 'remaining_sec' => $remaining]);
 			return null;
 		}
-		$processTimeout = (int) max(20, min(85, $remaining));
-		$delayMs = min(max(0, $delayMs), 6000);
+		$heavy = $this->isHeavyJsProcurementPortal($url);
+		$processTimeoutSec = $heavy ? min(120, (int) max(25, $remaining)) : (int) max(20, min(85, $remaining));
+		$maxDelayCap = $heavy ? 30000 : 6000;
+		$delayMs = min(max(0, $delayMs), $maxDelayCap);
 
 		$script = base_path('bin/render-page.cjs');
 		$nodeBin = trim((string) env('NODE_BINARY', ''));
@@ -985,12 +1021,14 @@ class ScraperService
 			$nodeBin = $this->findNodeBinary() ?? 'node';
 		}
 
+		$navTimeoutMs = min($heavy ? 90000 : 45000, $processTimeoutSec * 1000);
+
 		$process = new \Symfony\Component\Process\Process(
-			[$nodeBin, $script, $url, (string) $delayMs, (string) min(45000, $processTimeout * 1000)],
+			[$nodeBin, $script, $url, (string) $delayMs, (string) $navTimeoutMs],
 			base_path(),
 			$this->nodeProcessEnv($nodeBin),
 			null,
-			$processTimeout
+			$processTimeoutSec
 		);
 		$process->run();
 

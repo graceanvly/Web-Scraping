@@ -69,6 +69,7 @@ Rules:
 3) Respond with strict JSON only in the format: {"bids":[{...}]} with the fields above.
 4) Browser interaction states are page snapshots captured after the scraper clicked likely controls. Use them to find content revealed by buttons, tabs, accordions, dropdowns, "view details", "documents", "attachments", and similar controls.
 5) Do your best to find the bids: some sites require clicking links (e.g., "see all open bid opportunities") before listings appear. Only return actual bids; do not treat generic portal/home pages or unrelated content as bids.
+6) Bonfire Hub / similar portals: listings often appear as a table of "opportunities" with titles, due dates, and status. Extract one bid per opportunity row when the portal shows open/public opportunities.
 SYS;
 
 		$promptUser = [
