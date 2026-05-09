@@ -51,14 +51,26 @@ function buildLaunchConfig() {
         CHROME_CRASHPAD_DISABLED: '1',
     };
 
+    /** Headless: boolean true = Chrome new headless; 'shell' = headless_shell (often more stable on Linux). */
+    const hm = String(process.env.SCRAPER_CHROME_HEADLESS || 'true').trim().toLowerCase();
+    const headless = hm === 'shell' ? 'shell' : true;
+
     const launchOptions = {
-        headless: 'new',
+        headless,
         args,
         env,
         userDataDir: profileDir,
-        // Avoid WebSocket to browser; can reduce crashpad/socket issues on some hosts
-        pipe: true,
     };
+
+    const chromeExe = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.SCRAPER_CHROME_EXECUTABLE;
+    if (chromeExe && String(chromeExe).trim()) {
+        launchOptions.executablePath = String(chromeExe).trim();
+    }
+
+    // Pipe can fix crashpad on some hosts but causes "Target closed" on others (opt-in only).
+    if (truthyEnv('SCRAPER_CHROME_PIPE')) {
+        launchOptions.pipe = true;
+    }
 
     return { launchOptions, profileDir };
 }

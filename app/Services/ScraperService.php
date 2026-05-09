@@ -868,7 +868,10 @@ class ScraperService
 					Log::warning('PUPPETEER MISSING OS LIBS', ['url' => $url, 'hint' => 'On Amazon Linux EC2 run: bash bin/install-puppeteer-chrome-deps-amzn.sh (then restart php-fpm).']);
 				}
 				if (str_contains($err, 'crashpad') || str_contains($err, 'Browser process')) {
-					Log::warning('PUPPETEER CRASHPAD', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_SINGLE_PROCESS=true and/or SCRAPER_CHROME_USER_DATA_DIR=/tmp/chrome-scraper (writable by php-fpm user) in .env; git pull includes tmp profile + pipe mode.']);
+					Log::warning('PUPPETEER CRASHPAD', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_SINGLE_PROCESS=true and/or SCRAPER_CHROME_USER_DATA_DIR=/tmp/chrome-scraper (writable by php-fpm user) in .env.']);
+				}
+				if (str_contains($err, 'Target closed') || str_contains($err, 'Protocol error')) {
+					Log::warning('PUPPETEER PROTOCOL', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_HEADLESS=shell in .env, leave SCRAPER_CHROME_PIPE unset/false, or set PUPPETEER_EXECUTABLE_PATH to system Chromium (e.g. /usr/bin/chromium-browser).']);
 				}
 				return [];
 			}
@@ -1087,6 +1090,9 @@ class ScraperService
 			if (str_contains($error, 'crashpad') || str_contains($error, 'Browser process')) {
 				Log::warning('PUPPETEER CRASHPAD', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_SINGLE_PROCESS=true and/or SCRAPER_CHROME_USER_DATA_DIR=/tmp/chrome-scraper in .env.']);
 			}
+			if (str_contains($error, 'Target closed') || str_contains($error, 'Protocol error')) {
+				Log::warning('PUPPETEER PROTOCOL', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_HEADLESS=shell, leave SCRAPER_CHROME_PIPE unset/false, or set PUPPETEER_EXECUTABLE_PATH to system Chromium.']);
+			}
 			return null;
 		}
 
@@ -1168,6 +1174,22 @@ class ScraperService
 		$chromeUserData = trim((string) env('SCRAPER_CHROME_USER_DATA_DIR', ''));
 		if ($chromeUserData !== '') {
 			$env['SCRAPER_CHROME_USER_DATA_DIR'] = $chromeUserData;
+		}
+
+		$headlessOpt = trim((string) env('SCRAPER_CHROME_HEADLESS', ''));
+		if ($headlessOpt !== '') {
+			$env['SCRAPER_CHROME_HEADLESS'] = $headlessOpt;
+		}
+		if (filter_var(env('SCRAPER_CHROME_PIPE', false), FILTER_VALIDATE_BOOLEAN)) {
+			$env['SCRAPER_CHROME_PIPE'] = 'true';
+		}
+		$puppeteerExe = trim((string) env('PUPPETEER_EXECUTABLE_PATH', ''));
+		if ($puppeteerExe !== '') {
+			$env['PUPPETEER_EXECUTABLE_PATH'] = $puppeteerExe;
+		}
+		$scraperChromeExe = trim((string) env('SCRAPER_CHROME_EXECUTABLE', ''));
+		if ($scraperChromeExe !== '') {
+			$env['SCRAPER_CHROME_EXECUTABLE'] = $scraperChromeExe;
 		}
 
 		$cookieHeader = trim((string) env('SCRAPER_COOKIE', ''));
