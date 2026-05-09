@@ -43,11 +43,18 @@ if (!url) {
             host = '';
         }
         const isBonfire = host.includes('bonfirehub.com');
+        let isBonfireOpp = false;
+        try {
+            const path = new URL(url).pathname.replace(/\/$/, '') || '/';
+            isBonfireOpp = isBonfire && /^\/opportunities\/\d+$/i.test(path);
+        } catch {
+            isBonfireOpp = false;
+        }
 
         const safeNavMs = Math.min(Math.max(15000, navTimeout), 120000);
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: safeNavMs });
 
-        if (isBonfire) {
+        if (isBonfire && !isBonfireOpp) {
             try {
                 await page.waitForFunction(
                     () => {
@@ -66,9 +73,21 @@ if (!url) {
             } catch {
                 // continue with settle delay
             }
+        } else if (isBonfireOpp) {
+            try {
+                await page.waitForFunction(
+                    () => {
+                        const t = (document.body && document.body.innerText) ? document.body.innerText.replace(/\s+/g, ' ').trim() : '';
+                        return t.length > 350;
+                    },
+                    { timeout: Math.min(22000, Math.max(4000, navTimeout)) }
+                );
+            } catch {
+                // continue
+            }
         }
 
-        const maxSettle = isBonfire ? 30000 : 8000;
+        const maxSettle = isBonfireOpp ? 10000 : isBonfire ? 30000 : 8000;
         const settleMs = Math.min(Math.max(0, delay), maxSettle);
         if (settleMs > 0) {
             await new Promise((r) => setTimeout(r, settleMs));

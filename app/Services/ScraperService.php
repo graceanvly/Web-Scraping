@@ -19,7 +19,9 @@ class ScraperService
 	private int $maxPdfDownloads = 5; // Avoid excessive PDF processing per page.
 	private int $maxInteractivePages = 8; // Browser-clicked states to feed into AI.
 	private int $maxInteractivePdfDownloads = 3; // PDFs discovered after UI clicks.
-	private int $maxPerUrlSeconds = 180; // Hard cap per URL scrape (HTTP + Puppeteer + follow-ups).
+	private int $maxPerUrlSeconds = 180; // Hard cap per URL scrape (HTTP + Puppeteer + follow-ups); see SCRAPER_MAX_PER_URL_SECONDS.
+	/** @var int|null Raised for one fetch() on heavy JS portals (SCRAPER_HEAVY_PORTAL_MAX_URL_SECONDS). */
+	private ?int $fetchBudgetSeconds = null;
 	private int $requestTimeout = 60; // General HTTP request timeout.
 	private int $maxHtmlBytes = 3145728; // Max raw HTML stored per response (3 MB).
 	private int $htmlToTextMaxChars = 400000; // Cap DOM parsing to avoid multi-minute hangs on huge pages.
@@ -105,6 +107,13 @@ class ScraperService
 			return $this->fetchPdf($url, $requestOptions, $authProvided, $startedAt);
 		}
 
+		$this->fetchBudgetSeconds = null;
+		if ($this->isHeavyJsProcurementPortal($url)) {
+			$heavyBudget = max(60, (int) env('SCRAPER_HEAVY_PORTAL_MAX_URL_SECONDS', 540));
+			$this->fetchBudgetSeconds = max($this->maxPerUrlSeconds, $heavyBudget);
+		}
+
+		try {
 		// 2. Fetch HTML content
 		$bestHtml = '';
 		$bestText = '';
@@ -198,7 +207,7 @@ class ScraperService
 				if ($this->isHeavyJsProcurementPortal($url)) {
 					$puppetDelay = max($puppetDelay, (int) env('SCRAPER_HEAVY_PORTAL_SETTLE_MS', 22000));
 				}
-				$renderedHtml = $this->renderWithPuppeteer($url, $puppetDelay, $startedAt);
+				$renderedHtml = $this->renderWithPuppeteer($url, $puppetDelay, $startedAt, false);
 
 				if ($renderedHtml !== null) {
 					$renderedText = $this->htmlToText($renderedHtml);
@@ -286,7 +295,7 @@ class ScraperService
 				$this->ensureWithinBudget($startedAt, 'detail page request');
 				if ($headlessDetail) {
 					$detailDelay = max(2000, min(12000, (int) env('SCRAPER_DETAIL_PUPPETEER_DELAY_MS', 6000)));
-					$pageHtml = $this->renderWithPuppeteer($detail['URL'], $detailDelay, $startedAt);
+					$pageHtml = $this->renderWithPuppeteer($detail['URL'], $detailDelay, $startedAt, true);
 					if ($pageHtml === null || trim($pageHtml) === '') {
 						throw new \RuntimeException('Headless detail fetch returned no HTML.');
 					}
@@ -351,6 +360,9 @@ class ScraperService
 			'blocked_reason' => $blockedReason,
 			'no_open_bids' => $noOpenBids,
 		];
+		} finally {
+			$this->fetchBudgetSeconds = null;
+		}
 	}
 
 	/**
@@ -601,7 +613,8 @@ class ScraperService
 	private function ensureWithinBudget(float $startedAt, string $context): void
 	{
 		$elapsed = microtime(true) - $startedAt;
-		if ($elapsed > $this->maxPerUrlSeconds) {
+		$cap = $this->fetchBudgetSeconds ?? $this->maxPerUrlSeconds;
+		if ($elapsed > $cap) {
 			throw new \RuntimeException("Scrape timed out while processing {$context}. Please retry later or reduce the amount of content to download.");
 		}
 	}
@@ -905,7 +918,8 @@ class ScraperService
 
 			$elapsed = microtime(true) - $startedAt;
 			$interactiveCap = $this->isHeavyJsProcurementPortal($url) ? 120 : 90;
-			$subTimeout = (int) max(25, min($interactiveCap, floor($this->maxPerUrlSeconds - $elapsed - 5)));
+			$budgetCap = $this->fetchBudgetSeconds ?? $this->maxPerUrlSeconds;
+			$subTimeout = (int) max(25, min($interactiveCap, floor($budgetCap - $elapsed - 5)));
 
 			$process = new \Symfony\Component\Process\Process(
 				[$nodeBin, $script, $url, '2500', (string) $this->maxInteractivePages],
@@ -1106,17 +1120,22 @@ class ScraperService
 		return $buf;
 	}
 
-	private function renderWithPuppeteer(string $url, int $delayMs, float $startedAt): ?string
+	private function renderWithPuppeteer(string $url, int $delayMs, float $startedAt, bool $detailPagePass = false): ?string
 	{
 		$this->ensureWithinBudget($startedAt, 'before headless chrome');
 		$elapsed = microtime(true) - $startedAt;
-		$remaining = $this->maxPerUrlSeconds - $elapsed - 3;
+		$budgetCap = $this->fetchBudgetSeconds ?? $this->maxPerUrlSeconds;
+		$remaining = $budgetCap - $elapsed - 3;
 		if ($remaining < 12) {
 			Log::warning('PUPPETEER SKIPPED (no time left in budget)', ['url' => $url, 'remaining_sec' => $remaining]);
 			return null;
 		}
 		$heavy = $this->isHeavyJsProcurementPortal($url);
-		$processTimeoutSec = $heavy ? min(120, (int) max(25, $remaining)) : (int) max(20, min(85, $remaining));
+		if ($detailPagePass) {
+			$processTimeoutSec = (int) max(35, min(150, $remaining));
+		} else {
+			$processTimeoutSec = $heavy ? min(120, (int) max(25, $remaining)) : (int) max(20, min(85, $remaining));
+		}
 		$maxDelayCap = $heavy ? 30000 : 6000;
 		$delayMs = min(max(0, $delayMs), $maxDelayCap);
 
@@ -1126,7 +1145,8 @@ class ScraperService
 			$nodeBin = $this->findNodeBinary() ?? 'node';
 		}
 
-		$navTimeoutMs = min($heavy ? 90000 : 45000, $processTimeoutSec * 1000);
+		$defaultNavMs = $detailPagePass ? 45000 : ($heavy ? 90000 : 45000);
+		$navTimeoutMs = min($defaultNavMs, $processTimeoutSec * 1000);
 
 		$process = new \Symfony\Component\Process\Process(
 			[$nodeBin, $script, $url, (string) $delayMs, (string) $navTimeoutMs],
