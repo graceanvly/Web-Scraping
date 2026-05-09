@@ -580,6 +580,9 @@ class ScraperService
 			$attr = $node->getAttribute('href') ?: $node->getAttribute('src');
 			if (preg_match('/\.pdf($|\?)/i', $attr)) {
 				$pdfUrl = $this->resolveUrl($attr, $baseUrl);
+				if ($this->hrefLooksLikeClientTemplate($attr) || $this->hrefLooksLikeClientTemplate($pdfUrl)) {
+					continue;
+				}
 				$linkText = $this->normalizeWhitespace($node->textContent ?? '');
 				$parentText = $this->nearbyText($node);
 				$context = trim($linkText . ' ' . $parentText . ' ' . $attr . ' ' . $pdfUrl);
@@ -742,6 +745,9 @@ class ScraperService
 				continue;
 
 			$resolved = $this->resolveUrl($href, $baseUrl);
+			if ($this->hrefLooksLikeClientTemplate($href) || $this->hrefLooksLikeClientTemplate($resolved)) {
+				continue;
+			}
 			if ($this->isOpenGovPortalListingUrl($resolved)) {
 				continue;
 			}
@@ -768,6 +774,31 @@ class ScraperService
 		}
 
 		return $deduped;
+	}
+
+	/**
+	 * Skip SPA hrefs that still contain server-side or client template tokens (e.g. Underscore &lt;%- auction.ProjectID %&gt;).
+	 * Following these produces invalid URLs and often Cloudflare 403.
+	 */
+	private function hrefLooksLikeClientTemplate(string $href): bool
+	{
+		if ($href === '') {
+			return false;
+		}
+
+		foreach ([$href, rawurldecode($href), urldecode($href)] as $chunk) {
+			if (str_contains($chunk, '<%') || str_contains($chunk, '%>')) {
+				return true;
+			}
+			if (preg_match('/\{\{\s*[^}]+\s*\}\}/', $chunk)) {
+				return true;
+			}
+			if (str_contains($chunk, '${')) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private function shouldCollectInteractivePages(string $html, string $text): bool
