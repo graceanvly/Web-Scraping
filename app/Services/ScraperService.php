@@ -867,6 +867,9 @@ class ScraperService
 				if (str_contains($err, 'libxkbcommon') || str_contains($err, 'error while loading shared libraries') || str_contains($err, 'Code: 127')) {
 					Log::warning('PUPPETEER MISSING OS LIBS', ['url' => $url, 'hint' => 'On Amazon Linux EC2 run: bash bin/install-puppeteer-chrome-deps-amzn.sh (then restart php-fpm).']);
 				}
+				if (str_contains($err, 'crashpad') || str_contains($err, 'Browser process')) {
+					Log::warning('PUPPETEER CRASHPAD', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_SINGLE_PROCESS=true and/or SCRAPER_CHROME_USER_DATA_DIR=/tmp/chrome-scraper (writable by php-fpm user) in .env; git pull includes tmp profile + pipe mode.']);
+				}
 				return [];
 			}
 
@@ -1081,6 +1084,9 @@ class ScraperService
 			if (str_contains($error, 'libxkbcommon') || str_contains($error, 'error while loading shared libraries') || str_contains($error, 'Code: 127')) {
 				Log::warning('PUPPETEER MISSING OS LIBS', ['url' => $url, 'hint' => 'On Amazon Linux EC2 run: bash bin/install-puppeteer-chrome-deps-amzn.sh (then restart php-fpm).']);
 			}
+			if (str_contains($error, 'crashpad') || str_contains($error, 'Browser process')) {
+				Log::warning('PUPPETEER CRASHPAD', ['url' => $url, 'hint' => 'Try SCRAPER_CHROME_SINGLE_PROCESS=true and/or SCRAPER_CHROME_USER_DATA_DIR=/tmp/chrome-scraper in .env.']);
+			}
 			return null;
 		}
 
@@ -1155,6 +1161,14 @@ class ScraperService
 		}
 
 		$env['CHROME_CRASHPAD_DISABLED'] = '1';
+
+		if (filter_var(env('SCRAPER_CHROME_SINGLE_PROCESS', false), FILTER_VALIDATE_BOOLEAN)) {
+			$env['SCRAPER_CHROME_SINGLE_PROCESS'] = 'true';
+		}
+		$chromeUserData = trim((string) env('SCRAPER_CHROME_USER_DATA_DIR', ''));
+		if ($chromeUserData !== '') {
+			$env['SCRAPER_CHROME_USER_DATA_DIR'] = $chromeUserData;
+		}
 
 		$cookieHeader = trim((string) env('SCRAPER_COOKIE', ''));
 		if ($cookieHeader !== '') {

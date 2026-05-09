@@ -1,4 +1,5 @@
 const puppeteer = require('puppeteer');
+const { buildLaunchConfig, removeChromeProfile } = require('./puppeteer-launch.cjs');
 
 const url = process.argv[2];
 const delay = parseInt(process.argv[3] || '3000', 10);
@@ -26,27 +27,12 @@ function trimHtml(html) {
 
 (async () => {
     let browser;
+    let profileDir = null;
+    let exitCode = 0;
     try {
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-software-rasterizer',
-                '--disable-breakpad',
-                '--disable-crash-reporter',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--disable-blink-features=AutomationControlled',
-                '--window-size=1280,900',
-            ],
-            env: {
-                ...process.env,
-                CHROME_CRASHPAD_DISABLED: '1',
-            },
-        });
+        const cfg = buildLaunchConfig();
+        profileDir = cfg.profileDir;
+        browser = await puppeteer.launch(cfg.launchOptions);
 
         const page = await browser.newPage();
         await page.setUserAgent(
@@ -209,10 +195,14 @@ function trimHtml(html) {
         process.stdout.write(JSON.stringify({ pages: snapshots }));
     } catch (err) {
         process.stderr.write(err.message + '\n');
-        process.exit(1);
+        exitCode = 1;
     } finally {
         if (browser) {
-            await browser.close();
+            await browser.close().catch(() => {});
         }
+        removeChromeProfile(profileDir);
+    }
+    if (exitCode) {
+        process.exit(exitCode);
     }
 })();
