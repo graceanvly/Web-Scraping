@@ -276,15 +276,24 @@ class ScraperService
 		foreach ($detailLinks as $detail) {
 			$detailIdx++;
 			try {
-				$report("Detail page {$detailIdx}/{$detailTotal}…");
+				$headlessDetail = $this->detailUrlRequiresHeadlessFetch($detail['URL']);
+				$report($headlessDetail ? "Detail page {$detailIdx}/{$detailTotal} (browser)…" : "Detail page {$detailIdx}/{$detailTotal}…");
 				$pageHtml = '';
 				$pageText = '';
 				$pagePdfText = '';
 				$pagePdfLinks = [];
 
 				$this->ensureWithinBudget($startedAt, 'detail page request');
-				$response = $this->requestWithAuth($detail['URL'], $requestOptions, $authProvided);
-				$pageHtml = $this->limitedResponseBody($response, $startedAt);
+				if ($headlessDetail) {
+					$detailDelay = max(2000, min(12000, (int) env('SCRAPER_DETAIL_PUPPETEER_DELAY_MS', 6000)));
+					$pageHtml = $this->renderWithPuppeteer($detail['URL'], $detailDelay, $startedAt);
+					if ($pageHtml === null || trim($pageHtml) === '') {
+						throw new \RuntimeException('Headless detail fetch returned no HTML.');
+					}
+				} else {
+					$response = $this->requestWithAuth($detail['URL'], $requestOptions, $authProvided);
+					$pageHtml = $this->limitedResponseBody($response, $startedAt);
+				}
 				$pageText = $this->htmlToText($pageHtml);
 				$this->guardLoginRequirement($pageHtml, $pageText, $authProvided);
 				$pagePdfLinks = $this->findPdfLink($pageHtml, $detail['URL']);
@@ -357,6 +366,39 @@ class ScraperService
 
 		$suffixes = ['bonfirehub.com'];
 		foreach (array_filter(array_map('trim', explode(',', (string) env('SCRAPER_HEAVY_PORTAL_HOST_SUFFIXES', '')))) as $s) {
+			if ($s !== '') {
+				$suffixes[] = strtolower($s);
+			}
+		}
+
+		foreach (array_unique($suffixes) as $s) {
+			if ($s === '') {
+				continue;
+			}
+			if ($host === $s || str_ends_with($host, '.' . $s)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Some portals (e.g. Bonfire behind Cloudflare) return "Just a moment…" to Guzzle but render in real Chrome.
+	 */
+	private function detailUrlRequiresHeadlessFetch(string $detailUrl): bool
+	{
+		if (!filter_var(env('SCRAPER_DETAIL_HEADLESS_FETCH', true), FILTER_VALIDATE_BOOLEAN)) {
+			return false;
+		}
+
+		$host = strtolower((string) parse_url($detailUrl, PHP_URL_HOST));
+		if ($host === '') {
+			return false;
+		}
+
+		$suffixes = ['bonfirehub.com'];
+		foreach (array_filter(array_map('trim', explode(',', (string) env('SCRAPER_DETAIL_HEADLESS_HOST_SUFFIXES', '')))) as $s) {
 			if ($s !== '') {
 				$suffixes[] = strtolower($s);
 			}
