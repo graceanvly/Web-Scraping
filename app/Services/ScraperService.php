@@ -743,8 +743,14 @@ class ScraperService
 				continue;
 			if (stripos($href, 'javascript:') === 0)
 				continue;
+			if ($this->isNonHttpDocumentLink($href)) {
+				continue;
+			}
 
 			$resolved = $this->resolveUrl($href, $baseUrl);
+			if ($this->isNonHttpDocumentLink($resolved)) {
+				continue;
+			}
 			if ($this->hrefLooksLikeClientTemplate($href) || $this->hrefLooksLikeClientTemplate($resolved)) {
 				continue;
 			}
@@ -799,6 +805,12 @@ class ScraperService
 		}
 
 		return false;
+	}
+
+	/** mailto:/tel:/sms: are not HTTP documents; do not enqueue for GET. */
+	private function isNonHttpDocumentLink(string $href): bool
+	{
+		return $href !== '' && (bool) preg_match('/^\s*(mailto|tel|sms|fax|data|blob):/i', $href);
 	}
 
 	private function shouldCollectInteractivePages(string $html, string $text): bool
@@ -1176,7 +1188,24 @@ class ScraperService
 
 	private function resolveUrl(string $href, string $base): string
 	{
+		$href = trim($href);
+		if ($href === '' || $href === '#') {
+			return $base;
+		}
+
 		if (preg_match('/^https?:/i', $href)) {
+			return $href;
+		}
+
+		// Protocol-relative
+		if (str_starts_with($href, '//')) {
+			$baseScheme = parse_url($base, PHP_URL_SCHEME) ?: 'https';
+
+			return $baseScheme . ':' . $href;
+		}
+
+		// mailto:, tel:, sms:, data:, etc. — must not be joined to https://host/
+		if (preg_match('#^[a-z][a-z0-9+.-]*:#i', $href)) {
 			return $href;
 		}
 
