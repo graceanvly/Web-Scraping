@@ -825,6 +825,12 @@ class ScraperService
 			if ($this->isOpenGovPortalListingUrl($resolved)) {
 				continue;
 			}
+			if ($this->urlsSameDocumentIgnoringFragment($resolved, $baseUrl)) {
+				continue;
+			}
+			if ($this->isBonfireHubHost($resolved) && !$this->isBonfireOpportunityDetailUrl($resolved)) {
+				continue;
+			}
 
 			$lower = strtolower($text . ' ' . $resolved);
 			if (!preg_match('/bid|rfp|rfq|tender|solicitation|proposal|opportunit/i', $lower)) {
@@ -848,6 +854,67 @@ class ScraperService
 		}
 
 		return $deduped;
+	}
+
+	/** Broward-style Bonfire hubs use /opportunities/{id} for bid detail; /portal tabs and #hash nav are not separate documents. */
+	private function isBonfireHubHost(string $url): bool
+	{
+		$host = strtolower((string) parse_url($url, PHP_URL_HOST));
+
+		return $host !== '' && ($host === 'bonfirehub.com' || str_ends_with($host, '.bonfirehub.com'));
+	}
+
+	private function isBonfireOpportunityDetailUrl(string $url): bool
+	{
+		$path = parse_url($url, PHP_URL_PATH);
+
+		return is_string($path) && $path !== '' && (bool) preg_match('#^/opportunities/\d+#i', $path);
+	}
+
+	/** Compare scheme, host, port, path, query; ignore #fragment (in-page / tab links). */
+	private function urlsSameDocumentIgnoringFragment(string $a, string $b): bool
+	{
+		$pa = parse_url($a);
+		$pb = parse_url($b);
+		if (($pa['scheme'] ?? '') === '' || ($pb['scheme'] ?? '') === '') {
+			return false;
+		}
+		if (strtolower($pa['scheme']) !== strtolower($pb['scheme'])) {
+			return false;
+		}
+		if (strtolower($pa['host'] ?? '') !== strtolower($pb['host'] ?? '')) {
+			return false;
+		}
+		$portA = $pa['port'] ?? null;
+		$portB = $pb['port'] ?? null;
+		if (($portA ?? $this->defaultPortForUrlScheme($pa['scheme'])) !== ($portB ?? $this->defaultPortForUrlScheme($pb['scheme']))) {
+			return false;
+		}
+		$pathA = $this->normalizeUrlPathForCompare($pa['path'] ?? '');
+		$pathB = $this->normalizeUrlPathForCompare($pb['path'] ?? '');
+		if ($pathA !== $pathB) {
+			return false;
+		}
+
+		return ($pa['query'] ?? '') === ($pb['query'] ?? '');
+	}
+
+	private function defaultPortForUrlScheme(string $scheme): ?int
+	{
+		return match (strtolower($scheme)) {
+			'http' => 80,
+			'https' => 443,
+			default => null,
+		};
+	}
+
+	private function normalizeUrlPathForCompare(string $path): string
+	{
+		if ($path === '') {
+			return '/';
+		}
+
+		return rtrim($path, '/') ?: '/';
 	}
 
 	/**
@@ -1149,7 +1216,7 @@ class ScraperService
 			$nodeBin = $this->findNodeBinary() ?? 'node';
 		}
 
-		$defaultNavMs = $detailPagePass ? 45000 : ($heavy ? 90000 : 45000);
+		$defaultNavMs = ($detailPagePass && !$heavy) ? 45000 : ($heavy ? 90000 : 45000);
 		$navTimeoutMs = min($defaultNavMs, $processTimeoutSec * 1000);
 
 		$process = new \Symfony\Component\Process\Process(
