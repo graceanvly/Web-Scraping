@@ -917,7 +917,8 @@ class ScraperService
 			}
 
 			$elapsed = microtime(true) - $startedAt;
-			$interactiveCap = $this->isHeavyJsProcurementPortal($url) ? 120 : 90;
+			$heavyInteractiveCap = max(60, (int) env('SCRAPER_HEAVY_PORTAL_INTERACTIVE_MAX_SEC', 180));
+			$interactiveCap = $this->isHeavyJsProcurementPortal($url) ? $heavyInteractiveCap : 90;
 			$budgetCap = $this->fetchBudgetSeconds ?? $this->maxPerUrlSeconds;
 			$subTimeout = (int) max(25, min($interactiveCap, floor($budgetCap - $elapsed - 5)));
 
@@ -1134,7 +1135,10 @@ class ScraperService
 		if ($detailPagePass) {
 			$processTimeoutSec = (int) max(35, min(150, $remaining));
 		} else {
-			$processTimeoutSec = $heavy ? min(120, (int) max(25, $remaining)) : (int) max(20, min(85, $remaining));
+			$heavyPuppetCap = max(90, (int) env('SCRAPER_HEAVY_PORTAL_PUPPETEER_MAX_SEC', 240));
+			$processTimeoutSec = $heavy
+				? min($heavyPuppetCap, (int) max(25, $remaining))
+				: (int) max(20, min(85, $remaining));
 		}
 		$maxDelayCap = $heavy ? 30000 : 6000;
 		$delayMs = min(max(0, $delayMs), $maxDelayCap);
