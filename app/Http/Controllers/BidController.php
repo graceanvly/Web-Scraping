@@ -11,6 +11,7 @@ use App\Services\ScraperService;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class BidController extends Controller
@@ -954,9 +955,36 @@ class BidController extends Controller
 		$validated['NEEDS_REVIEW'] = $request->has('NEEDS_REVIEW') && (string) $request->input('NEEDS_REVIEW') !== '0' ? 1 : 0;
 		$validated['UNDERREVIEW'] = $request->has('UNDERREVIEW') && (string) $request->input('UNDERREVIEW') !== '0' ? 1 : 0;
 
-		$bid->update($validated);
+		$bid->update($this->filterBidUpdateAttributes($bid, $validated));
 
 		return redirect()->route('bids.index')->with('success', 'Bid updated successfully.');
+	}
+
+	/**
+	 * Oracle and other legacy schemas may omit columns that exist only on MySQL (e.g. raw_html, extracted_json).
+	 */
+	private function filterBidUpdateAttributes(Bid $bid, array $validated): array
+	{
+		try {
+			$listing = Schema::getColumnListing($bid->getTable());
+		} catch (\Throwable $e) {
+			return $validated;
+		}
+		if ($listing === []) {
+			return $validated;
+		}
+		$allowed = [];
+		foreach ($listing as $col) {
+			$allowed[strtolower((string) $col)] = true;
+		}
+		$out = [];
+		foreach ($validated as $key => $value) {
+			if (isset($allowed[strtolower((string) $key)])) {
+				$out[$key] = $value;
+			}
+		}
+
+		return $out;
 	}
 
 	public function destroy(Bid $bid)
