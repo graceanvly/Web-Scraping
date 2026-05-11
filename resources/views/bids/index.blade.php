@@ -812,46 +812,48 @@
 					</div>
 					<div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.35rem;">
 						<input type="checkbox" id="edit_under_review" name="UNDERREVIEW" value="1">
-						<label for="edit_under_review" style="margin:0; font-weight:500;">Under review</label>
+						<label for="edit_under_review" style="margin:0; font-weight:500;">UNDERREVIEW</label>
+					</div>
+
+					<p class="edit-field-full" style="margin:0.5rem 0 0; font-size:0.85rem; font-weight:700; color:#374151;">IDs</p>
+					<div>
+						<label for="edit_subscription_type_id">SUBSCRIPTIONTYPEID</label>
+						<input type="number" id="edit_subscription_type_id" name="SUBSCRIPTIONTYPEID">
+					</div>
+					<div>
+						<label for="edit_user_id">USERID</label>
+						<input type="number" id="edit_user_id" name="USERID">
+					</div>
+					<div>
+						<label for="edit_setaside_id">SETASIDECODEID</label>
+						<input type="number" id="edit_setaside_id" name="SETASIDECODEID">
+					</div>
+					<div>
+						<label for="edit_source_id">SOURCEID <span style="font-weight:400; color:#6b7280;">(SOURCE_ID)</span></label>
+						<input type="number" id="edit_source_id" name="SOURCE_ID">
+					</div>
+					<div>
+						<label for="edit_state_id">STATEID</label>
+						<input type="number" id="edit_state_id" name="STATEID">
 					</div>
 
 					<details class="edit-field-full">
-						<summary>IDs &amp; technical fields</summary>
+						<summary>More IDs &amp; technical fields</summary>
 						<div class="edit-form-grid" style="margin-top:0.75rem;">
 							<div>
-								<label for="edit_category_id">Category ID</label>
+								<label for="edit_category_id">CATEGORYID</label>
 								<input type="number" id="edit_category_id" name="CATEGORYID">
 							</div>
 							<div>
-								<label for="edit_entity_id">Entity ID</label>
+								<label for="edit_entity_id">ENTITYID</label>
 								<input type="number" id="edit_entity_id" name="ENTITYID">
 							</div>
 							<div>
-								<label for="edit_subscription_type_id">Subscription type ID</label>
-								<input type="number" id="edit_subscription_type_id" name="SUBSCRIPTIONTYPEID">
-							</div>
-							<div>
-								<label for="edit_user_id">User ID</label>
-								<input type="number" id="edit_user_id" name="USERID">
-							</div>
-							<div>
-								<label for="edit_setaside_id">Set-aside code ID</label>
-								<input type="number" id="edit_setaside_id" name="SETASIDECODEID">
-							</div>
-							<div>
-								<label for="edit_bid_url_id">Bid URL ID</label>
+								<label for="edit_bid_url_id">BID_URL_ID</label>
 								<input type="number" id="edit_bid_url_id" name="BID_URL_ID">
 							</div>
 							<div>
-								<label for="edit_source_id">Source ID</label>
-								<input type="number" id="edit_source_id" name="SOURCE_ID">
-							</div>
-							<div>
-								<label for="edit_state_id">State ID</label>
-								<input type="number" id="edit_state_id" name="STATEID">
-							</div>
-							<div>
-								<label for="edit_category_alias_id">Category alias ID</label>
+								<label for="edit_category_alias_id">CATEGORY_ALIAS_ID</label>
 								<input type="number" id="edit_category_alias_id" name="CATEGORY_ALIAS_ID">
 							</div>
 						</div>
