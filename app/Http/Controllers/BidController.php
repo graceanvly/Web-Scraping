@@ -876,18 +876,83 @@ class BidController extends Controller
 
 	public function update(Request $request, Bid $bid)
 	{
+		$nullableStrings = ['DESCRIPTION', 'EMAIL', 'URL', 'NAICSCODE', 'SOLICIATIONNUMBER', 'THIRD_PARTY_IDENTIFIER', 'NSN', 'INLINEURL', 'COUNTRY_ID', 'raw_html', 'extracted_json'];
+		foreach ($nullableStrings as $key) {
+			if ($request->input($key) === '') {
+				$request->merge([$key => null]);
+			}
+		}
+		$nullableInts = ['CATEGORYID', 'ENTITYID', 'SUBSCRIPTIONTYPEID', 'USERID', 'SETASIDECODEID', 'BID_URL_ID', 'SOURCE_ID', 'STATEID', 'CATEGORY_ALIAS_ID', 'NAICSCODE_INT'];
+		foreach ($nullableInts as $key) {
+			if ($request->input($key) === '' || $request->input($key) === null) {
+				$request->merge([$key => null]);
+			}
+		}
+		foreach (['ENDDATE', 'FEDDATE', 'CREATED', 'LAST_MODIFIED'] as $key) {
+			if ($request->input($key) === '') {
+				$request->merge([$key => null]);
+			}
+		}
+
 		$validated = $request->validate([
-			'TITLE' => 'required|string|max:255',
-			'ENDDATE' => 'nullable|date',
-			'NAICSCODE' => 'nullable|string|max:50',
+			'TITLE' => ['required', 'string', 'max:255'],
+			'DESCRIPTION' => ['nullable', 'string'],
+			'EMAIL' => ['nullable', 'email', 'max:255'],
+			'URL' => ['nullable', 'string', 'max:2048'],
+			'ENDDATE' => ['nullable', 'date'],
+			'NAICSCODE' => ['nullable', 'string', 'max:255'],
+			'SOLICIATIONNUMBER' => ['nullable', 'string', 'max:255'],
+			'FEDDATE' => ['nullable', 'date'],
+			'THIRD_PARTY_IDENTIFIER' => ['nullable', 'string', 'max:255'],
+			'NSN' => ['nullable', 'string', 'max:255'],
+			'CREATED' => ['nullable', 'date'],
+			'LAST_MODIFIED' => ['nullable', 'date'],
+			'INLINEURL' => ['nullable', 'string', 'max:500'],
+			'CATEGORYID' => ['nullable', 'integer'],
+			'ENTITYID' => ['nullable', 'integer'],
+			'SUBSCRIPTIONTYPEID' => ['nullable', 'integer'],
+			'USERID' => ['nullable', 'integer'],
+			'SETASIDECODEID' => ['nullable', 'integer'],
+			'BID_URL_ID' => ['nullable', 'integer'],
+			'SOURCE_ID' => ['nullable', 'integer'],
+			'STATEID' => ['nullable', 'integer'],
+			'CATEGORY_ALIAS_ID' => ['nullable', 'integer'],
+			'NAICSCODE_INT' => ['nullable', 'integer'],
+			'COUNTRY_ID' => ['nullable', 'string', 'max:32'],
+			'raw_html' => ['nullable', 'string'],
+			'extracted_json' => ['nullable', 'string'],
 		], [
 			'TITLE.required' => 'Title is required.',
 			'TITLE.max' => 'Title is too long. Please keep it under 255 characters.',
-			'ENDDATE.date' => 'End Date must be a valid date in the format YYYY-MM-DD.',
-			'NAICSCODE.max' => 'NAICS code must be 50 characters or fewer.',
+			'ENDDATE.date' => 'End date must be a valid date.',
+			'FEDDATE.date' => 'Fed date must be a valid date.',
+			'CREATED.date' => 'Created must be a valid date/time.',
+			'LAST_MODIFIED.date' => 'Last modified must be a valid date/time.',
 		]);
 
 		$validated['ENDDATE'] = $this->sanitizeDate($validated['ENDDATE'] ?? null);
+		$validated['FEDDATE'] = $this->sanitizeDate($validated['FEDDATE'] ?? null);
+		if (!empty($validated['CREATED'])) {
+			try {
+				$validated['CREATED'] = \Carbon\Carbon::parse($validated['CREATED']);
+			} catch (\Throwable $e) {
+				$validated['CREATED'] = null;
+			}
+		} else {
+			$validated['CREATED'] = null;
+		}
+		if (!empty($validated['LAST_MODIFIED'])) {
+			try {
+				$validated['LAST_MODIFIED'] = \Carbon\Carbon::parse($validated['LAST_MODIFIED']);
+			} catch (\Throwable $e) {
+				$validated['LAST_MODIFIED'] = now();
+			}
+		} else {
+			$validated['LAST_MODIFIED'] = now();
+		}
+
+		$validated['NEEDS_REVIEW'] = $request->has('NEEDS_REVIEW') && (string) $request->input('NEEDS_REVIEW') !== '0' ? 1 : 0;
+		$validated['UNDERREVIEW'] = $request->has('UNDERREVIEW') && (string) $request->input('UNDERREVIEW') !== '0' ? 1 : 0;
 
 		$bid->update($validated);
 

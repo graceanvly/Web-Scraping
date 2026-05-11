@@ -294,6 +294,77 @@
 		}
 		.issue-delete-btn:hover { background: #fee2e2; }
 
+		#editModal {
+			max-width: 920px;
+			width: 92vw;
+			max-height: 92vh;
+			border: none;
+			border-radius: 12px;
+			padding: 0;
+			box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+		}
+
+		#editModal::backdrop {
+			background: rgba(15, 23, 42, 0.45);
+		}
+
+		#editModal article {
+			margin: 0;
+			padding: 1.5rem 1.75rem;
+			max-height: 92vh;
+			overflow-y: auto;
+		}
+
+		#editModal .edit-form-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+			gap: 0.75rem 1rem;
+			margin-bottom: 1rem;
+		}
+
+		#editModal label {
+			font-size: 0.85rem;
+			font-weight: 600;
+			color: #374151;
+		}
+
+		#editModal input[type="text"],
+		#editModal input[type="url"],
+		#editModal input[type="date"],
+		#editModal input[type="datetime-local"],
+		#editModal input[type="number"],
+		#editModal input[type="email"],
+		#editModal textarea,
+		#editModal select {
+			font-size: 0.9rem;
+			margin-bottom: 0.15rem;
+		}
+
+		#editModal textarea {
+			min-height: 120px;
+			resize: vertical;
+		}
+
+		#editModal .edit-field-full {
+			grid-column: 1 / -1;
+		}
+
+		#editModal details {
+			grid-column: 1 / -1;
+			border: 1px solid #e5e7eb;
+			border-radius: 8px;
+			padding: 0.65rem 0.85rem;
+			background: #fafafa;
+			margin-bottom: 0.75rem;
+		}
+
+		#editModal details summary {
+			cursor: pointer;
+			font-weight: 600;
+			color: #1d4ed8;
+			font-size: 0.9rem;
+		}
+
 		/* Responsive table for mobile */
 		@media (max-width: 768px) {
 			table {
@@ -532,12 +603,7 @@
 								</td>
 								<td>
 									<div class="action-buttons">
-										<button type="button" class="secondary" onclick="openEditModal(
-													{{ $bid->ID }},
-													'{{ addslashes($bid->TITLE) }}',
-													'{{ $bid->ENDDATE ?? '' }}',
-													'{{ $bid->NAICSCODE ?? '' }}'
-												)">
+										<button type="button" class="secondary" onclick="openEditModal({{ $idx }})">
 											✏️ Edit
 										</button>
 										<form action="{{ route('bids.destroy', ['bid' => $bid->ID]) }}" method="POST">
@@ -673,38 +739,197 @@
 	<!-- Edit Modal -->
 	<dialog id="editModal">
 		<article>
-			<h3>Edit Bid</h3>
+			<h3 style="margin-top:0;">Edit bid</h3>
 			<form id="editForm" method="POST">
 				@csrf
 				@method('PUT')
 
-				<label for="edit_title">Title</label>
-				<input type="text" id="edit_title" name="TITLE" required>
+				<div class="edit-form-grid">
+					<div class="edit-field-full">
+						<label for="edit_title">Title</label>
+						<input type="text" id="edit_title" name="TITLE" required maxlength="255">
+					</div>
+					<div class="edit-field-full">
+						<label for="edit_url">URL</label>
+						<input type="text" id="edit_url" name="URL" maxlength="2048" placeholder="https://…">
+					</div>
+					<div class="edit-field-full">
+						<label for="edit_description">Description</label>
+						<textarea id="edit_description" name="DESCRIPTION" rows="6"></textarea>
+					</div>
+					<div>
+						<label for="edit_email">Email</label>
+						<input type="email" id="edit_email" name="EMAIL" maxlength="255">
+					</div>
+					<div>
+						<label for="edit_end_date">End date</label>
+						<input type="date" id="edit_end_date" name="ENDDATE">
+					</div>
+					<div>
+						<label for="edit_fed_date">Fed date</label>
+						<input type="date" id="edit_fed_date" name="FEDDATE">
+					</div>
+					<div>
+						<label for="edit_naics_code">NAICS</label>
+						<input type="text" id="edit_naics_code" name="NAICSCODE" maxlength="255">
+					</div>
+					<div>
+						<label for="edit_naics_int">NAICS (int)</label>
+						<input type="number" id="edit_naics_int" name="NAICSCODE_INT">
+					</div>
+					<div>
+						<label for="edit_solicitation">Solicitation #</label>
+						<input type="text" id="edit_solicitation" name="SOLICIATIONNUMBER" maxlength="255">
+					</div>
+					<div>
+						<label for="edit_nsn">NSN</label>
+						<input type="text" id="edit_nsn" name="NSN" maxlength="255">
+					</div>
+					<div>
+						<label for="edit_third_party">Third party ID</label>
+						<input type="text" id="edit_third_party" name="THIRD_PARTY_IDENTIFIER" maxlength="255">
+					</div>
+					<div>
+						<label for="edit_inline_url">Inline URL</label>
+						<input type="text" id="edit_inline_url" name="INLINEURL" maxlength="500">
+					</div>
+					<div>
+						<label for="edit_country">Country ID</label>
+						<input type="text" id="edit_country" name="COUNTRY_ID" maxlength="32">
+					</div>
+					<div>
+						<label for="edit_created">Created (scraped)</label>
+						<input type="datetime-local" id="edit_created" name="CREATED">
+					</div>
+					<div>
+						<label for="edit_last_modified">Last modified</label>
+						<input type="datetime-local" id="edit_last_modified" name="LAST_MODIFIED">
+					</div>
 
-				<label for="edit_end_date">End Date</label>
-				<input type="date" id="edit_end_date" name="ENDDATE">
+					<div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.35rem;">
+						<input type="checkbox" id="edit_needs_review" name="NEEDS_REVIEW" value="1">
+						<label for="edit_needs_review" style="margin:0; font-weight:500;">Needs review</label>
+					</div>
+					<div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.35rem;">
+						<input type="checkbox" id="edit_under_review" name="UNDERREVIEW" value="1">
+						<label for="edit_under_review" style="margin:0; font-weight:500;">Under review</label>
+					</div>
 
-				<label for="edit_naics_code">NAICS Code</label>
-				<input type="text" id="edit_naics_code" name="NAICSCODE">
+					<details class="edit-field-full">
+						<summary>IDs &amp; technical fields</summary>
+						<div class="edit-form-grid" style="margin-top:0.75rem;">
+							<div>
+								<label for="edit_category_id">Category ID</label>
+								<input type="number" id="edit_category_id" name="CATEGORYID">
+							</div>
+							<div>
+								<label for="edit_entity_id">Entity ID</label>
+								<input type="number" id="edit_entity_id" name="ENTITYID">
+							</div>
+							<div>
+								<label for="edit_subscription_type_id">Subscription type ID</label>
+								<input type="number" id="edit_subscription_type_id" name="SUBSCRIPTIONTYPEID">
+							</div>
+							<div>
+								<label for="edit_user_id">User ID</label>
+								<input type="number" id="edit_user_id" name="USERID">
+							</div>
+							<div>
+								<label for="edit_setaside_id">Set-aside code ID</label>
+								<input type="number" id="edit_setaside_id" name="SETASIDECODEID">
+							</div>
+							<div>
+								<label for="edit_bid_url_id">Bid URL ID</label>
+								<input type="number" id="edit_bid_url_id" name="BID_URL_ID">
+							</div>
+							<div>
+								<label for="edit_source_id">Source ID</label>
+								<input type="number" id="edit_source_id" name="SOURCE_ID">
+							</div>
+							<div>
+								<label for="edit_state_id">State ID</label>
+								<input type="number" id="edit_state_id" name="STATEID">
+							</div>
+							<div>
+								<label for="edit_category_alias_id">Category alias ID</label>
+								<input type="number" id="edit_category_alias_id" name="CATEGORY_ALIAS_ID">
+							</div>
+						</div>
+						<div class="edit-field-full" style="margin-top:0.75rem;">
+							<label for="edit_raw_html">Raw HTML</label>
+							<textarea id="edit_raw_html" name="raw_html" rows="5"></textarea>
+						</div>
+						<div class="edit-field-full">
+							<label for="edit_extracted_json">Extracted JSON</label>
+							<textarea id="edit_extracted_json" name="extracted_json" rows="5"></textarea>
+						</div>
+					</details>
+				</div>
 
-				<footer style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+				<footer style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.25rem;">
 					<button type="button" class="secondary"
 						onclick="document.getElementById('editModal').close()">Cancel</button>
-					<button type="submit" class="contrast">Update</button>
+					<button type="submit" class="contrast">Save</button>
 				</footer>
 			</form>
 		</article>
 	</dialog>
 
 	@php
-		$bidsModalData = $bids->map(fn ($bid) => [
-			'TITLE' => $bid->TITLE,
-			'ENDDATE' => $bid->ENDDATE,
-			'NAICSCODE' => $bid->NAICSCODE,
-			'URL' => $bid->URL,
-			'DESCRIPTION' => $bid->DESCRIPTION,
-			'CREATED' => $bid->CREATED,
-		])->values();
+		$bidsModalData = $bids->map(function ($bid) {
+			$fmtDate = static function ($v) {
+				if (empty($v)) {
+					return '';
+				}
+				try {
+					return \Carbon\Carbon::parse($v)->format('Y-m-d');
+				} catch (\Throwable $e) {
+					return '';
+				}
+			};
+			$fmtDt = static function ($v) {
+				if (empty($v)) {
+					return '';
+				}
+				try {
+					return \Carbon\Carbon::parse($v)->format('Y-m-d\TH:i');
+				} catch (\Throwable $e) {
+					return '';
+				}
+			};
+
+			return [
+				'ID' => $bid->ID,
+				'TITLE' => $bid->TITLE,
+				'DESCRIPTION' => $bid->DESCRIPTION,
+				'EMAIL' => $bid->EMAIL,
+				'URL' => $bid->URL,
+				'ENDDATE' => $fmtDate($bid->ENDDATE ?? null),
+				'FEDDATE' => $fmtDate($bid->FEDDATE ?? null),
+				'NAICSCODE' => $bid->NAICSCODE,
+				'SOLICIATIONNUMBER' => $bid->SOLICIATIONNUMBER,
+				'THIRD_PARTY_IDENTIFIER' => $bid->THIRD_PARTY_IDENTIFIER,
+				'NSN' => $bid->NSN,
+				'CREATED' => $fmtDt($bid->CREATED ?? null),
+				'LAST_MODIFIED' => $fmtDt($bid->LAST_MODIFIED ?? null),
+				'INLINEURL' => $bid->INLINEURL,
+				'CATEGORYID' => $bid->CATEGORYID,
+				'ENTITYID' => $bid->ENTITYID,
+				'SUBSCRIPTIONTYPEID' => $bid->SUBSCRIPTIONTYPEID,
+				'USERID' => $bid->USERID,
+				'SETASIDECODEID' => $bid->SETASIDECODEID,
+				'BID_URL_ID' => $bid->BID_URL_ID,
+				'SOURCE_ID' => $bid->SOURCE_ID,
+				'STATEID' => $bid->STATEID,
+				'CATEGORY_ALIAS_ID' => $bid->CATEGORY_ALIAS_ID,
+				'COUNTRY_ID' => $bid->COUNTRY_ID,
+				'NEEDS_REVIEW' => (int) ($bid->NEEDS_REVIEW ?? 0),
+				'UNDERREVIEW' => (int) ($bid->UNDERREVIEW ?? 0),
+				'NAICSCODE_INT' => $bid->NAICSCODE_INT,
+				'raw_html' => $bid->raw_html,
+				'extracted_json' => $bid->extracted_json,
+			];
+		})->values();
 	@endphp
 	<script>
 		const bidsData = @json($bidsModalData);
@@ -775,13 +1000,48 @@
 			return div.innerHTML;
 		}
 
-		function openEditModal(ID, TITLE, ENDDATE, NAICSCODE) {
+		function openEditModal(idx) {
+			const b = bidsData[idx];
+			if (!b) return;
 			const modal = document.getElementById('editModal');
 			const form = document.getElementById('editForm');
-			form.action = "{{ url('/bids') }}/" + ID;
-			document.getElementById('edit_title').value = TITLE || '';
-			document.getElementById('edit_end_date').value = ENDDATE ? ENDDATE.substring(0, 10) : '';
-			document.getElementById('edit_naics_code').value = NAICSCODE || '';
+			form.action = "{{ url('/bids') }}/" + b.ID;
+
+			const setVal = (id, v) => {
+				const el = document.getElementById(id);
+				if (el) el.value = v != null && v !== '' ? String(v) : '';
+			};
+			const setNum = (id, v) => setVal(id, v === null || v === undefined ? '' : v);
+
+			setVal('edit_title', b.TITLE);
+			setVal('edit_url', b.URL);
+			setVal('edit_description', b.DESCRIPTION);
+			setVal('edit_email', b.EMAIL);
+			setVal('edit_end_date', b.ENDDATE);
+			setVal('edit_fed_date', b.FEDDATE);
+			setVal('edit_naics_code', b.NAICSCODE);
+			setNum('edit_naics_int', b.NAICSCODE_INT);
+			setVal('edit_solicitation', b.SOLICIATIONNUMBER);
+			setVal('edit_nsn', b.NSN);
+			setVal('edit_third_party', b.THIRD_PARTY_IDENTIFIER);
+			setVal('edit_inline_url', b.INLINEURL);
+			setVal('edit_country', b.COUNTRY_ID);
+			setVal('edit_created', b.CREATED);
+			setVal('edit_last_modified', b.LAST_MODIFIED);
+			document.getElementById('edit_needs_review').checked = !!b.NEEDS_REVIEW;
+			document.getElementById('edit_under_review').checked = !!b.UNDERREVIEW;
+			setNum('edit_category_id', b.CATEGORYID);
+			setNum('edit_entity_id', b.ENTITYID);
+			setNum('edit_subscription_type_id', b.SUBSCRIPTIONTYPEID);
+			setNum('edit_user_id', b.USERID);
+			setNum('edit_setaside_id', b.SETASIDECODEID);
+			setNum('edit_bid_url_id', b.BID_URL_ID);
+			setNum('edit_source_id', b.SOURCE_ID);
+			setNum('edit_state_id', b.STATEID);
+			setNum('edit_category_alias_id', b.CATEGORY_ALIAS_ID);
+			setVal('edit_raw_html', b.raw_html);
+			setVal('edit_extracted_json', b.extracted_json);
+
 			modal.showModal();
 		}
 
