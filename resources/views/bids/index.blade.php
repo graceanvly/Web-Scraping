@@ -817,6 +817,14 @@
 
 					<p class="edit-field-full" style="margin:0.5rem 0 0; font-size:0.85rem; font-weight:700; color:#374151;">IDs</p>
 					<div>
+						<label for="edit_category_id">CATEGORYID</label>
+						<input type="number" id="edit_category_id" name="CATEGORYID">
+					</div>
+					<div>
+						<label for="edit_category_alias_id">CATEGORY_ALIAS_ID</label>
+						<input type="number" id="edit_category_alias_id" name="CATEGORY_ALIAS_ID">
+					</div>
+					<div>
 						<label for="edit_subscription_type_id">SUBSCRIPTIONTYPEID</label>
 						<input type="number" id="edit_subscription_type_id" name="SUBSCRIPTIONTYPEID">
 					</div>
@@ -841,20 +849,12 @@
 						<summary>More IDs &amp; technical fields</summary>
 						<div class="edit-form-grid" style="margin-top:0.75rem;">
 							<div>
-								<label for="edit_category_id">CATEGORYID</label>
-								<input type="number" id="edit_category_id" name="CATEGORYID">
-							</div>
-							<div>
 								<label for="edit_entity_id">ENTITYID</label>
 								<input type="number" id="edit_entity_id" name="ENTITYID">
 							</div>
 							<div>
 								<label for="edit_bid_url_id">BID_URL_ID</label>
 								<input type="number" id="edit_bid_url_id" name="BID_URL_ID">
-							</div>
-							<div>
-								<label for="edit_category_alias_id">CATEGORY_ALIAS_ID</label>
-								<input type="number" id="edit_category_alias_id" name="CATEGORY_ALIAS_ID">
 							</div>
 						</div>
 						<div class="edit-field-full" style="margin-top:0.75rem;">
