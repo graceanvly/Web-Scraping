@@ -61,12 +61,14 @@ For each bid you return, include:
 - ENDDATE (YYYY-MM-DD when present)
 - NAICSCODE (best guess if not explicitly provided)
 - URL (detail page URL or PDF URL where the bid was found; otherwise the listing URL)
+- BID_CATEGORY (short procurement category label that best matches the work or commodity, e.g. Construction, IT Services, Professional Services, Supplies, Equipment, Services General — suitable for matching a master category list)
+- LOCATION_STATE (US state as a 2-letter postal abbreviation when the bid is clearly in the US, e.g. FL for Florida; otherwise full state/province name or "Not provided")
 - DESCRIPTION (A labeled block that includes: Bid Title; Solicitation/Bid Number; Agency/Department; Status; Description / Scope / Specification; Issue Date; End Date / Due Date including time and timezone; Pre-bid Meeting Date and location/link; Site Visit; Questions Deadline; Contact Person with roles (Purchasing Agent, Finance Officer, Bid Clerk, County/City/Town Clerk, Officer in Charge, School Administrator, District Engineer, Commissioner, Accounting if applicable); Phone Number; Email Address; Mailing Address; Physical Address; Submission Instructions; Required Documents / Attachments / Addenda; Bonding / Insurance / License Requirements; Correct geographic location/state; Commodity/category.)
 
 Rules:
 1) Prefer the most specific source: PDF text first, then clicked detail pages and browser interaction states, then listing text.
 2) If a value is missing, write "Not provided" for that label instead of leaving it blank.
-3) Respond with strict JSON only in the format: {"bids":[{...}]} with the fields above.
+3) Respond with strict JSON only in the format: {"bids":[{...}]} including the fields above (TITLE, ENDDATE, NAICSCODE, URL, BID_CATEGORY, LOCATION_STATE, DESCRIPTION).
 4) Browser interaction states are page snapshots captured after the scraper clicked likely controls. Use them to find content revealed by buttons, tabs, accordions, dropdowns, "view details", "documents", "attachments", and similar controls.
 5) Do your best to find the bids: some sites require clicking links (e.g., "see all open bid opportunities") before listings appear. Only return actual bids; do not treat generic portal/home pages or unrelated content as bids.
 6) Bonfire Hub / similar portals: listings often appear as a table of "opportunities" with titles, due dates, and status. Extract one bid per opportunity row when the portal shows open/public opportunities.
@@ -169,11 +171,23 @@ SYS;
 				$detailUrl = $URL;
 			}
 
+			$bidCategory = $bid['BID_CATEGORY'] ?? '';
+			if (is_array($bidCategory)) {
+				$bidCategory = implode(' ', $bidCategory);
+			}
+
+			$locationState = $bid['LOCATION_STATE'] ?? '';
+			if (is_array($locationState)) {
+				$locationState = implode(' ', $locationState);
+			}
+
 			return [
 				'TITLE' => (string) $title,
 				'ENDDATE' => (string) $endDate,
 				'NAICSCODE' => (string) $naics,
 				'URL' => (string) $detailUrl,
+				'BID_CATEGORY' => (string) $bidCategory,
+				'LOCATION_STATE' => (string) $locationState,
 				'DESCRIPTION' => $desc,
 			];
 		}, $bids);
@@ -184,6 +198,8 @@ SYS;
 				'ENDDATE' => '',
 				'NAICSCODE' => '',
 				'URL' => $URL,
+				'BID_CATEGORY' => '',
+				'LOCATION_STATE' => '',
 				'DESCRIPTION' => $fullPdfText ?: ($text ?: 'No PDF or description found.'),
 			];
 		}

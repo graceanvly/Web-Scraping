@@ -7,6 +7,7 @@ use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
 use App\Models\ScrapeLog;
 use App\Services\AIExtractor;
+use App\Services\BidReferenceLookupService;
 use App\Services\ScraperService;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
@@ -67,7 +68,14 @@ class BidController extends Controller
 		$latestDateLabel = null;
 		$showAll = true;
 
-		return view('bids.index', compact('bids', 'naicsCodes', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterNaics', 'showAll', 'latestDateLabel'));
+		$manilaDirectoryUsers = [];
+		try {
+			$manilaDirectoryUsers = app(BidReferenceLookupService::class)->getManilaAssignableUsersForSelect();
+		} catch (\Throwable $e) {
+			Log::warning('Manila directory users not loaded', ['error' => $e->getMessage()]);
+		}
+
+		return view('bids.index', compact('bids', 'naicsCodes', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterNaics', 'showAll', 'latestDateLabel', 'manilaDirectoryUsers'));
 	}
 
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
@@ -205,6 +213,7 @@ class BidController extends Controller
 				$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
 				$bid->CREATED = now();
 				$bid->LAST_MODIFIED = now();
+				$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
 				$bid->save();
 
 				$saved[] = $bid->id;
@@ -352,6 +361,7 @@ class BidController extends Controller
 					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
+					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
 					$bid->save();
 					$savedCount++;
 
@@ -529,6 +539,7 @@ class BidController extends Controller
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
 					$bid->BID_URL_ID = $bidUrl->id;
+					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
 					$bid->save();
 
 					$savedThisUrl++;
@@ -768,6 +779,7 @@ class BidController extends Controller
 						$bid->CREATED = now();
 						$bid->LAST_MODIFIED = now();
 						$bid->BID_URL_ID = $bidUrl->id;
+						$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
 						$bid->save();
 						$savedThisUrl++;
 					}
@@ -920,6 +932,27 @@ class BidController extends Controller
 			'CATEGORY_ALIAS_ID' => ['nullable', 'integer'],
 			'NAICSCODE_INT' => ['nullable', 'integer'],
 			'COUNTRY_ID' => ['nullable', 'string', 'max:32'],
+			'USERID' => [
+				'nullable',
+				'integer',
+				function (string $attribute, mixed $value, \Closure $fail) use ($bid) {
+					if ($value === null || $value === '') {
+						return;
+					}
+					$intVal = (int) $value;
+					$manilaIds = collect(app(BidReferenceLookupService::class)->getManilaAssignableUsersForSelect())
+						->map(fn (array $r) => (int) $r['id'])
+						->all();
+					if (in_array($intVal, $manilaIds, true)) {
+						return;
+					}
+					$current = (int) ($bid->USERID ?? 0);
+					if ($current !== 0 && $current === $intVal) {
+						return;
+					}
+					$fail('Choose a user from the Manila (Asia/Manila) list.');
+				},
+			],
 			'raw_html' => ['nullable', 'string'],
 			'extracted_json' => ['nullable', 'string'],
 		], [
@@ -985,6 +1018,23 @@ class BidController extends Controller
 		}
 
 		return $out;
+	}
+
+	private function applyBidReferenceFieldsFromScrape(Bid $bid, array $bidData, string $title, string $description): void
+	{
+		try {
+			$lookup = app(BidReferenceLookupService::class);
+			$catId = $lookup->resolveCategoryId($bidData['BID_CATEGORY'] ?? null, $title, $description);
+			if ($catId !== null) {
+				$bid->CATEGORYID = $catId;
+			}
+			$stateId = $lookup->resolveStateId($bidData['LOCATION_STATE'] ?? null, $description, $title);
+			if ($stateId !== null) {
+				$bid->STATEID = $stateId;
+			}
+		} catch (\Throwable $e) {
+			Log::warning('Bid classification lookup failed', ['error' => $e->getMessage()]);
+		}
 	}
 
 	public function destroy(Bid $bid)

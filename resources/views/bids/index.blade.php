@@ -829,8 +829,13 @@
 						<input type="number" id="edit_subscription_type_id" name="SUBSCRIPTIONTYPEID">
 					</div>
 					<div>
-						<label for="edit_user_id">USERID</label>
-						<input type="number" id="edit_user_id" name="USERID">
+						<label for="edit_user_id">USERID <span style="font-weight:400; color:#6b7280;">(Asia/Manila users)</span></label>
+						<select id="edit_user_id" name="USERID">
+							<option value="">— None —</option>
+							@foreach ($manilaDirectoryUsers ?? [] as $dirUser)
+								<option value="{{ $dirUser['id'] }}">{{ $dirUser['label'] }}</option>
+							@endforeach
+						</select>
 					</div>
 					<div>
 						<label for="edit_setaside_id">SETASIDECODEID</label>
@@ -1035,7 +1040,20 @@
 			setNum('edit_category_id', b.CATEGORYID);
 			setNum('edit_entity_id', b.ENTITYID);
 			setNum('edit_subscription_type_id', b.SUBSCRIPTIONTYPEID);
-			setNum('edit_user_id', b.USERID);
+			const userSel = document.getElementById('edit_user_id');
+			if (userSel) {
+				userSel.querySelectorAll('option[data-legacy-user="1"]').forEach((o) => o.remove());
+				const uid = b.USERID != null && b.USERID !== '' ? String(b.USERID) : '';
+				const hasOpt = uid && Array.from(userSel.options).some((o) => o.value === uid);
+				if (uid && !hasOpt) {
+					const opt = document.createElement('option');
+					opt.value = uid;
+					opt.textContent = uid + ' (current assignee)';
+					opt.setAttribute('data-legacy-user', '1');
+					userSel.appendChild(opt);
+				}
+				userSel.value = uid;
+			}
 			setNum('edit_setaside_id', b.SETASIDECODEID);
 			setNum('edit_bid_url_id', b.BID_URL_ID);
 			setNum('edit_source_id', b.SOURCE_ID);
