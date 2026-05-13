@@ -197,6 +197,174 @@
 			margin-left: auto;
 		}
 
+		/* Scrape actions — separated bulk vs single URL */
+		.scrape-actions-head {
+			margin: 0 0 1.35rem;
+		}
+
+		.scrape-actions-head h2 {
+			margin: 0 0 0.35rem;
+			font-size: 1.1rem;
+			font-weight: 650;
+			color: #0f172a;
+			letter-spacing: -0.02em;
+		}
+
+		.scrape-actions-head p {
+			margin: 0;
+			font-size: 0.9rem;
+			color: #64748b;
+			line-height: 1.5;
+			max-width: 52rem;
+		}
+
+		.scrape-actions-grid {
+			display: grid;
+			grid-template-columns: 1fr;
+			gap: 1.25rem;
+			align-items: stretch;
+		}
+
+		@media (min-width: 880px) {
+			.scrape-actions-grid {
+				grid-template-columns: 1fr 1fr;
+				gap: 1.5rem;
+			}
+		}
+
+		.scrape-panel {
+			border: 1px solid #e2e8f0;
+			border-radius: 12px;
+			padding: 1.35rem 1.4rem;
+			background: linear-gradient(165deg, #f8fafc 0%, #fff 42%);
+			box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+			display: flex;
+			flex-direction: column;
+			min-height: 100%;
+		}
+
+		.scrape-panel-label {
+			display: flex;
+			align-items: baseline;
+			gap: 0.5rem;
+			margin-bottom: 0.5rem;
+		}
+
+		.scrape-panel-label h3 {
+			margin: 0;
+			font-size: 0.95rem;
+			font-weight: 650;
+			color: #1e293b;
+		}
+
+		.scrape-panel-badge {
+			font-size: 0.65rem;
+			font-weight: 700;
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+			padding: 0.2rem 0.5rem;
+			border-radius: 6px;
+			background: #e0e7ff;
+			color: #3730a3;
+			line-height: 1;
+		}
+
+		.scrape-panel-badge.scrape-badge-alt {
+			background: #dbeafe;
+			color: #1d4ed8;
+		}
+
+		.scrape-panel-desc {
+			margin: 0 0 1.15rem;
+			font-size: 0.84rem;
+			color: #64748b;
+			line-height: 1.5;
+			flex-grow: 0;
+		}
+
+		.scrape-field-stack {
+			display: flex;
+			flex-direction: column;
+			gap: 0.5rem;
+			margin-bottom: 1.1rem;
+		}
+
+		.scrape-field-stack label.field-label {
+			margin: 0;
+			font-size: 0.8rem;
+			font-weight: 600;
+			color: #475569;
+			letter-spacing: 0.01em;
+		}
+
+		.scrape-field-stack select {
+			width: 100%;
+			margin: 0;
+			font-weight: 500;
+		}
+
+		.scrape-panel-footer {
+			margin-top: auto;
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0.75rem;
+			padding-top: 0.15rem;
+		}
+
+		.scrape-panel-footer #scrapeAllBtn {
+			padding: 0.62rem 1.25rem;
+			font-size: 0.95rem;
+			font-weight: 600;
+			border-radius: 8px;
+		}
+
+		.scrape-link-secondary {
+			font-size: 0.9rem;
+			font-weight: 600;
+			text-decoration: none;
+			color: #2563eb;
+			padding: 0.35rem 0;
+		}
+
+		.scrape-link-secondary:hover {
+			text-decoration: underline;
+			color: #1d4ed8;
+		}
+
+		.single-scrape-form {
+			display: flex;
+			flex-direction: column;
+			gap: 0.9rem;
+			margin: 0;
+			flex-grow: 1;
+		}
+
+		.single-scrape-form .single-url-row label.field-label {
+			margin: 0 0 0.45rem;
+			font-size: 0.8rem;
+			font-weight: 600;
+			color: #475569;
+			display: block;
+		}
+
+		.single-scrape-form input[type="url"] {
+			width: 100%;
+			margin: 0;
+			padding: 0.68rem 0.85rem;
+			font-size: 0.95rem;
+			border-radius: 8px;
+		}
+
+		.single-scrape-form #singleScrapeBtn {
+			align-self: flex-start;
+			padding: 0.58rem 1.35rem;
+			font-size: 0.9rem;
+			font-weight: 600;
+			border-radius: 8px;
+			white-space: nowrap;
+		}
+
 		/* Tabs */
 		.tab-btn {
 			padding: 0.6rem 1.4rem;
@@ -475,36 +643,53 @@
 
 		<!-- Actions -->
 	<section class="card">
-		<div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-start; justify-content:space-between;">
-			<div style="display:flex; flex-direction:column; gap:0.35rem; align-items:flex-start;">
-				<div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-					<button id="scrapeAllBtn" type="button" class="contrast"
-						style="padding:0.6rem 1.2rem; font-size:0.95rem; white-space:nowrap;"
-						onclick="startScrapeAll()">
+		<header class="scrape-actions-head">
+			<h2>Run scraper</h2>
+			<p>Bulk scraping uses every URL saved under Bid URLs. Single URL is for pasting one listing page link when you need a targeted run.</p>
+		</header>
+
+		<div class="scrape-actions-grid" role="presentation">
+			<div class="scrape-panel scrape-panel-bulk" aria-labelledby="scrape-all-heading">
+				<div class="scrape-panel-label">
+					<h3 id="scrape-all-heading">Scrape all saved URLs</h3>
+					<span class="scrape-panel-badge">Bulk</span>
+				</div>
+				<p class="scrape-panel-desc">Processes each configured bid source. Optionally assign extracted bids to someone in the Manila directory before starting.</p>
+				<div class="scrape-field-stack">
+					<label class="field-label" for="scrapeAssignUserId">Assign new bids to (optional)</label>
+					<select id="scrapeAssignUserId" name="assign_user_id">
+						<option value="">— None —</option>
+						@foreach ($manilaDirectoryUsers ?? [] as $dirUser)
+							<option value="{{ $dirUser['id'] }}">{{ $dirUser['label'] }}</option>
+						@endforeach
+					</select>
+				</div>
+				<div class="scrape-panel-footer">
+					<button id="scrapeAllBtn" type="button" class="contrast" onclick="startScrapeAll()">
 						Scrape All
 					</button>
-					<label for="scrapeAssignUserId" style="display:flex; align-items:center; gap:0.35rem; margin:0; font-size:0.9rem; font-weight:600; color:#374151; white-space:nowrap;">
-						Assign to
-						<select id="scrapeAssignUserId" name="assign_user_id" style="min-width:12rem; max-width:min(28vw, 260px); margin:0; font-weight:500;">
-							<option value="">— None —</option>
-							@foreach ($manilaDirectoryUsers ?? [] as $dirUser)
-								<option value="{{ $dirUser['id'] }}">{{ $dirUser['label'] }}</option>
-							@endforeach
-						</select>
-					</label>
-					<a href="{{ route('bidurl.index') }}" class="secondary" style="white-space:nowrap;">Bid URLs</a>
+					<a href="{{ route('bidurl.index') }}" class="scrape-link-secondary">Manage Bid URLs →</a>
 				</div>
 			</div>
 
-			<form id="singleScrapeForm" onsubmit="return startSingleScrape(event)"
-				style="display:flex; gap:0.5rem; flex:1; max-width:600px;">
-				<input type="URL" id="singleScrapeUrl" placeholder="Enter bidding URL to scrape"
-					required style="flex:1; min-width:80px; padding:0.6rem 0.75rem; font-size:0.95rem;">
-				<button type="submit" id="singleScrapeBtn"
-					style="flex:0; width:auto; padding:0.45rem 0.9rem; font-size:0.85rem; white-space:nowrap;">
-					Scrape
-				</button>
-			</form>
+			<div class="scrape-panel scrape-panel-single" aria-labelledby="scrape-single-heading">
+				<div class="scrape-panel-label">
+					<h3 id="scrape-single-heading">Single URL scrape</h3>
+					<span class="scrape-panel-badge scrape-badge-alt">One link</span>
+				</div>
+				<p class="scrape-panel-desc">Paste a full https link to an agency’s open-bids listing page. Only that page is scraped for this run.</p>
+				<form id="singleScrapeForm" class="single-scrape-form" onsubmit="return startSingleScrape(event)">
+					<div class="single-url-row">
+						<label class="field-label" for="singleScrapeUrl">Bidding URL</label>
+						<input type="url" id="singleScrapeUrl" name="single_scrape_url" inputmode="url" autocomplete="url"
+							placeholder="https://example.gov/bids/open"
+							required>
+					</div>
+					<button type="submit" id="singleScrapeBtn">
+						Scrape this URL
+					</button>
+				</form>
+			</div>
 		</div>
 
 		<!-- Scrape Progress Panel -->
@@ -1348,7 +1533,7 @@
 					reader.read().then(({ done, value }) => {
 						if (done) {
 							btn.disabled = false;
-							btn.textContent = 'Scrape';
+							btn.textContent = 'Scrape this URL';
 							return;
 						}
 						buffer += decoder.decode(value, { stream: true });
@@ -1370,7 +1555,7 @@
 				progressTitle.textContent = 'Error: ' + err.message;
 				progressBar.style.background = '#dc2626';
 				btn.disabled = false;
-				btn.textContent = 'Scrape';
+				btn.textContent = 'Scrape this URL';
 			});
 
 			function handleSingleScrapeEvent(ev) {
@@ -1402,7 +1587,7 @@
 						}
 						progressUrl.textContent = '';
 						btn.disabled = false;
-						btn.textContent = 'Scrape';
+						btn.textContent = 'Scrape this URL';
 						break;
 				}
 			}
