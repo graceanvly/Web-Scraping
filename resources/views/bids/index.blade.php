@@ -483,6 +483,15 @@
 						onclick="startScrapeAll()">
 						Scrape All
 					</button>
+					<label for="scrapeAssignUserId" style="display:flex; align-items:center; gap:0.35rem; margin:0; font-size:0.9rem; font-weight:600; color:#374151; white-space:nowrap;">
+						Assign to
+						<select id="scrapeAssignUserId" name="assign_user_id" style="min-width:12rem; max-width:min(28vw, 260px); margin:0; font-weight:500;">
+							<option value="">— None —</option>
+							@foreach ($manilaDirectoryUsers ?? [] as $dirUser)
+								<option value="{{ $dirUser['id'] }}">{{ $dirUser['label'] }}</option>
+							@endforeach
+						</select>
+					</label>
 					<a href="{{ route('bidurl.index') }}" class="secondary" style="white-space:nowrap;">Bid URLs</a>
 				</div>
 			</div>
@@ -1189,7 +1198,13 @@
 
 			let total = 0;
 
-			fetch("{{ route('bidurl.scrapeStream') }}", {
+			let streamUrl = "{{ route('bidurl.scrapeStream') }}";
+			const au = document.getElementById('scrapeAssignUserId')?.value?.trim();
+			if (au) {
+				streamUrl += (streamUrl.indexOf('?') === -1 ? '?' : '&') + 'assign_user_id=' + encodeURIComponent(au);
+			}
+
+			fetch(streamUrl, {
 				method: 'GET',
 				headers: { 'Accept': 'text/event-stream' },
 			}).then(response => {
@@ -1316,7 +1331,10 @@
 			progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtmlGlobal(url);
 			progressLog.innerHTML = '';
 
-			const streamUrl = "{{ route('bids.scrapeUrlStream') }}?url=" + encodeURIComponent(url);
+			const streamUrl = "{{ route('bids.scrapeUrlStream') }}?url=" + encodeURIComponent(url)
+				+ (document.getElementById('scrapeAssignUserId')?.value?.trim()
+					? '&assign_user_id=' + encodeURIComponent(document.getElementById('scrapeAssignUserId').value.trim())
+					: '');
 
 			fetch(streamUrl, {
 				method: 'GET',

@@ -265,11 +265,13 @@ class BidController extends Controller
 
 		$url = trim((string) $request->query('url', ''));
 
+		$assignUserId = $this->resolveOptionalManilaAssignUserId($request->query('assign_user_id'));
+
 		if (session()->isStarted()) {
 			session()->save();
 		}
 
-		return new StreamedResponse(function () use ($url, $scraper, $ai) {
+		return new StreamedResponse(function () use ($url, $scraper, $ai, $assignUserId) {
 			$send = function ($data) {
 				echo "data: " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
 				if (ob_get_level()) ob_flush();
@@ -362,6 +364,7 @@ class BidController extends Controller
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
 					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
+					$this->applyScrapeAssignUserId($bid, $assignUserId);
 					$bid->save();
 					$savedCount++;
 
@@ -392,6 +395,8 @@ class BidController extends Controller
 	{
 		@set_time_limit(0);
 		@ini_set('memory_limit', '1G');
+
+		$assignUserId = $this->resolveOptionalManilaAssignUserId($request->input('assign_user_id'));
 
 		$today = \Carbon\Carbon::today();
 		$bidUrls = BidUrl::all();
@@ -540,6 +545,7 @@ class BidController extends Controller
 					$bid->LAST_MODIFIED = now();
 					$bid->BID_URL_ID = $bidUrl->id;
 					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
+					$this->applyScrapeAssignUserId($bid, $assignUserId);
 					$bid->save();
 
 					$savedThisUrl++;
@@ -620,7 +626,9 @@ class BidController extends Controller
 			session()->save();
 		}
 
-		return new StreamedResponse(function () use ($scraper, $ai) {
+		$assignUserId = $this->resolveOptionalManilaAssignUserId($request->query('assign_user_id'));
+
+		return new StreamedResponse(function () use ($scraper, $ai, $assignUserId) {
 			$send = function ($data) {
 				echo "data: " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
 				if (ob_get_level())
@@ -780,6 +788,7 @@ class BidController extends Controller
 						$bid->LAST_MODIFIED = now();
 						$bid->BID_URL_ID = $bidUrl->id;
 						$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
+						$this->applyScrapeAssignUserId($bid, $assignUserId);
 						$bid->save();
 						$savedThisUrl++;
 					}
@@ -1034,6 +1043,38 @@ class BidController extends Controller
 			}
 		} catch (\Throwable $e) {
 			Log::warning('Bid classification lookup failed', ['error' => $e->getMessage()]);
+		}
+	}
+
+	/** Optional Manila directory user to set on newly scraped bids (query: assign_user_id). */
+	private function resolveOptionalManilaAssignUserId(mixed $value): ?int
+	{
+		if ($value === null || $value === '') {
+			return null;
+		}
+		if (!is_numeric($value)) {
+			return null;
+		}
+		$intVal = (int) $value;
+		if ($intVal <= 0) {
+			return null;
+		}
+		$allowed = collect(app(BidReferenceLookupService::class)->getManilaAssignableUsersForSelect())
+			->map(fn (array $r) => (int) $r['id'])
+			->all();
+		if (!in_array($intVal, $allowed, true)) {
+			Log::warning('assign_user_id ignored: unknown or non-Manila user', ['id' => $intVal]);
+
+			return null;
+		}
+
+		return $intVal;
+	}
+
+	private function applyScrapeAssignUserId(Bid $bid, ?int $assignUserId): void
+	{
+		if ($assignUserId !== null) {
+			$bid->USERID = $assignUserId;
 		}
 	}
 
