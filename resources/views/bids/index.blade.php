@@ -39,6 +39,11 @@
 			margin-bottom: 2rem;
 		}
 
+		/* Allow wide inner tables (bids wrap) to scroll instead of overflowing the card edge */
+		#panelBids.card {
+			min-width: 0;
+		}
+
 		table {
 			width: 100%;
 			border-collapse: collapse;
@@ -46,6 +51,70 @@
 			border-radius: 8px;
 			overflow: hidden;
 			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+		}
+
+		/* Bids listing: fixed layout stays within card; Actions stays visible */
+		.bids-table-wrap {
+			display: block;
+			width: 100%;
+			max-width: 100%;
+			min-width: 0;
+			overflow-x: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+
+		#bidsTable {
+			table-layout: fixed;
+			width: 100%;
+			max-width: 100%;
+			overflow: visible;
+			min-width: 0;
+		}
+
+		/* Let title ellipsis work inside fixed columns */
+		#bidsTable thead th:first-child,
+		#bidsTable tbody td:first-child {
+			min-width: 0;
+			max-width: none;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		#bidsTable thead th:nth-child(2),
+		#bidsTable tbody td:nth-child(2) {
+			width: 9.75rem;
+		}
+
+		#bidsTable thead th:nth-child(3),
+		#bidsTable tbody td:nth-child(3) {
+			width: 5.25rem;
+		}
+
+		#bidsTable thead th:nth-child(4),
+		#bidsTable tbody td:nth-child(4) {
+			width: 9.75rem;
+		}
+
+		#bidsTable thead th:nth-child(5),
+		#bidsTable tbody td:nth-child(5) {
+			width: 6rem;
+			text-align: center;
+			vertical-align: middle;
+		}
+
+		#bidsTable thead th:nth-child(6),
+		#bidsTable tbody td:nth-child(6) {
+			width: 14rem;
+			min-width: 14rem;
+			white-space: nowrap;
+			vertical-align: middle;
+			overflow: visible;
+		}
+
+		#bidsTable .action-buttons {
+			flex-shrink: 0;
+			flex-wrap: nowrap;
 		}
 
 		th,
@@ -760,7 +829,7 @@
 				</div>
 			@endif
 
-			<div style="overflow-x:auto;">
+			<div class="bids-table-wrap">
 				<table role="grid" id="bidsTable">
 					<thead>
 						<tr>
