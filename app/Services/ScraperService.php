@@ -235,6 +235,8 @@ class ScraperService
 			Log::info('NO OPEN BIDS FLAGGED', ['url' => $url]);
 		}
 
+		$bestText = $this->prependComplianceNewsPrimaryDescription($finalUrl, $bestText);
+
 		if (!$blocked && !$noOpenBids && (!$batchMode || $this->isHeavyJsProcurementPortal($url)) && $this->shouldCollectInteractivePages($bestHtml, $bestText)) {
 			$report('Interactive page scan (clicks/tabs)…');
 			$interactivePages = $this->collectInteractivePages($url, $startedAt, $requestOptions, $authProvided);
@@ -304,6 +306,7 @@ class ScraperService
 					$pageHtml = $this->limitedResponseBody($response, $startedAt);
 				}
 				$pageText = $this->htmlToText($pageHtml);
+				$pageText = $this->prependComplianceNewsPrimaryDescription($detail['URL'], $pageText);
 				$this->guardLoginRequirement($pageHtml, $pageText, $authProvided);
 				$pagePdfLinks = $this->findPdfLink($pageHtml, $detail['URL']);
 				if ($maxDetailPdfsPerPage >= 0 && count($pagePdfLinks) > $maxDetailPdfsPerPage) {
@@ -426,6 +429,58 @@ class ScraperService
 		}
 
 		return false;
+	}
+
+	/**
+	 * Compliance News trade-journal detail pages embed the real scope under "PROJECT DETAILS" / "PROJECT DESCRIPTION".
+	 * Prepend that block so the model uses the narrative for DESCRIPTION instead of title/status/state metadata only.
+	 */
+	private function prependComplianceNewsPrimaryDescription(string $pageUrl, string $plainText): string
+	{
+		$hint = $this->extractComplianceNewsPrimaryDescription($pageUrl, $plainText);
+		if ($hint === null || $hint === '') {
+			return $plainText;
+		}
+
+		return "--- PRIMARY PROJECT DESCRIPTION (use the full text below for DESCRIPTION; do not replace with a short metadata summary) ---\n\n"
+			. $hint
+			. "\n\n--- PAGE TEXT ---\n\n"
+			. $plainText;
+	}
+
+	/**
+	 * @return non-empty-string|null
+	 */
+	private function extractComplianceNewsPrimaryDescription(string $pageUrl, string $plainText): ?string
+	{
+		$host = strtolower((string) parse_url($pageUrl, PHP_URL_HOST));
+		if ($host === '' || !str_contains($host, 'compliancenews.com')) {
+			return null;
+		}
+
+		$t = preg_replace("/\r\n?/", "\n", $plainText);
+		if (!is_string($t) || $t === '') {
+			return null;
+		}
+
+		$stop = '(?=\n\s*PDF\s+ATTACHMENTS\b|\nBack\s+To\s+Trade\s+Journal\b|\z)';
+		$patterns = [
+			'/PROJECT\s+DETAILS\s*:?\s*\n?([\s\S]+?)' . $stop . '/iu',
+			'/PROJECT\s+DESCRIPTION\s*:?\s*\n?([\s\S]+?)' . $stop . '/iu',
+		];
+
+		foreach ($patterns as $re) {
+			if (preg_match($re, $t, $m)) {
+				$block = trim($m[1]);
+				if (mb_strlen($block) >= 120) {
+					$block = preg_replace("/\n{3,}/", "\n\n", $block);
+
+					return mb_substr($block, 0, 120000);
+				}
+			}
+		}
+
+		return null;
 	}
 
 	/**
@@ -1043,6 +1098,7 @@ class ScraperService
 				$seen[$fingerprint] = true;
 
 				$pageUrl = filter_var($page['url'] ?? '', FILTER_VALIDATE_URL) ? (string) $page['url'] : $url;
+				$text = $this->prependComplianceNewsPrimaryDescription($pageUrl, $text);
 				$pdfLinks = $this->findPdfLink($html, $pageUrl);
 				$pagePdfText = '';
 				$pdfTexts = [];

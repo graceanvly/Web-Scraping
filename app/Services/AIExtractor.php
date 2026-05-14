@@ -63,7 +63,7 @@ For each bid you return, include:
 - URL (detail page URL or PDF URL where the bid was found; otherwise the listing URL)
 - BID_CATEGORY (short procurement category label that best matches the work or commodity, e.g. Construction, IT Services, Professional Services, Supplies, Equipment, Services General — suitable for matching a master category list)
 - LOCATION_STATE (US state as a 2-letter postal abbreviation when the bid is clearly in the US, e.g. FL for Florida; otherwise full state/province name or "Not provided")
-- DESCRIPTION (A labeled block that includes: Bid Title; Solicitation/Bid Number; Agency/Department; Status; Description / Scope / Specification; Issue Date; End Date / Due Date including time and timezone; Pre-bid Meeting Date and location/link; Site Visit; Questions Deadline; Contact Person with roles (Purchasing Agent, Finance Officer, Bid Clerk, County/City/Town Clerk, Officer in Charge, School Administrator, District Engineer, Commissioner, Accounting if applicable); Phone Number; Email Address; Mailing Address; Physical Address; Submission Instructions; Required Documents / Attachments / Addenda; Bonding / Insurance / License Requirements; Correct geographic location/state; Commodity/category.)
+- DESCRIPTION (**The full long-form solicitation text.** This must be the complete project narrative: scope / specifications / solicitation body / "PROJECT DESCRIPTION" / invitation text from the detail page or PDF — not merely a labeled summary of Title, Status, End Date, state, or category. Where the pasted content includes a block marked "--- PRIMARY PROJECT DESCRIPTION ---", use that narrative in full (or as much as fits) as the core of DESCRIPTION, preserving paragraph breaks. You may prepend a short "**Metadata:**" subsection with solicitation number, agency, contacts, deadlines, addresses, bonding/insurance, submission instructions ONLY after the narrative, or weave those facts into prose — but DO NOT omit the narrative in favor of a short field list when the narrative exists on the page or in PRIMARY PROJECT DESCRIPTION.)
 
 Rules:
 1) Prefer the most specific source: PDF text first, then clicked detail pages and browser interaction states, then listing text.
@@ -72,25 +72,27 @@ Rules:
 4) Browser interaction states are page snapshots captured after the scraper clicked likely controls. Use them to find content revealed by buttons, tabs, accordions, dropdowns, "view details", "documents", "attachments", and similar controls.
 5) Do your best to find the bids: some sites require clicking links (e.g., "see all open bid opportunities") before listings appear. Only return actual bids; do not treat generic portal/home pages or unrelated content as bids.
 6) Bonfire Hub / similar portals: listings often appear as a table of "opportunities" with titles, due dates, and status. Extract one bid per opportunity row when the portal shows open/public opportunities.
+7) Trade journal / detail pages (e.g. Compliance News style): TITLE, ENDDATE, LOCATION_STATE, BID_CATEGORY should reflect structured fields where present; DESCRIPTION must still include the entire **PROJECT DETAILS / PROJECT DESCRIPTION** narrative, not replace it with Title + Status + state + commodity only.
+
 SYS;
 
 		$promptUser = [
 			'instructions' => 'Use listing, clicked bid pages, and PDF text to extract open bids.',
 			'URL' => $URL,
 			'pdf_links' => array_column($pdfLinks, 'PDF_LINK'),
-			'pdf_text_excerpt' => mb_substr($fullPdfText ?? '', 0, 18000),
-			'listing_text_excerpt' => mb_substr($text ?? '', 0, 8000),
-			'listing_html_excerpt' => mb_substr($html ?? '', 0, 8000),
+			'pdf_text_excerpt' => mb_substr($fullPdfText ?? '', 0, 24000),
+			'listing_text_excerpt' => mb_substr($text ?? '', 0, 32000),
+			'listing_html_excerpt' => mb_substr($html ?? '', 0, 12000),
 			'bid_pages' => array_map(function ($page) {
 				return [
 					'url' => $page['url'] ?? '',
 					'title' => $page['title'] ?? '',
 					'source' => $page['source'] ?? 'detail_or_interaction_page',
 					'interaction_type' => $page['interaction_type'] ?? '',
-					'text_excerpt' => mb_substr($page['text'] ?? '', 0, 6000),
-					'html_excerpt' => mb_substr($page['html'] ?? '', 0, 4000),
+					'text_excerpt' => mb_substr($page['text'] ?? '', 0, 28000),
+					'html_excerpt' => mb_substr($page['html'] ?? '', 0, 8000),
 					'pdf_links' => array_column($page['pdf_links'] ?? [], 'PDF_LINK'),
-					'pdf_text_excerpt' => mb_substr($page['pdf_text'] ?? '', 0, 8000),
+					'pdf_text_excerpt' => mb_substr($page['pdf_text'] ?? '', 0, 12000),
 				];
 			}, $bidPages),
 		];
