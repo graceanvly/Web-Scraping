@@ -71,19 +71,29 @@
 			min-width: 0;
 		}
 
-		/* Let title ellipsis work inside fixed columns */
+		/* Title: full text wraps within cell */
 		#bidsTable thead th:first-child,
 		#bidsTable tbody td:first-child {
 			min-width: 0;
 			max-width: none;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
+			overflow: visible;
+			text-overflow: clip;
+			white-space: normal;
+			vertical-align: top;
+			overflow-wrap: anywhere;
+			word-break: break-word;
+			hyphens: auto;
+		}
+
+		#bidsTable tbody td:first-child .bid-detail-link {
+			font-weight: 600;
+			line-height: 1.35;
 		}
 
 		#bidsTable thead th:nth-child(2),
 		#bidsTable tbody td:nth-child(2) {
-			width: 9.75rem;
+			width: 6.75rem;
+			min-width: 6.75rem;
 		}
 
 		#bidsTable thead th:nth-child(3),
@@ -93,7 +103,8 @@
 
 		#bidsTable thead th:nth-child(4),
 		#bidsTable tbody td:nth-child(4) {
-			width: 9.75rem;
+			width: 6.75rem;
+			min-width: 6.75rem;
 		}
 
 		#bidsTable thead th:nth-child(5),
@@ -160,7 +171,7 @@
 			background: #f1f5f9;
 		}
 
-		/* Title column truncate */
+		/* Title column truncate (issues tab / other tables only — bids title wraps via #bidsTable rules above) */
 		td:first-child {
 			max-width: 320px;
 			white-space: nowrap;
@@ -641,6 +652,12 @@
 				/* shorter title column */
 			}
 
+			#bidsTable tbody td:first-child {
+				max-width: none;
+				white-space: normal;
+				overflow: visible;
+			}
+
 			td:nth-child(3) {
 				max-width: 90px;
 				/* NAICS smaller */
@@ -877,11 +894,11 @@
 									<a href="javascript:void(0)" data-bid-idx="{{ $idx }}" class="bid-detail-link">{{ $bid->TITLE ?? '—' }}</a>
 								</td>
 								<td>
-									{{ $bid->ENDDATE ? \Carbon\Carbon::parse($bid->ENDDATE)->format('M. d, Y') : '—' }}
+									{{ $bid->ENDDATE ? \Carbon\Carbon::parse($bid->ENDDATE)->format('M d') : '—' }}
 								</td>
 								<td title="{{ $bid->NAICSCODE }}">{{ $bid->NAICSCODE ?? '—' }}</td>
 								<td style="font-size:0.85rem; color:#6b7280;">
-									{{ $bid->CREATED ? \Carbon\Carbon::parse($bid->CREATED)->format('M. d, Y') : '—' }}
+									{{ $bid->CREATED ? \Carbon\Carbon::parse($bid->CREATED)->format('M d') : '—' }}
 								</td>
 								<td>
 									@if ($bid->URL)
