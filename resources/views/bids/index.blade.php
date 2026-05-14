@@ -105,16 +105,37 @@
 
 		#bidsTable thead th:nth-child(6),
 		#bidsTable tbody td:nth-child(6) {
-			width: 14rem;
-			min-width: 14rem;
+			width: 6rem;
+			min-width: 5.75rem;
 			white-space: nowrap;
 			vertical-align: middle;
 			overflow: visible;
+			text-align: center;
 		}
 
 		#bidsTable .action-buttons {
 			flex-shrink: 0;
 			flex-wrap: nowrap;
+			justify-content: center;
+			gap: 0.35rem;
+		}
+
+		#bidsTable .action-buttons button,
+		#bidsTable .action-buttons form button {
+			padding: 0.35rem;
+			min-width: 2.25rem;
+			min-height: 2.25rem;
+			justify-content: center;
+			align-items: center;
+			font-size: 1.05rem;
+			line-height: 1;
+			border-radius: 8px;
+			gap: 0;
+		}
+
+		#bidsTable .action-buttons form {
+			display: inline-flex;
+			margin: 0;
 		}
 
 		th,
@@ -632,6 +653,14 @@
 				font-size: 0.7rem;
 			}
 
+			#bidsTable .action-buttons button,
+			#bidsTable .action-buttons form button {
+				min-width: 2.125rem;
+				min-height: 2.125rem;
+				padding: 0.28rem;
+				font-size: 1rem;
+			}
+
 			/* Toolbar compact */
 			.table-toolbar {
 				flex-direction: column;
@@ -866,16 +895,18 @@
 								</td>
 								<td>
 									<div class="action-buttons">
-										<button type="button" class="secondary" onclick="openEditModal({{ $idx }})">
-											✏️ Edit
+										<button type="button" class="secondary" onclick="openEditModal({{ $idx }})"
+											title="Edit bid" aria-label="Edit bid">
+											✏️
 										</button>
 										<form action="{{ route('bids.destroy', ['bid' => $bid->ID]) }}" method="POST">
 											@csrf
 											@method('DELETE')
 											<button type="submit"
 												onclick="return confirm('Do you really want to delete this?')"
-												class="contrast">
-												🗑 Delete
+												class="contrast"
+												title="Delete bid" aria-label="Delete bid">
+												🗑
 											</button>
 										</form>
 									</div>
