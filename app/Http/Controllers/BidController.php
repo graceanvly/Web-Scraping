@@ -161,6 +161,7 @@ class BidController extends Controller
 					continue;
 				}
 				$title = $titleMap[$rawTitle] ?? $rawTitle;
+				$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
 				$detailUrl = trim((string) ($bidData['URL'] ?? $validated['URL']));
 				$detailUrl = $detailUrl !== '' ? $detailUrl : $validated['URL'];
@@ -211,6 +212,7 @@ class BidController extends Controller
 					$validated['URL']
 				);
 				$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
+				$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
 				$bid->CREATED = now();
 				$bid->LAST_MODIFIED = now();
 				$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
@@ -334,6 +336,7 @@ class BidController extends Controller
 					$rawTitle = $bidData['TITLE'] ?? null;
 					if (!$rawTitle) continue;
 					$title = $titleMap[$rawTitle] ?? $rawTitle;
+					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
 					$detailUrl = trim((string) ($bidData['URL'] ?? $url));
 					$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
@@ -361,6 +364,7 @@ class BidController extends Controller
 					$bid->ENDDATE = $endDate;
 					$bid->NAICSCODE = $this->normalizeNaicsCode($bidData['NAICSCODE'] ?? null, $description, $title, $url);
 					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
+					$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
 					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
@@ -491,6 +495,7 @@ class BidController extends Controller
 						continue;
 					}
 					$title = $titleMap[$rawTitle] ?? $rawTitle;
+					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
 					$detailUrl = trim((string) ($bidData['URL'] ?? $url));
 					$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
@@ -541,6 +546,7 @@ class BidController extends Controller
 						$url
 					);
 					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
+					$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
 					$bid->BID_URL_ID = $bidUrl->id;
@@ -746,6 +752,7 @@ class BidController extends Controller
 						if (!$rawTitle)
 							continue;
 						$title = $titleMap[$rawTitle] ?? $rawTitle;
+						$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
 						$detailUrl = trim((string) ($bidData['URL'] ?? $url));
 						$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
@@ -784,6 +791,7 @@ class BidController extends Controller
 						$bid->ENDDATE = $endDate;
 						$bid->NAICSCODE = $this->normalizeNaicsCode($bidData['NAICSCODE'] ?? null, $description, $title, $url);
 						$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
+						$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
 						$bid->CREATED = now();
 						$bid->LAST_MODIFIED = now();
 						$bid->BID_URL_ID = $bidUrl->id;
@@ -1027,6 +1035,68 @@ class BidController extends Controller
 		}
 
 		return $out;
+	}
+
+	private function applyCorporateTitlePrefix(string $title, ?string $postingEntity): string
+	{
+		$t = trim($title);
+		if ($t === '') {
+			return $title;
+		}
+		if (strtolower(trim((string) ($postingEntity ?? ''))) !== 'private_company') {
+			return $title;
+		}
+		if (preg_match('/^Corporate\s*:\s+/iu', $t)) {
+			return $title;
+		}
+
+		return 'Corporate: ' . $t;
+	}
+
+	private function resolveBidContactEmail(array $bidData, string $description): ?string
+	{
+		$fromAi = $this->sanitizeBidEmailForColumn($bidData['CONTACT_EMAIL'] ?? null);
+		if ($fromAi !== null) {
+			return $fromAi;
+		}
+
+		return $this->extractFirstEmailFromText($description);
+	}
+
+	private function sanitizeBidEmailForColumn(mixed $raw): ?string
+	{
+		if (is_array($raw)) {
+			$raw = implode(' ', $raw);
+		}
+		$s = trim((string) ($raw ?? ''));
+		if ($s === '' || strcasecmp($s, 'not provided') === 0) {
+			return null;
+		}
+		foreach (preg_split('/[\s,;|]+/', $s) as $part) {
+			$part = trim($part);
+			if ($part !== '' && filter_var($part, FILTER_VALIDATE_EMAIL)) {
+				return mb_substr($part, 0, 255);
+			}
+		}
+
+		return null;
+	}
+
+	private function extractFirstEmailFromText(string $text): ?string
+	{
+		if ($text === '') {
+			return null;
+		}
+		if (preg_match_all('/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/', $text, $m) && isset($m[0])) {
+			foreach ($m[0] as $candidate) {
+				$v = $this->sanitizeBidEmailForColumn($candidate);
+				if ($v !== null) {
+					return $v;
+				}
+			}
+		}
+
+		return null;
 	}
 
 	private function applyBidReferenceFieldsFromScrape(Bid $bid, array $bidData, string $title, string $description): void

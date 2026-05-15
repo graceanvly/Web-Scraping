@@ -63,16 +63,27 @@ For each bid you return, include:
 - URL (detail page URL or PDF URL where the bid was found; otherwise the listing URL)
 - BID_CATEGORY (short procurement category label that best matches the work or commodity, e.g. Construction, IT Services, Professional Services, Supplies, Equipment, Services General — suitable for matching a master category list)
 - LOCATION_STATE (US state as a 2-letter postal abbreviation when the bid is clearly in the US, e.g. FL for Florida; otherwise full state/province name or "Not provided")
+- POSTING_ENTITY (exactly one of: government, private_company, uncertain). Classify the **immediate posting source** — who published this solicitation to bidders — not necessarily the project's ultimate owner.
+  • **government**: Posted on an official agency/procurement site (e.g. .gov portals, CivicPlus, DemandStar/Jaggaer gov modules, SAM-style pages, county/city/school/university solicitation pages when **the agency** is the buyer of record issuing the solicitation.
+  • **private_company**: A **business** publishes the outreach (general contractor seeking subs/suppliers; construction firm/supplier solicitation; subcontractor/supplier bids "to the GC"; trade-journal or vendor-hosted pages where a **company** invites bids for its vendor chain even if the work is ultimately for a public owner.
+  • **uncertain**: If you truly cannot tell.
 - DESCRIPTION (**The full long-form solicitation text.** This must be the complete project narrative: scope / specifications / solicitation body / "PROJECT DESCRIPTION" / invitation text from the detail page or PDF — not merely a labeled summary of Title, Status, End Date, state, or category. Where the pasted content includes a block marked "--- PRIMARY PROJECT DESCRIPTION ---", use that narrative in full (or as much as fits) as the core of DESCRIPTION, preserving paragraph breaks. You may prepend a short "**Metadata:**" subsection with solicitation number, agency, contacts, deadlines, addresses, bonding/insurance, submission instructions ONLY after the narrative, or weave those facts into prose — but DO NOT omit the narrative in favor of a short field list when the narrative exists on the page or in PRIMARY PROJECT DESCRIPTION.)
+  **After the narrative**, when email addresses, phone numbers, or fax numbers appear anywhere in the sources for bid submission, questions, estimator/purchasing contacts, or outreach coordinators, append a clearly labeled **Contact** section so the text includes at least:
+  Email: ...
+  Phone: ...
+  Fax: ... (only if present)
+  List every distinct email/phone that is clearly relevant to responding to this bid (omit lines only when that type of contact truly does not appear). If the **Contact** block would duplicate the exact same lines already present in the narrative **as labeled contact fields**, you may skip repeating them.
+
+- CONTACT_EMAIL (single **best** email for bid questions or submissions: estimator@, bids@, purchasing@, or the explicitly labeled submission address. Use empty string "" if no email appears anywhere.)
 
 Rules:
 1) Prefer the most specific source: PDF text first, then clicked detail pages and browser interaction states, then listing text.
-2) If a value is missing, write "Not provided" for that label instead of leaving it blank.
-3) Respond with strict JSON only in the format: {"bids":[{...}]} including the fields above (TITLE, ENDDATE, NAICSCODE, URL, BID_CATEGORY, LOCATION_STATE, DESCRIPTION).
+2) If a value is missing, write "Not provided" for that label instead of leaving it blank. Exception: POSTING_ENTITY must always be exactly one of government, private_company, or uncertain — use uncertain when unknown; never use "Not provided" for POSTING_ENTITY. Use empty string "" for CONTACT_EMAIL when no email exists.
+3) Respond with strict JSON only in the format: {"bids":[{...}]} including the fields above (TITLE, ENDDATE, NAICSCODE, URL, BID_CATEGORY, LOCATION_STATE, POSTING_ENTITY, CONTACT_EMAIL, DESCRIPTION).
 4) Browser interaction states are page snapshots captured after the scraper clicked likely controls. Use them to find content revealed by buttons, tabs, accordions, dropdowns, "view details", "documents", "attachments", and similar controls.
 5) Do your best to find the bids: some sites require clicking links (e.g., "see all open bid opportunities") before listings appear. Only return actual bids; do not treat generic portal/home pages or unrelated content as bids.
 6) Bonfire Hub / similar portals: listings often appear as a table of "opportunities" with titles, due dates, and status. Extract one bid per opportunity row when the portal shows open/public opportunities.
-7) Trade journal / detail pages (e.g. Compliance News style): TITLE, ENDDATE, LOCATION_STATE, BID_CATEGORY should reflect structured fields where present; DESCRIPTION must still include the entire **PROJECT DETAILS / PROJECT DESCRIPTION** narrative, not replace it with Title + Status + state + commodity only.
+7) Trade journal / detail pages (e.g. Compliance News style): TITLE, ENDDATE, LOCATION_STATE, BID_CATEGORY should reflect structured fields where present; DESCRIPTION must still include the entire **PROJECT DETAILS / PROJECT DESCRIPTION** narrative, not replace it with Title + Status + state + commodity only. POSTING_ENTITY is usually **private_company** when a general contractor or firm is inviting sub-bids/supplier quotes, even if the AWARDING AGENCY is public.
 
 SYS;
 
@@ -183,6 +194,10 @@ SYS;
 				$locationState = implode(' ', $locationState);
 			}
 
+			$postingEntity = $this->normalizePostingEntity($bid['POSTING_ENTITY'] ?? null);
+
+			$contactEmail = $this->normalizeContactEmailFromExtract($bid['CONTACT_EMAIL'] ?? $bid['EMAIL'] ?? null);
+
 			return [
 				'TITLE' => (string) $title,
 				'ENDDATE' => (string) $endDate,
@@ -190,6 +205,8 @@ SYS;
 				'URL' => (string) $detailUrl,
 				'BID_CATEGORY' => (string) $bidCategory,
 				'LOCATION_STATE' => (string) $locationState,
+				'POSTING_ENTITY' => $postingEntity,
+				'CONTACT_EMAIL' => $contactEmail,
 				'DESCRIPTION' => $desc,
 			];
 		}, $bids);
@@ -202,6 +219,8 @@ SYS;
 				'URL' => $URL,
 				'BID_CATEGORY' => '',
 				'LOCATION_STATE' => '',
+				'POSTING_ENTITY' => 'uncertain',
+				'CONTACT_EMAIL' => '',
 				'DESCRIPTION' => $fullPdfText ?: ($text ?: 'No PDF or description found.'),
 			];
 		}
@@ -224,7 +243,7 @@ SYS;
 		}
 
 		$system = <<<SYS
-You are a bid title editor. Rewrite each government bid title to be clear, professional, and concise.
+You are a bid title editor. Rewrite each opportunity title (government solicitations or private-sector bid postings — e.g. GC sub-bid invitations) for clarity.
 
 Rules:
 1) Remove bid/solicitation numbers from the beginning (e.g. "Bid 26121 - " or "RFP-2026-003:") but keep them if they are the ONLY identifier.
@@ -290,6 +309,56 @@ SYS;
 		$title = ucwords(strtolower($title));
 
 		return $title ?: 'Bidding Page';
+	}
+
+	/**
+	 * Canonical email for Bid.EMAIL field; empty string means unknown after normalization.
+	 */
+	private function normalizeContactEmailFromExtract(mixed $raw): string
+	{
+		if (is_array($raw)) {
+			$raw = implode(' ', $raw);
+		}
+		$s = trim((string) ($raw ?? ''));
+		if ($s === '' || strcasecmp($s, 'not provided') === 0) {
+			return '';
+		}
+		foreach (preg_split('/[\s,;|]+/', $s) as $part) {
+			$part = trim($part);
+			if ($part !== '' && filter_var($part, FILTER_VALIDATE_EMAIL)) {
+				return mb_substr($part, 0, 255);
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * @return 'government'|'private_company'|'uncertain'
+	 */
+	private function normalizePostingEntity(mixed $raw): string
+	{
+		if (is_array($raw)) {
+			$raw = implode(' ', $raw);
+		}
+		$s = strtolower(preg_replace('/\s+/u', ' ', trim((string) ($raw ?? ''))));
+		if ($s === '' || str_contains($s, 'not provided')) {
+			return 'uncertain';
+		}
+		if ($s === 'private_company' || $s === 'government' || $s === 'uncertain') {
+			return $s;
+		}
+		if (preg_match('/private[\s_-]*company|^corporate$/i', $s)) {
+			return 'private_company';
+		}
+		if (preg_match('/^government$|^gov$|public sector|public agency|municipal|county /i', $s)) {
+			return 'government';
+		}
+		if (preg_match('/uncertain|unknown/i', $s)) {
+			return 'uncertain';
+		}
+
+		return 'uncertain';
 	}
 
 	/**
