@@ -40,24 +40,35 @@ class BidController extends Controller
 		if (empty($scrapedUrlIds)) {
 			$bids = new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage);
 			$bids->withQueryString();
+			$noEntityBids = new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage);
+			$noEntityBids->withQueryString();
 		} else {
+			$applyBidListingFilters = function ($q) use ($search, $filterDate, $filterUserIdRaw) {
+				if ($search !== '') {
+					$q->where(function ($q2) use ($search) {
+						$q2->where('TITLE', 'like', "%{$search}%")
+							->orWhere('NAICSCODE', 'like', "%{$search}%")
+							->orWhere('URL', 'like', "%{$search}%");
+					});
+				}
+				if ($filterDate !== '') {
+					$q->whereDate('CREATED', $filterDate);
+				}
+				if ($filterUserIdRaw !== '' && ctype_digit($filterUserIdRaw)) {
+					$q->where('USERID', (int) $filterUserIdRaw);
+				}
+			};
+
 			$query = Bid::whereIn('BID_URL_ID', $scrapedUrlIds);
-
-			if ($search !== '') {
-				$query->where(function ($q) use ($search) {
-					$q->where('TITLE', 'like', "%{$search}%")
-						->orWhere('NAICSCODE', 'like', "%{$search}%")
-						->orWhere('URL', 'like', "%{$search}%");
-				});
-			}
-			if ($filterDate !== '') {
-				$query->whereDate('CREATED', $filterDate);
-			}
-			if ($filterUserIdRaw !== '' && ctype_digit($filterUserIdRaw)) {
-				$query->where('USERID', (int) $filterUserIdRaw);
-			}
-
+			$applyBidListingFilters($query);
 			$bids = $query->latest('CREATED')->paginate($perPage)->withQueryString();
+
+			$queryNoEntity = Bid::whereIn('BID_URL_ID', $scrapedUrlIds)
+				->where(function ($q) {
+					$q->whereNull('ENTITYID')->orWhere('ENTITYID', 0);
+				});
+			$applyBidListingFilters($queryNoEntity);
+			$noEntityBids = $queryNoEntity->latest('CREATED')->paginate($perPage, ['*'], 'ne_page')->withQueryString();
 		}
 
 		$issueCount = 0;
@@ -79,7 +90,7 @@ class BidController extends Controller
 			Log::warning('Manila directory users not loaded', ['error' => $e->getMessage()]);
 		}
 
-		return view('bids.index', compact('bids', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterUserIdRaw', 'showAll', 'latestDateLabel', 'manilaDirectoryUsers'));
+		return view('bids.index', compact('bids', 'noEntityBids', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterUserIdRaw', 'showAll', 'latestDateLabel', 'manilaDirectoryUsers'));
 	}
 
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
