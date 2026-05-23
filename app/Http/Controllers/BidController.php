@@ -96,8 +96,9 @@ class BidController extends Controller
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
 	{
 		// Allow more time/memory for heavy PDF pages to avoid timeouts during single-URL scrapes.
-		@set_time_limit(300);
-		@ini_set('max_execution_time', '300');
+		// Allow enough wall-clock for AI + persistence (bulk extract can legitimately exceed 90s HTTP alone).
+		@set_time_limit((int) max(600, $this->scrapeUrlMaxSeconds() + 240));
+		@ini_set('max_execution_time', (string) max(600, $this->scrapeUrlMaxSeconds() + 240));
 		@ini_set('memory_limit', '1024M');
 
 		$validated = $request->validate([
@@ -110,6 +111,7 @@ class BidController extends Controller
 		]);
 
 		try {
+			$urlStartedAt = microtime(true);
 			$result = $scraper->fetch($validated['URL']);
 			if (!empty($result['blocked'])) {
 				$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
@@ -137,7 +139,13 @@ class BidController extends Controller
 				'clicked_bid_pages' => count($result['bid_pages'] ?? []),
 			]);
 
-			// 2) Let AI extract relevant bid data from listing + clicked pages + PDFs
+			Log::info('AI bid extract starting', [
+				'url' => $validated['URL'],
+				'pdf_text_chars' => strlen($result['pdf_text'] ?? ''),
+				'listing_text_chars' => strlen($result['text'] ?? ''),
+				'bid_pages' => count($result['bid_pages'] ?? []),
+			]);
+			$aiExtractStarted = microtime(true);
 			$extracted = $ai->extract(
 				$validated['URL'],
 				$result['html'],
@@ -146,6 +154,13 @@ class BidController extends Controller
 				$result['pdf_text'] ?? '',
 				$result['bid_pages'] ?? []
 			);
+			Log::info('AI bid extract finished', [
+				'url' => $validated['URL'],
+				'elapsed_sec' => round(microtime(true) - $aiExtractStarted, 2),
+				'bids_returned' => count($extracted['bids'] ?? []),
+			]);
+
+			$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $validated['URL']);
 
 			$today = \Carbon\Carbon::today();
 			$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
@@ -167,8 +182,10 @@ class BidController extends Controller
 			$nonBids = [];
 
 			$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
-			$rewrittenTitles = $ai->rewriteTitles($rawTitles);
+			$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $validated['URL'], null);
 			$titleMap = array_combine($rawTitles, $rewrittenTitles);
+
+			$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $validated['URL']);
 
 			foreach ($filteredBids as $bidData) {
 				$rawTitle = $bidData['TITLE'] ?? null;
@@ -303,6 +320,7 @@ class BidController extends Controller
 			}
 
 			try {
+				$urlStartedAt = microtime(true);
 				$send(['type' => 'status', 'step' => 'Fetching page...']);
 				$result = $scraper->fetch($url);
 
@@ -326,8 +344,22 @@ class BidController extends Controller
 					return;
 				}
 
-				$send(['type' => 'status', 'step' => 'Extracting bids with AI...']);
+				$send(['type' => 'status', 'step' => 'Extracting bids with AI... (large pages can take several minutes)']);
+				Log::info('AI bid extract starting', [
+					'url' => $url,
+					'pdf_text_chars' => strlen($result['pdf_text'] ?? ''),
+					'listing_text_chars' => strlen($result['text'] ?? ''),
+					'bid_pages' => count($result['bid_pages'] ?? []),
+				]);
+				$aiExtractStarted = microtime(true);
 				$extracted = $ai->extract($url, $result['html'], $result['text'], $result['pdf_bids'] ?? [], $result['pdf_text'] ?? '', $result['bid_pages'] ?? []);
+				Log::info('AI bid extract finished', [
+					'url' => $url,
+					'elapsed_sec' => round(microtime(true) - $aiExtractStarted, 2),
+					'bids_returned' => count($extracted['bids'] ?? []),
+				]);
+
+				$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
 
 				$today = \Carbon\Carbon::today();
 				$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
@@ -338,11 +370,19 @@ class BidController extends Controller
 				})->values();
 
 				$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
-				if (!empty($rawTitles)) {
-					$send(['type' => 'status', 'step' => 'Rewriting ' . count($rawTitles) . ' title(s)...']);
-				}
-				$rewrittenTitles = $ai->rewriteTitles($rawTitles);
+				$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $url, function (string $ev, array $ctx) use ($send) {
+					if ($ev === 'start') {
+						$send(['type' => 'status', 'step' => 'Rewriting ' . ($ctx['count'] ?? 0) . ' title(s)...']);
+					} elseif ($ev === 'skip_time') {
+						$send(['type' => 'status', 'step' => 'Using extracted titles (rewrite skipped — near per-URL time limit).']);
+					} elseif ($ev === 'skip_many') {
+						$n = $ctx['count'] ?? 0;
+						$send(['type' => 'status', 'step' => "Using extracted titles (rewrite skipped — {$n} opportunities)."]);
+					}
+				});
 				$titleMap = array_combine($rawTitles, $rewrittenTitles);
+
+				$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
 
 				$send(['type' => 'status', 'step' => 'Saving bids...']);
 				$savedCount = 0;
@@ -446,6 +486,8 @@ class BidController extends Controller
 					continue;
 				}
 
+				$urlStartedAt = microtime(true);
+
 				// 1) Fetch data for each bid URL (batch: skip interactive scan, tighter PDF/detail caps)
 				$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null, ['batch' => true]);
 				if (!empty($result['blocked'])) {
@@ -473,7 +515,14 @@ class BidController extends Controller
 					'clicked_bid_pages' => count($result['bid_pages'] ?? []),
 				]);
 
-				// 2) Extract bid data via AI
+				Log::info('AI bid extract starting', [
+					'url' => $url,
+					'batch_scrape_all' => true,
+					'pdf_text_chars' => strlen($result['pdf_text'] ?? ''),
+					'listing_text_chars' => strlen($result['text'] ?? ''),
+					'bid_pages' => count($result['bid_pages'] ?? []),
+				]);
+				$aiExtractStarted = microtime(true);
 				$extracted = $ai->extract(
 					$url,
 					$result['html'],
@@ -482,6 +531,14 @@ class BidController extends Controller
 					$result['pdf_text'] ?? '',
 					$result['bid_pages'] ?? []
 				);
+				Log::info('AI bid extract finished', [
+					'url' => $url,
+					'batch_scrape_all' => true,
+					'elapsed_sec' => round(microtime(true) - $aiExtractStarted, 2),
+					'bids_returned' => count($extracted['bids'] ?? []),
+				]);
+
+				$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
 
 				$today = \Carbon\Carbon::today();
 				$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
@@ -503,8 +560,10 @@ class BidController extends Controller
 				$nonBidsThisUrl = 0;
 
 				$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
-				$rewrittenTitles = $ai->rewriteTitles($rawTitles);
+				$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $url, null);
 				$titleMap = array_combine($rawTitles, $rewrittenTitles);
+
+				$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
 
 				foreach ($filteredBids as $bidData) {
 					$rawTitle = $bidData['TITLE'] ?? null;
@@ -729,7 +788,15 @@ class BidController extends Controller
 						continue;
 					}
 
-					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Extracting bids with AI...']);
+					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Extracting bids with AI... (large pages can take several minutes)']);
+					Log::info('AI bid extract starting', [
+						'url' => $url,
+						'index' => $idx + 1,
+						'pdf_text_chars' => strlen($result['pdf_text'] ?? ''),
+						'listing_text_chars' => strlen($result['text'] ?? ''),
+						'bid_pages' => count($result['bid_pages'] ?? []),
+					]);
+					$aiExtractStarted = microtime(true);
 					$extracted = $ai->extract(
 						$url,
 						$result['html'],
@@ -738,6 +805,14 @@ class BidController extends Controller
 						$result['pdf_text'] ?? '',
 						$result['bid_pages'] ?? []
 					);
+					Log::info('AI bid extract finished', [
+						'url' => $url,
+						'index' => $idx + 1,
+						'elapsed_sec' => round(microtime(true) - $aiExtractStarted, 2),
+						'bids_returned' => count($extracted['bids'] ?? []),
+					]);
+
+					$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
 
 					$today = \Carbon\Carbon::today();
 					$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
@@ -756,13 +831,19 @@ class BidController extends Controller
 					$nonBidsThisUrl = 0;
 
 					$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
-					if (!empty($rawTitles)) {
-						$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Rewriting ' . count($rawTitles) . ' title(s)...']);
-					}
-					$rewrittenTitles = $ai->rewriteTitles($rawTitles);
+					$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $url, function (string $ev, array $ctx) use ($send, $idx) {
+						if ($ev === 'start') {
+							$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Rewriting ' . ($ctx['count'] ?? 0) . ' title(s)...']);
+						} elseif ($ev === 'skip_time') {
+							$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Using extracted titles (rewrite skipped — near per-URL time limit).']);
+						} elseif ($ev === 'skip_many') {
+							$n = $ctx['count'] ?? 0;
+							$send(['type' => 'status', 'index' => $idx + 1, 'step' => "Using extracted titles (rewrite skipped — {$n} opportunities)."]);
+						}
+					});
 					$titleMap = array_combine($rawTitles, $rewrittenTitles);
 
-					$this->guardUrlBudget($urlStartedAt, 300, $url);
+					$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
 					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Saving bids...']);
 
 					foreach ($filteredBids as $bidData) {
@@ -1463,6 +1544,70 @@ class BidController extends Controller
 		}
 
 		return 'Failed to scrape this URL. ' . $rawMessage;
+	}
+
+	private function scrapeUrlMaxSeconds(): int
+	{
+		return max(120, min(7200, (int) config('scraper.scrape_url_max_seconds', 480)));
+	}
+
+	private function scrapeTitleRewriteReserveSeconds(): int
+	{
+		return max(30, min(900, (int) config('scraper.scrape_title_rewrite_reserve_seconds', 90)));
+	}
+
+	private function scrapeRewriteMaxTitles(): int
+	{
+		return max(10, min(500, (int) config('scraper.scrape_rewrite_max_titles', 120)));
+	}
+
+	/**
+	 * Optionally skip batched rewrite (second OpenAI call) near time budget / huge title lists.
+	 *
+	 * @param callable|null $progress function (string $event, array $context):void — events: start, skip_time, skip_many
+	 */
+	private function maybeRewriteScrapeTitles(AIExtractor $ai, array $rawTitles, float $urlStartedAt, string $url, ?callable $progress): array
+	{
+		if ($rawTitles === []) {
+			return [];
+		}
+
+		$maxTitles = $this->scrapeRewriteMaxTitles();
+		if (count($rawTitles) > $maxTitles) {
+			Log::warning('Title rewrite skipped: too many opportunities for one batched call', [
+				'url' => $url,
+				'title_count' => count($rawTitles),
+				'max_allowed' => $maxTitles,
+			]);
+			if ($progress !== null) {
+				$progress('skip_many', ['count' => count($rawTitles)]);
+			}
+
+			return $rawTitles;
+		}
+
+		$elapsed = microtime(true) - $urlStartedAt;
+		$maxSec = $this->scrapeUrlMaxSeconds();
+		$reserve = $this->scrapeTitleRewriteReserveSeconds();
+		if ($elapsed > $maxSec - $reserve) {
+			Log::warning('Title rewrite skipped: URL nearing per-row time budget', [
+				'url' => $url,
+				'elapsed_sec' => round($elapsed, 2),
+				'budget_sec' => $maxSec,
+				'reserve_sec' => $reserve,
+			]);
+			if ($progress !== null) {
+				$progress('skip_time', ['elapsed_sec' => round($elapsed, 2), 'budget_sec' => $maxSec]);
+			}
+
+			return $rawTitles;
+		}
+
+		if ($progress !== null) {
+			$progress('start', ['count' => count($rawTitles)]);
+		}
+
+		return $ai->rewriteTitles($rawTitles);
 	}
 
 	private function guardUrlBudget(float $startedAt, int $maxSeconds, string $url): void

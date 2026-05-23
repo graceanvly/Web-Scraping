@@ -7,14 +7,27 @@ use GuzzleHttp\Client;
 class AIExtractor
 {
 	private Client $httpClient;
+
+	private Client $httpClientRewrite;
+
 	private string $apiKey;
+
 	private string $model;
 
 	public function __construct()
 	{
+		$timeoutExtract = max(30.0, (float) config('services.openai.http_timeout', 300));
+		$timeoutRewrite = max(30.0, (float) config('services.openai.http_timeout_rewrite', 120));
+		$connectTimeout = max(5.0, (float) config('services.openai.http_connect_timeout', 30));
+
 		$this->httpClient = new Client([
-			'timeout' => 90,
-			'connect_timeout' => 30,
+			'timeout' => $timeoutExtract,
+			'connect_timeout' => $connectTimeout,
+		]);
+
+		$this->httpClientRewrite = new Client([
+			'timeout' => min($timeoutExtract, $timeoutRewrite),
+			'connect_timeout' => $connectTimeout,
 		]);
 
 		$this->apiKey = (string) config('services.openai.key', '');
@@ -294,7 +307,7 @@ SYS;
 		];
 
 		try {
-			$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', [
+			$response = $this->httpClientRewrite->post('https://api.openai.com/v1/chat/completions', [
 				'headers' => [
 					'Authorization' => 'Bearer ' . $this->apiKey,
 					'Content-Type' => 'application/json',

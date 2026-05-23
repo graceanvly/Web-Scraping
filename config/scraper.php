@@ -50,4 +50,16 @@ return [
 		'trim',
 		explode(',', (string) env('SCRAPER_ENTITY_WEBSITE_COLUMNS', '')),
 	))),
+
+	/*
+	|--------------------------------------------------------------------------
+	| Bulk scrape pacing (streaming / scrape-all jobs)
+	|--------------------------------------------------------------------------
+	*/
+	/** Hard cap seconds per Bid URL row (fetch + AI + saves) before skipping remainder of rewrite / continuing. */
+	'scrape_url_max_seconds' => max(120, min(7200, (int) env('SCRAPER_URL_MAX_SECONDS', 480))),
+	/** Reserve seconds so we skip the second OpenAI rewrite call when nearing the URL cap (avoids long tail). */
+	'scrape_title_rewrite_reserve_seconds' => max(30, min(900, (int) env('SCRAPER_TITLE_REWRITE_RESERVE_SECONDS', 90))),
+	/** Skip batched rewrite when more than this many titles (would be one oversized API call). */
+	'scrape_rewrite_max_titles' => max(10, min(500, (int) env('SCRAPER_REWRITE_MAX_TITLES', 120))),
 ];
