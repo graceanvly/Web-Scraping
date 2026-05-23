@@ -587,6 +587,24 @@ class ScraperService
 
 			return $this->httpClient->get($url, $options);
 		} catch (RequestException $e) {
+			$m = strtolower($e->getMessage());
+			if (empty($options['_retry_identity_encoding']) && (
+				str_contains($m, 'unrecognized content encoding')
+				|| str_contains($m, 'curl error 61')
+			)) {
+				Log::notice('Retrying GET with uncompressed response (encoding decode failure)', ['url' => $url]);
+				$retryOpts = $options;
+				$retryOpts['_retry_identity_encoding'] = true;
+				$retryOpts['headers'] = array_merge($retryOpts['headers'] ?? [], [
+					'Accept-Encoding' => 'identity',
+				]);
+				$retryOpts['curl'] = array_merge($retryOpts['curl'] ?? [], [
+					CURLOPT_ENCODING => '',
+				]);
+
+				return $this->requestWithAuth($url, $retryOpts, $authProvided);
+			}
+
 			// If credentials were supplied, allow parsing the response body even on 4xx.
 			if ($authProvided && $e->getResponse()) {
 				Log::warning('AUTH REQUEST RETURNED ERROR STATUS, USING BODY', [
@@ -605,6 +623,26 @@ class ScraperService
 			}
 
 			throw $e;
+		} catch (TransferException $e) {
+			$m = strtolower($e->getMessage());
+			$looksLikeEncodingFailure = str_contains($m, 'unrecognized content encoding')
+				|| str_contains($m, 'content encodings.')
+				|| str_contains($m, 'curl error 61');
+			if (!$looksLikeEncodingFailure || !empty($options['_retry_identity_encoding'])) {
+				throw $e;
+			}
+
+			Log::notice('Retrying GET with uncompressed response (curl encoding/decoding failure)', ['url' => $url]);
+			$retryOpts = $options;
+			$retryOpts['_retry_identity_encoding'] = true;
+			$retryOpts['headers'] = array_merge($retryOpts['headers'] ?? [], [
+				'Accept-Encoding' => 'identity',
+			]);
+			$retryOpts['curl'] = array_merge($retryOpts['curl'] ?? [], [
+				CURLOPT_ENCODING => '',
+			]);
+
+			return $this->requestWithAuth($url, $retryOpts, $authProvided);
 		}
 	}
 

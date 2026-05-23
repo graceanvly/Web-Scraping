@@ -796,14 +796,23 @@ class BidController extends Controller
 						ob_flush();
 					flush();
 
-					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Extracting bids with AI... (large pages can take several minutes)']);
+					$listingCharsPreAi = strlen($result['text'] ?? '');
+					$pdfCharsPreAi = strlen($result['pdf_text'] ?? '');
+					$bidPageCountPreAi = count($result['bid_pages'] ?? []);
+					$heavyAiPayload = $listingCharsPreAi >= 35000 || $pdfCharsPreAi >= 28000 || $bidPageCountPreAi >= 3;
+					$aiStatusStep = $heavyAiPayload
+						? 'Extracting bids with AI… Heavy listing/PDF or multiple detail pages: OpenAI often needs ½–4 min. SSE stays quiet until it returns — watch “Elapsed this step”.'
+						: 'Extracting bids with AI... (large pages can take several minutes)';
+
+					$send(['type' => 'status', 'index' => $idx + 1, 'step' => $aiStatusStep]);
 					Log::info('AI bid extract starting', [
 						'url' => $url,
 						'index' => $idx + 1,
 						'bulk_ai_payload' => true,
-						'pdf_text_chars' => strlen($result['pdf_text'] ?? ''),
-						'listing_text_chars' => strlen($result['text'] ?? ''),
-						'bid_pages' => count($result['bid_pages'] ?? []),
+						'pdf_text_chars' => $pdfCharsPreAi,
+						'listing_text_chars' => $listingCharsPreAi,
+						'bid_pages' => $bidPageCountPreAi,
+						'heavy_ai_payload_estimate' => $heavyAiPayload,
 					]);
 					$aiExtractStarted = microtime(true);
 					$extracted = $ai->extract(
