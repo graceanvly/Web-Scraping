@@ -62,4 +62,24 @@ return [
 	'scrape_title_rewrite_reserve_seconds' => max(30, min(900, (int) env('SCRAPER_TITLE_REWRITE_RESERVE_SECONDS', 90))),
 	/** Skip batched rewrite when more than this many titles (would be one oversized API call). */
 	'scrape_rewrite_max_titles' => max(10, min(500, (int) env('SCRAPER_REWRITE_MAX_TITLES', 120))),
+
+	/*
+	|--------------------------------------------------------------------------
+	| AI extract prompt excerpts (characters, mb_substr)
+	|--------------------------------------------------------------------------
+	| Bulk/scrape-stream uses tighter caps so long runs finish sooner and SSE does not appear "stuck".
+	*/
+	'ai_standard_pdf_text_chars' => max(4000, min(96000, (int) env('SCRAPER_AI_STANDARD_PDF_TEXT_CHARS', 24000))),
+	'ai_standard_listing_text_chars' => max(4000, min(96000, (int) env('SCRAPER_AI_STANDARD_LISTING_TEXT_CHARS', 32000))),
+	'ai_standard_listing_html_chars' => max(2000, min(48000, (int) env('SCRAPER_AI_STANDARD_LISTING_HTML_CHARS', 12000))),
+	'ai_standard_bid_page_text_chars' => max(4000, min(96000, (int) env('SCRAPER_AI_STANDARD_BID_PAGE_TEXT_CHARS', 28000))),
+	'ai_standard_bid_page_html_chars' => max(1000, min(32000, (int) env('SCRAPER_AI_STANDARD_BID_PAGE_HTML_CHARS', 8000))),
+	'ai_standard_bid_page_pdf_text_chars' => max(2000, min(48000, (int) env('SCRAPER_AI_STANDARD_BID_PAGE_PDF_TEXT_CHARS', 12000))),
+
+	'ai_bulk_pdf_text_chars' => max(4000, min(96000, (int) env('SCRAPER_AI_BULK_PDF_TEXT_CHARS', 14000))),
+	'ai_bulk_listing_text_chars' => max(4000, min(96000, (int) env('SCRAPER_AI_BULK_LISTING_TEXT_CHARS', 20000))),
+	'ai_bulk_listing_html_chars' => max(2000, min(48000, (int) env('SCRAPER_AI_BULK_LISTING_HTML_CHARS', 10000))),
+	'ai_bulk_bid_page_text_chars' => max(4000, min(96000, (int) env('SCRAPER_AI_BULK_BID_PAGE_TEXT_CHARS', 16000))),
+	'ai_bulk_bid_page_html_chars' => max(1000, min(32000, (int) env('SCRAPER_AI_BULK_BID_PAGE_HTML_CHARS', 6000))),
+	'ai_bulk_bid_page_pdf_text_chars' => max(2000, min(48000, (int) env('SCRAPER_AI_BULK_BID_PAGE_PDF_TEXT_CHARS', 9000))),
 ];

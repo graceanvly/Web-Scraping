@@ -34,7 +34,7 @@ class AIExtractor
 		$this->model = (string) config('services.openai.model', 'gpt-4o-mini');
 	}
 
-	public function extract(string $URL, string $html, string $text, array|string $pdfLinks = [], string $pdfText = '', array $bidPages = []): array
+	public function extract(string $URL, string $html, string $text, array|string $pdfLinks = [], string $pdfText = '', array $bidPages = [], array $options = []): array
 	{
 		// Normalize pdfLinks input
 		if (is_string($pdfLinks) && !empty($pdfLinks)) {
@@ -103,23 +103,24 @@ Rules:
 
 SYS;
 
+		$lim = $this->promptExcerptLimits($options);
 		$promptUser = [
 			'instructions' => 'Use listing, clicked bid pages, and PDF text to extract open bids.',
 			'URL' => $URL,
 			'pdf_links' => array_column($pdfLinks, 'PDF_LINK'),
-			'pdf_text_excerpt' => mb_substr($fullPdfText ?? '', 0, 24000),
-			'listing_text_excerpt' => mb_substr($text ?? '', 0, 32000),
-			'listing_html_excerpt' => mb_substr($html ?? '', 0, 12000),
-			'bid_pages' => array_map(function ($page) {
+			'pdf_text_excerpt' => mb_substr($fullPdfText ?? '', 0, $lim['pdf_text']),
+			'listing_text_excerpt' => mb_substr($text ?? '', 0, $lim['listing_text']),
+			'listing_html_excerpt' => mb_substr($html ?? '', 0, $lim['listing_html']),
+			'bid_pages' => array_map(function ($page) use ($lim) {
 				return [
 					'url' => $page['url'] ?? '',
 					'title' => $page['title'] ?? '',
 					'source' => $page['source'] ?? 'detail_or_interaction_page',
 					'interaction_type' => $page['interaction_type'] ?? '',
-					'text_excerpt' => mb_substr($page['text'] ?? '', 0, 28000),
-					'html_excerpt' => mb_substr($page['html'] ?? '', 0, 8000),
+					'text_excerpt' => mb_substr($page['text'] ?? '', 0, $lim['bid_page_text']),
+					'html_excerpt' => mb_substr($page['html'] ?? '', 0, $lim['bid_page_html']),
 					'pdf_links' => array_column($page['pdf_links'] ?? [], 'PDF_LINK'),
-					'pdf_text_excerpt' => mb_substr($page['pdf_text'] ?? '', 0, 12000),
+					'pdf_text_excerpt' => mb_substr($page['pdf_text'] ?? '', 0, $lim['bid_page_pdf']),
 				];
 			}, $bidPages),
 		];
@@ -517,5 +518,22 @@ SYS;
 			$lines[] = "{$indent}{$label}: {$value}";
 		}
 		return implode("\n", array_filter($lines));
+	}
+
+	/**
+	 * @return array{pdf_text:int,listing_text:int,listing_html:int,bid_page_text:int,bid_page_html:int,bid_page_pdf:int}
+	 */
+	private function promptExcerptLimits(array $options): array
+	{
+		$pfx = !empty($options['bulk_mode']) ? 'ai_bulk_' : 'ai_standard_';
+
+		return [
+			'pdf_text' => (int) config('scraper.' . $pfx . 'pdf_text_chars'),
+			'listing_text' => (int) config('scraper.' . $pfx . 'listing_text_chars'),
+			'listing_html' => (int) config('scraper.' . $pfx . 'listing_html_chars'),
+			'bid_page_text' => (int) config('scraper.' . $pfx . 'bid_page_text_chars'),
+			'bid_page_html' => (int) config('scraper.' . $pfx . 'bid_page_html_chars'),
+			'bid_page_pdf' => (int) config('scraper.' . $pfx . 'bid_page_pdf_text_chars'),
+		];
 	}
 }

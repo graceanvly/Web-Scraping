@@ -837,7 +837,10 @@
 			<div style="width:100%; background:#e5e7eb; border-radius:4px; height:6px; margin-bottom:0.75rem;">
 				<div id="progressBar" style="width:0%; height:100%; background:#2563eb; border-radius:4px; transition:width 0.3s;"></div>
 			</div>
-			<div id="progressUrl" style="font-size:0.85rem; color:#374151; word-break:break-all; min-height:1.3rem;"></div>
+			<div style="display:flex; flex-wrap:wrap; align-items:baseline; gap:0.35rem;">
+				<div id="progressUrl" style="flex:1; font-size:0.85rem; color:#374151; word-break:break-all; min-height:1.3rem;"></div>
+				<span id="progressStepElapsed" style="font-size:0.78rem; color:#6b7280; white-space:nowrap;"></span>
+			</div>
 			<div id="progressLog" style="margin-top:0.5rem; max-height:120px; overflow-y:auto; font-size:0.8rem; color:#6b7280;"></div>
 		</div>
 	</section>
@@ -1613,7 +1616,35 @@
 			const progressCounter = document.getElementById('progressCounter');
 			const progressBar = document.getElementById('progressBar');
 			const progressUrl = document.getElementById('progressUrl');
+			const progressElapsed = document.getElementById('progressStepElapsed');
 			const progressLog = document.getElementById('progressLog');
+
+			let bulkStepElapsedTimer = null;
+
+			function restartBulkStepElapsed() {
+				if (bulkStepElapsedTimer) clearInterval(bulkStepElapsedTimer);
+				if (!progressElapsed) return;
+				const startedAt = Date.now();
+				const tick = () => {
+					const secs = Math.floor((Date.now() - startedAt) / 1000);
+					if (secs < 90) progressElapsed.textContent = 'Elapsed this step: ' + secs + 's';
+					else {
+						const m = Math.floor(secs / 60);
+						const s = secs % 60;
+						progressElapsed.textContent = 'Elapsed this step: ' + m + ':' + String(s).padStart(2, '0');
+					}
+				};
+				tick();
+				bulkStepElapsedTimer = setInterval(tick, 500);
+			}
+
+			function stopBulkStepElapsed() {
+				if (bulkStepElapsedTimer) {
+					clearInterval(bulkStepElapsedTimer);
+					bulkStepElapsedTimer = null;
+				}
+				if (progressElapsed) progressElapsed.textContent = '';
+			}
 
 			btn.disabled = true;
 			btn.textContent = 'Scraping...';
@@ -1622,6 +1653,7 @@
 			progressCounter.textContent = '';
 			progressBar.style.width = '0%';
 			progressUrl.textContent = '';
+			stopBulkStepElapsed();
 			progressLog.innerHTML = '';
 
 			let total = 0;
@@ -1643,6 +1675,7 @@
 				function read() {
 					reader.read().then(({ done, value }) => {
 						if (done) {
+							stopBulkStepElapsed();
 							btn.disabled = false;
 							btn.textContent = 'Scrape All';
 							return;
@@ -1663,6 +1696,7 @@
 				}
 				read();
 			}).catch(err => {
+				stopBulkStepElapsed();
 				progressTitle.textContent = 'Error: ' + err.message;
 				progressBar.style.background = '#dc2626';
 				btn.disabled = false;
@@ -1672,35 +1706,42 @@
 			function handleScrapeEvent(ev) {
 				switch (ev.type) {
 					case 'start':
+						stopBulkStepElapsed();
 						total = ev.total;
 						progressTitle.textContent = 'Scraping ' + total + ' URL(s)...';
 						break;
 
 					case 'processing':
+						restartBulkStepElapsed();
 						progressCounter.textContent = ev.index + ' / ' + total;
 						progressBar.style.width = Math.round((ev.index / total) * 100) + '%';
 						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtml(ev.url);
 						break;
 
 					case 'status':
+						restartBulkStepElapsed();
 						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtml(ev.step);
 						break;
 
 					case 'skip':
+						stopBulkStepElapsed();
 						progressCounter.textContent = ev.index + ' / ' + total;
 						progressBar.style.width = Math.round((ev.index / total) * 100) + '%';
 						addLogLine('Skipped: ' + ev.url + ' (' + ev.reason + ')', '#9ca3af');
 						break;
 
 					case 'done_url':
+						stopBulkStepElapsed();
 						addLogLine(ev.url + ' — ' + ev.saved + ' saved, ' + ev.duplicates + ' duplicates' + (ev.message ? ' (' + ev.message + ')' : ''), ev.saved > 0 ? '#16a34a' : '#6b7280');
 						break;
 
 					case 'error':
+						stopBulkStepElapsed();
 						addLogLine('Error: ' + ev.url + ' — ' + ev.message, '#dc2626');
 						break;
 
 					case 'complete':
+						stopBulkStepElapsed();
 						progressBar.style.width = '100%';
 						progressBar.style.background = '#16a34a';
 						let msg = ev.total_saved + ' new bid(s) saved.';
@@ -1747,7 +1788,35 @@
 			const progressCounter = document.getElementById('progressCounter');
 			const progressBar = document.getElementById('progressBar');
 			const progressUrl = document.getElementById('progressUrl');
+			const progressElapsed = document.getElementById('progressStepElapsed');
 			const progressLog = document.getElementById('progressLog');
+
+			let singleStepElapsedTimer = null;
+
+			function restartSingleStepElapsed() {
+				if (singleStepElapsedTimer) clearInterval(singleStepElapsedTimer);
+				if (!progressElapsed) return;
+				const startedAt = Date.now();
+				const tick = () => {
+					const secs = Math.floor((Date.now() - startedAt) / 1000);
+					if (secs < 90) progressElapsed.textContent = 'Elapsed this step: ' + secs + 's';
+					else {
+						const m = Math.floor(secs / 60);
+						const s = secs % 60;
+						progressElapsed.textContent = 'Elapsed this step: ' + m + ':' + String(s).padStart(2, '0');
+					}
+				};
+				tick();
+				singleStepElapsedTimer = setInterval(tick, 500);
+			}
+
+			function stopSingleStepElapsed() {
+				if (singleStepElapsedTimer) {
+					clearInterval(singleStepElapsedTimer);
+					singleStepElapsedTimer = null;
+				}
+				if (progressElapsed) progressElapsed.textContent = '';
+			}
 
 			btn.disabled = true;
 			btn.textContent = 'Scraping...';
@@ -1757,6 +1826,7 @@
 			progressBar.style.width = '30%';
 			progressBar.style.background = '#2563eb';
 			progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtmlGlobal(url);
+			restartSingleStepElapsed();
 			progressLog.innerHTML = '';
 
 			const streamUrl = "{{ route('bids.scrapeUrlStream') }}?url=" + encodeURIComponent(url)
@@ -1775,6 +1845,7 @@
 				function read() {
 					reader.read().then(({ done, value }) => {
 						if (done) {
+							stopSingleStepElapsed();
 							btn.disabled = false;
 							btn.textContent = 'Scrape this URL';
 							return;
@@ -1795,6 +1866,7 @@
 				}
 				read();
 			}).catch(err => {
+				stopSingleStepElapsed();
 				progressTitle.textContent = 'Error: ' + err.message;
 				progressBar.style.background = '#dc2626';
 				btn.disabled = false;
@@ -1804,6 +1876,7 @@
 			function handleSingleScrapeEvent(ev) {
 				switch (ev.type) {
 					case 'status':
+						restartSingleStepElapsed();
 						progressBar.style.width = '50%';
 						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtmlGlobal(ev.step);
 						break;
@@ -1811,9 +1884,11 @@
 						addSingleLogLine('Saved: ' + ev.title, '#16a34a');
 						break;
 					case 'error':
+						stopSingleStepElapsed();
 						addSingleLogLine('Error: ' + ev.message, '#dc2626');
 						break;
 					case 'complete':
+						stopSingleStepElapsed();
 						progressBar.style.width = '100%';
 						let msg = ev.saved + ' bid(s) saved.';
 						if (ev.duplicates > 0) msg += ' ' + ev.duplicates + ' duplicate(s).';

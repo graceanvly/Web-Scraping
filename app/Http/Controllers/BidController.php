@@ -518,6 +518,7 @@ class BidController extends Controller
 				Log::info('AI bid extract starting', [
 					'url' => $url,
 					'batch_scrape_all' => true,
+					'bulk_ai_payload' => true,
 					'pdf_text_chars' => strlen($result['pdf_text'] ?? ''),
 					'listing_text_chars' => strlen($result['text'] ?? ''),
 					'bid_pages' => count($result['bid_pages'] ?? []),
@@ -529,7 +530,8 @@ class BidController extends Controller
 					$result['text'],
 					$result['pdf_bids'] ?? [],
 					$result['pdf_text'] ?? '',
-					$result['bid_pages'] ?? []
+					$result['bid_pages'] ?? [],
+					['bulk_mode' => true]
 				);
 				Log::info('AI bid extract finished', [
 					'url' => $url,
@@ -788,10 +790,17 @@ class BidController extends Controller
 						continue;
 					}
 
+					// Extra padding avoids some proxies buffering the stream until bytes arrive during the blocking OpenAI call.
+					echo ':' . str_repeat(' ', 2048) . "\n\n";
+					if (ob_get_level())
+						ob_flush();
+					flush();
+
 					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Extracting bids with AI... (large pages can take several minutes)']);
 					Log::info('AI bid extract starting', [
 						'url' => $url,
 						'index' => $idx + 1,
+						'bulk_ai_payload' => true,
 						'pdf_text_chars' => strlen($result['pdf_text'] ?? ''),
 						'listing_text_chars' => strlen($result['text'] ?? ''),
 						'bid_pages' => count($result['bid_pages'] ?? []),
@@ -803,7 +812,8 @@ class BidController extends Controller
 						$result['text'],
 						$result['pdf_bids'] ?? [],
 						$result['pdf_text'] ?? '',
-						$result['bid_pages'] ?? []
+						$result['bid_pages'] ?? [],
+						['bulk_mode' => true]
 					);
 					Log::info('AI bid extract finished', [
 						'url' => $url,
