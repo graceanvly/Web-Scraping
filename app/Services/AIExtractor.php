@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use GuzzleHttp\Client;
+use Illuminate\Support\Facades\Log;
 
 class AIExtractor
 {
@@ -125,24 +126,49 @@ SYS;
 			}, $bidPages),
 		];
 
+		if (!empty($options['bulk_mode'])) {
+			$budget = max(1000, (int) config('scraper.ai_bulk_bid_pages_total_budget_chars', 34000));
+			$this->shrinkBulkBidPageExcerptsToBudget($promptUser['bid_pages'], $budget);
+		}
+
+		$userJson = json_encode($promptUser, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+		$combinedBidExcerpts = $this->combinedBulkBidPageExcerptChars($promptUser['bid_pages']);
+		$bulkTimeout = !empty($options['bulk_mode'])
+			? max(30.0, (float) config('services.openai.http_timeout_bulk_extract', 300))
+			: null;
+
+		Log::info('AI bid extract POST payload', [
+			'url' => $URL,
+			'bulk_mode' => !empty($options['bulk_mode']),
+			'approx_user_json_bytes' => strlen((string) $userJson),
+			'bid_pages_in_prompt' => count($promptUser['bid_pages'] ?? []),
+			'combined_bid_page_excerpt_chars' => $combinedBidExcerpts,
+			'guzzle_timeout_sec' => $bulkTimeout ?? max(30.0, (float) config('services.openai.http_timeout', 300)),
+		]);
+
 		$body = [
 			'model' => $this->model,
 			'messages' => [
 				['role' => 'system', 'content' => $promptSystem],
-				['role' => 'user', 'content' => json_encode($promptUser, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)],
+				['role' => 'user', 'content' => $userJson],
 			],
 			'response_format' => ['type' => 'json_object'],
 			'temperature' => 0.1,
 		];
 
+		$requestOptions = [
+			'headers' => [
+				'Authorization' => 'Bearer ' . $this->apiKey,
+				'Content-Type' => 'application/json',
+			],
+			'body' => json_encode($body),
+		];
+		if ($bulkTimeout !== null) {
+			$requestOptions['timeout'] = $bulkTimeout;
+		}
+
 		try {
-			$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', [
-				'headers' => [
-					'Authorization' => 'Bearer ' . $this->apiKey,
-					'Content-Type' => 'application/json',
-				],
-				'body' => json_encode($body),
-			]);
+			$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', $requestOptions);
 		} catch (\GuzzleHttp\Exception\ClientException $e) {
 			$status = $e->getResponse()?->getStatusCode();
 			$responseBody = (string) ($e->getResponse()?->getBody() ?? '');
@@ -162,6 +188,19 @@ SYS;
 		} catch (\GuzzleHttp\Exception\ConnectException $e) {
 			throw new \RuntimeException('AI error: Could not connect to OpenAI API. Please check your server\'s internet connection.');
 		} catch (\Throwable $e) {
+			$m = strtolower($e->getMessage());
+			if (
+				str_contains($m, 'timed out')
+				|| str_contains($m, 'timeout')
+				|| str_contains($m, 'curl error 28')
+				|| str_contains($m, 'operation timed out')
+				|| ($e instanceof \GuzzleHttp\Exception\TransferException)
+			) {
+				throw new \RuntimeException(
+					'AI error: Extract stalled or timed out. Try increasing OPENAI_HTTP_TIMEOUT (or OPENAI_HTTP_TIMEOUT_BULK for scrape-all), '
+					. 'or lower SCRAPER_AI_BULK_PAGES_TOTAL_CHARS / SCRAPER_AI_BULK_* excerpt sizes. Original: ' . $e->getMessage()
+				);
+			}
 			throw new \RuntimeException('AI error: ' . $e->getMessage());
 		}
 
@@ -518,6 +557,53 @@ SYS;
 			$lines[] = "{$indent}{$label}: {$value}";
 		}
 		return implode("\n", array_filter($lines));
+	}
+
+	/**
+	 * @param array<int, array<string, mixed>> $pages
+	 */
+	private function combinedBulkBidPageExcerptChars(array $pages): int
+	{
+		$n = 0;
+		foreach ($pages as $p) {
+			$n += mb_strlen((string) ($p['text_excerpt'] ?? ''));
+			$n += mb_strlen((string) ($p['html_excerpt'] ?? ''));
+			$n += mb_strlen((string) ($p['pdf_text_excerpt'] ?? ''));
+		}
+		return $n;
+	}
+
+	/**
+	 * Proportionally trim bid_page excerpts until combined size is <= budget (bulk runs only).
+	 *
+	 * @param array<int, array<string, mixed>> $pages
+	 */
+	private function shrinkBulkBidPageExcerptsToBudget(array &$pages, int $budget): void
+	{
+		if ($pages === [] || $budget < 1) {
+			return;
+		}
+		$keys = ['text_excerpt', 'html_excerpt', 'pdf_text_excerpt'];
+
+		for ($pass = 0; $pass < 3; $pass++) {
+			$total = $this->combinedBulkBidPageExcerptChars($pages);
+			if ($total <= $budget) {
+				return;
+			}
+			$ratio = $budget / max(1, $total);
+
+			foreach ($pages as &$p) {
+				foreach ($keys as $k) {
+					$s = (string) ($p[$k] ?? '');
+					if ($s === '') {
+						continue;
+					}
+					$newLen = max(0, (int) floor(mb_strlen($s) * $ratio));
+					$p[$k] = $newLen > 0 ? mb_substr($s, 0, min($newLen, mb_strlen($s))) : '';
+				}
+			}
+			unset($p);
+		}
 	}
 
 	/**

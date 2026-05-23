@@ -1,5 +1,7 @@
 <?php
 
+$openAiExtractTimeout = max(30.0, (float) env('OPENAI_HTTP_TIMEOUT', 300));
+
 return [
 
     /*
@@ -35,7 +37,9 @@ return [
         'key' => env('OPENAI_API_KEY', ''),
         'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
         // Full extract() calls can include large listing + PDF excerpts; keep above OpenAI’s typical latency.
-        'http_timeout' => max(30.0, (float) env('OPENAI_HTTP_TIMEOUT', 300)),
+        'http_timeout' => $openAiExtractTimeout,
+        // Optional tighter cap for bulk_mode extract (defaults to OPENAI_HTTP_TIMEOUT when unset).
+        'http_timeout_bulk_extract' => max(30.0, (float) env('OPENAI_HTTP_TIMEOUT_BULK', $openAiExtractTimeout)),
         // Title rewrite payloads are smaller; fail faster if the API stalls.
         'http_timeout_rewrite' => max(30.0, (float) env('OPENAI_HTTP_TIMEOUT_REWRITE', 120)),
         'http_connect_timeout' => max(5.0, (float) env('OPENAI_HTTP_CONNECT_TIMEOUT', 30)),

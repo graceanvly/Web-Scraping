@@ -82,4 +82,6 @@ return [
 	'ai_bulk_bid_page_text_chars' => max(4000, min(96000, (int) env('SCRAPER_AI_BULK_BID_PAGE_TEXT_CHARS', 16000))),
 	'ai_bulk_bid_page_html_chars' => max(1000, min(32000, (int) env('SCRAPER_AI_BULK_BID_PAGE_HTML_CHARS', 6000))),
 	'ai_bulk_bid_page_pdf_text_chars' => max(2000, min(48000, (int) env('SCRAPER_AI_BULK_BID_PAGE_PDF_TEXT_CHARS', 9000))),
+	/** After per-field truncation, proportional shrink if combined bid-page excerpts still exceed this (bulk_mode only). */
+	'ai_bulk_bid_pages_total_budget_chars' => max(6000, min(200000, (int) env('SCRAPER_AI_BULK_PAGES_TOTAL_CHARS', 34000))),
 ];
