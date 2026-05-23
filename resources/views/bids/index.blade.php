@@ -854,16 +854,27 @@
 				<div class="right-controls">
 					<input type="text" id="searchInput" name="search" value="{{ $search }}" placeholder="Search…" />
 					<input type="date" id="filterDate" name="date" value="{{ $filterDate }}" title="Filter by date scraped" />
-					<select id="filterNaics" name="naics">
-						<option value="">NAICS</option>
-						@foreach ($naicsCodes as $code)
-							@if ($code)
-								<option value="{{ $code }}" {{ $filterNaics === $code ? 'selected' : '' }}>{{ $code }}</option>
+					<label for="filterUserId" style="display:flex; align-items:center; gap:0.35rem; margin:0;">
+						<span style="white-space:nowrap; font-size:0.85rem;">User</span>
+						<select id="filterUserId" name="userid" title="Show bids assigned to this directory user">
+							<option value="">All users</option>
+							@php
+								$uidsInDirectory = collect($manilaDirectoryUsers ?? [])->map(fn ($u) => (string) $u['id'])->all();
+								$userSelectedInDirectory = ($filterUserIdRaw ?? '') === '' || in_array((string) ($filterUserIdRaw ?? ''), $uidsInDirectory, true);
+							@endphp
+							@if (!$userSelectedInDirectory && (($filterUserIdRaw ?? '') !== '') && ctype_digit((string) $filterUserIdRaw))
+								<option value="{{ $filterUserIdRaw }}" selected>{{ $filterUserIdRaw }}</option>
 							@endif
-						@endforeach
-					</select>
-					@if ($search !== '' || $filterDate !== '' || $filterNaics !== '')
-						<a href="{{ route('bids.index', ['per_page' => request('per_page', 50)]) }}" class="secondary">Clear</a>
+							@foreach ($manilaDirectoryUsers ?? [] as $dirUser)
+								<option value="{{ $dirUser['id'] }}" {{ (string) ($filterUserIdRaw ?? '') === (string) $dirUser['id'] ? 'selected' : '' }}>{{ $dirUser['label'] }}</option>
+							@endforeach
+						</select>
+					</label>
+					@php
+						$bidsToolbarClear = ($search ?? '') !== '' || ($filterDate ?? '') !== '' || ($filterUserIdRaw ?? '') === '' || (($filterUserIdRaw ?? '') !== '' && ($filterUserIdRaw ?? '') !== '120482');
+					@endphp
+					@if ($bidsToolbarClear)
+						<a href="{{ route('bids.index', ['per_page' => request('per_page', 50), 'userid' => '120482']) }}" class="secondary">Clear</a>
 					@endif
 				</div>
 			</form>
@@ -1381,7 +1392,7 @@
 		const filtersForm = document.getElementById("filtersForm");
 		const searchInput = document.getElementById("searchInput");
 		const filterDate = document.getElementById("filterDate");
-		const filterNaics = document.getElementById("filterNaics");
+		const filterUserId = document.getElementById("filterUserId");
 		const showEntries = document.getElementById("showEntries");
 		const showingCount = document.getElementById("showingCount");
 		showingCount.textContent = rows.length;
@@ -1396,7 +1407,7 @@
 		});
 
 		filterDate.addEventListener("change", () => filtersForm.requestSubmit());
-		filterNaics.addEventListener("change", () => filtersForm.requestSubmit());
+		filterUserId.addEventListener("change", () => filtersForm.requestSubmit());
 		showEntries.addEventListener("change", () => {
 			const pageInput = filtersForm.querySelector('input[name="page"]');
 			if (pageInput) {

@@ -24,9 +24,15 @@ class BidController extends Controller
 			$perPage = 50;
 		}
 
+		if (!$request->has('userid')) {
+			return redirect()->route('bids.index', array_merge($request->query(), [
+				'userid' => '120482',
+			]));
+		}
+
 		$search = trim((string) $request->query('search', ''));
 		$filterDate = trim((string) $request->query('date', ''));
-		$filterNaics = trim((string) $request->query('naics', ''));
+		$filterUserIdRaw = trim((string) ($request->query('userid')));
 		$showAll = $request->boolean('all');
 
 		$scrapedUrlIds = BidUrl::whereNotNull('last_scraped_at')->pluck('id')->all();
@@ -47,14 +53,12 @@ class BidController extends Controller
 			if ($filterDate !== '') {
 				$query->whereDate('CREATED', $filterDate);
 			}
-			if ($filterNaics !== '') {
-				$query->where('NAICSCODE', $filterNaics);
+			if ($filterUserIdRaw !== '' && ctype_digit($filterUserIdRaw)) {
+				$query->where('USERID', (int) $filterUserIdRaw);
 			}
 
 			$bids = $query->latest('CREATED')->paginate($perPage)->withQueryString();
 		}
-
-		$naicsCodes = $bids->pluck('NAICSCODE')->filter(fn($v) => !empty($v))->unique()->sort()->values();
 
 		$issueCount = 0;
 		$scrapeLogs = collect();
@@ -75,7 +79,7 @@ class BidController extends Controller
 			Log::warning('Manila directory users not loaded', ['error' => $e->getMessage()]);
 		}
 
-		return view('bids.index', compact('bids', 'naicsCodes', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterNaics', 'showAll', 'latestDateLabel', 'manilaDirectoryUsers'));
+		return view('bids.index', compact('bids', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterUserIdRaw', 'showAll', 'latestDateLabel', 'manilaDirectoryUsers'));
 	}
 
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
