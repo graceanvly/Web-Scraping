@@ -57,17 +57,14 @@ class BidReferenceLookupService
 			}
 			$attrs = (array) $row;
 			$upper = array_change_key_case($attrs, CASE_UPPER);
-			$labelParts = array_filter([
+			$firstParts = array_filter([
 				$upper['FIRSTNAME'] ?? $upper['FIRST_NAME'] ?? null,
 				$upper['LASTNAME'] ?? $upper['LAST_NAME'] ?? null,
-				$upper['EMAIL'] ?? null,
-				$upper['NAME'] ?? null,
 			], fn ($v) => $v !== null && trim((string) $v) !== '');
-			$label = trim(implode(' ', array_map('trim', $labelParts)));
+			$label = trim(implode(' ', array_map('trim', $firstParts)));
 			if ($label === '') {
-				$label = (string) $id;
-			} else {
-				$label = $id . ' – ' . $label;
+				$nameCol = isset($upper['NAME']) ? trim((string) $upper['NAME']) : '';
+				$label = $nameCol !== '' ? $nameCol : 'Unnamed';
 			}
 			$out[] = ['id' => $id, 'label' => $label];
 		}
