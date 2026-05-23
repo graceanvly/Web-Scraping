@@ -231,7 +231,7 @@ class BidController extends Controller
 				$bid->CREATED = now();
 				$bid->LAST_MODIFIED = now();
 				$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
-				$this->applyScrapedBidSubscriptionTypeDefault($bid);
+				$this->applyScrapeCreatedBidDefaults($bid);
 				$bid->save();
 
 				$saved[] = $bid->id;
@@ -385,7 +385,7 @@ class BidController extends Controller
 					$bid->LAST_MODIFIED = now();
 					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
 					$this->applyScrapeAssignUserId($bid, $assignUserId);
-					$this->applyScrapedBidSubscriptionTypeDefault($bid);
+					$this->applyScrapeCreatedBidDefaults($bid);
 					$bid->save();
 					$savedCount++;
 
@@ -569,7 +569,7 @@ class BidController extends Controller
 					$bid->BID_URL_ID = $bidUrl->id;
 					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
 					$this->applyScrapeAssignUserId($bid, $assignUserId);
-					$this->applyScrapedBidSubscriptionTypeDefault($bid);
+					$this->applyScrapeCreatedBidDefaults($bid);
 					$bid->save();
 
 					$savedThisUrl++;
@@ -815,7 +815,7 @@ class BidController extends Controller
 						$bid->BID_URL_ID = $bidUrl->id;
 						$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
 						$this->applyScrapeAssignUserId($bid, $assignUserId);
-						$this->applyScrapedBidSubscriptionTypeDefault($bid);
+						$this->applyScrapeCreatedBidDefaults($bid);
 						$bid->save();
 						$savedThisUrl++;
 					}
@@ -1177,10 +1177,14 @@ class BidController extends Controller
 		}
 	}
 
-	/** Default subscription type for bids created by scrape flows (not manual UI edit). */
-	private function applyScrapedBidSubscriptionTypeDefault(Bid $bid): void
+	/**
+	 * Defaults for scraped bids before save (not used for manual UI creates).
+	 * SUBSCRIPTIONTYPEID / SETASIDECODEID match production expectations for auto-imported rows.
+	 */
+	private function applyScrapeCreatedBidDefaults(Bid $bid): void
 	{
 		$bid->SUBSCRIPTIONTYPEID = 10;
+		$bid->SETASIDECODEID = 1;
 	}
 
 	public function destroy(Bid $bid)
