@@ -76,11 +76,13 @@ For each bid you return, include:
 
 - CONTACT_EMAIL (single **best** email for bid questions or submissions: estimator@, bids@, purchasing@, or the explicitly labeled submission address. Use empty string "" if no email appears anywhere.)
 - ISSUING_ORGANIZATION (concise issuing buyer / procurement unit / company **name** whose entity record might be matched in a master entity list — e.g. "City of Miami", "State of Vermont DOT", "ACME Constructors LLC"; use "Not provided" when unknown.)
+- ISSUING_ADDRESS (mailing/street/office address shown for the **issuing agency or contracting office**: building, street line(s), city, state/province, postal code when visibly part of solicitation / contact boilerplate — not merely the vague project geography unless labeled as departmental address; use "Not provided" when none appears.)
+- ISSUING_CONTACT_PHONE (voice phone number(s) for questions or procurement for that issuing office — digits, extensions; separate multiple entries with commas; use "Not provided" or empty string "" when none appears.)
 
 Rules:
 1) Prefer the most specific source: PDF text first, then clicked detail pages and browser interaction states, then listing text.
 2) If a value is missing, write "Not provided" for that label instead of leaving it blank. Exception: POSTING_ENTITY must always be exactly one of government, private_company, or uncertain — use uncertain when unknown; never use "Not provided" for POSTING_ENTITY. Use empty string "" for CONTACT_EMAIL when no email exists.
-3) Respond with strict JSON only in the format: {"bids":[{...}]} including the fields above (TITLE, ENDDATE, NAICSCODE, URL, BID_CATEGORY, LOCATION_STATE, POSTING_ENTITY, CONTACT_EMAIL, ISSUING_ORGANIZATION, DESCRIPTION).
+3) Respond with strict JSON only in the format: {"bids":[{...}]} including the fields above (TITLE, ENDDATE, NAICSCODE, URL, BID_CATEGORY, LOCATION_STATE, POSTING_ENTITY, CONTACT_EMAIL, ISSUING_ORGANIZATION, ISSUING_ADDRESS, ISSUING_CONTACT_PHONE, DESCRIPTION).
 4) Browser interaction states are page snapshots captured after the scraper clicked likely controls. Use them to find content revealed by buttons, tabs, accordions, dropdowns, "view details", "documents", "attachments", and similar controls.
 5) Do your best to find the bids: some sites require clicking links (e.g., "see all open bid opportunities") before listings appear. Only return actual bids; do not treat generic portal/home pages or unrelated content as bids.
 6) Bonfire Hub / similar portals: listings often appear as a table of "opportunities" with titles, due dates, and status. Extract one bid per opportunity row when the portal shows open/public opportunities.
@@ -204,6 +206,20 @@ SYS;
 				$issuingOrg = implode(' ', $issuingOrg);
 			}
 			$issuingOrg = $this->normalizeIssuingOrganization((string) $issuingOrg);
+
+			$issuingAddressRaw = $bid['ISSUING_ADDRESS'] ?? $bid['ENTITY_ADDRESS'] ?? '';
+			if (is_array($issuingAddressRaw)) {
+				$issuingAddressRaw = implode("\n", $issuingAddressRaw);
+			}
+			$issuingAddress = $this->normalizeIssuingContactSnippet((string) $issuingAddressRaw, true, 2500);
+
+			$issuingPhoneRaw = $bid['ISSUING_CONTACT_PHONE'] ?? $bid['ENTITY_CONTACT_PHONE'] ?? $bid['ENTITY_PHONE'] ?? '';
+			if (is_array($issuingPhoneRaw)) {
+				$issuingPhoneRaw = implode(', ', array_map('trim', $issuingPhoneRaw));
+			}
+			$issuingPhone = $this->normalizeIssuingContactSnippet((string) $issuingPhoneRaw, false, 512);
+
+			$desc = $this->appendIssuingEntityContactSuffix($desc, $issuingAddress, $issuingPhone);
 
 			return [
 				'TITLE' => (string) $title,
@@ -331,6 +347,81 @@ SYS;
 		}
 
 		return mb_substr($s, 0, 500);
+	}
+
+	/**
+	 * Normalize optional ISSUING_ADDRESS / ISSUING_CONTACT_PHONE from model output for suffix blocks.
+	 */
+	private function normalizeIssuingContactSnippet(string $raw, bool $preserveNewlines, int $maxChars): string
+	{
+		$s = strip_tags(trim($raw));
+		if ($preserveNewlines) {
+			$s = str_replace(["\r\n", "\r"], "\n", $s);
+			$s = preg_replace("/\n{3,}/u", "\n\n", $s) ?? $s;
+			$parts = preg_split('/\n/u', $s) ?: [];
+			$lines = [];
+			foreach ($parts as $line) {
+				$line = trim(preg_replace('/[ \t]+/u', ' ', (string) $line));
+				if ($line !== '') {
+					$lines[] = $line;
+				}
+			}
+			$s = implode("\n", $lines);
+		} else {
+			$s = trim(preg_replace('/\s+/u', ' ', $s));
+		}
+
+		if ($s === '' || $this->isNotProvidedSnippet($s)) {
+			return '';
+		}
+
+		return mb_strlen($s) > $maxChars ? mb_substr($s, 0, $maxChars) . '...' : $s;
+	}
+
+	private function isNotProvidedSnippet(string $s): bool
+	{
+		$t = str_replace(["\r\n", "\r"], "\n", $s);
+		$t = strtolower(trim(explode("\n", $t)[0] ?? ''));
+
+		return match (true) {
+			$t === '',
+			str_starts_with($t, 'not provided'),
+			$t === 'n/a',
+			$t === 'na',
+			$t === 'unknown',
+			$t === 'none',
+			$t === 'tbd',
+			$t === '—',
+			$t === '-' => true,
+			default => false,
+		};
+	}
+
+	private function appendIssuingEntityContactSuffix(string $desc, string $address, string $phone): string
+	{
+		$address = trim(str_replace(["\r\n", "\r"], "\n", $address));
+		$phone = trim($phone);
+		if ($address === '' && $phone === '') {
+			return $desc;
+		}
+
+		$lines = [];
+		$lines[] = '---';
+		$lines[] = '**Issuing entity — address & phone**';
+		if ($address !== '') {
+			$lines[] = 'Address: ' . str_replace(["\r\n", "\r"], "\n", $address);
+		}
+		if ($phone !== '') {
+			$lines[] = 'Phone: ' . $phone;
+		}
+
+		$suffix = implode("\n", $lines);
+		$base = str_replace(["\r\n", "\r"], "\n", rtrim((string) $desc));
+		if ($base !== '' && str_ends_with($base, $suffix)) {
+			return $desc;
+		}
+
+		return $base === '' ? $suffix : $base . "\n\n" . $suffix;
 	}
 
 	private function normalizeContactEmailFromExtract(mixed $raw): string
