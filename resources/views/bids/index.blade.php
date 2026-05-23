@@ -854,22 +854,19 @@
 				<div class="right-controls">
 					<input type="text" id="searchInput" name="search" value="{{ $search }}" placeholder="Search…" />
 					<input type="date" id="filterDate" name="date" value="{{ $filterDate }}" title="Filter by date scraped" />
-					<label for="filterUserId" style="display:flex; align-items:center; gap:0.35rem; margin:0;">
-						<span style="white-space:nowrap; font-size:0.85rem;">User</span>
-						<select id="filterUserId" name="userid" title="Show bids assigned to this directory user">
-							<option value="">All users</option>
-							@php
-								$uidsInDirectory = collect($manilaDirectoryUsers ?? [])->map(fn ($u) => (string) $u['id'])->all();
-								$userSelectedInDirectory = ($filterUserIdRaw ?? '') === '' || in_array((string) ($filterUserIdRaw ?? ''), $uidsInDirectory, true);
-							@endphp
-							@if (!$userSelectedInDirectory && (($filterUserIdRaw ?? '') !== '') && ctype_digit((string) $filterUserIdRaw))
-								<option value="{{ $filterUserIdRaw }}" selected>{{ $filterUserIdRaw }}</option>
-							@endif
-							@foreach ($manilaDirectoryUsers ?? [] as $dirUser)
-								<option value="{{ $dirUser['id'] }}" {{ (string) ($filterUserIdRaw ?? '') === (string) $dirUser['id'] ? 'selected' : '' }}>{{ $dirUser['label'] }}</option>
-							@endforeach
-						</select>
-					</label>
+					<select id="filterUserId" name="userid" title="Show bids assigned to this directory user" aria-label="Assigned user filter">
+						<option value="">All users</option>
+						@php
+							$uidsInDirectory = collect($manilaDirectoryUsers ?? [])->map(fn ($u) => (string) $u['id'])->all();
+							$userSelectedInDirectory = ($filterUserIdRaw ?? '') === '' || in_array((string) ($filterUserIdRaw ?? ''), $uidsInDirectory, true);
+						@endphp
+						@if (!$userSelectedInDirectory && (($filterUserIdRaw ?? '') !== '') && ctype_digit((string) $filterUserIdRaw))
+							<option value="{{ $filterUserIdRaw }}" selected>{{ $filterUserIdRaw }}</option>
+						@endif
+						@foreach ($manilaDirectoryUsers ?? [] as $dirUser)
+							<option value="{{ $dirUser['id'] }}" {{ (string) ($filterUserIdRaw ?? '') === (string) $dirUser['id'] ? 'selected' : '' }}>{{ $dirUser['label'] }}</option>
+						@endforeach
+					</select>
 					@php
 						$bidsToolbarClear = ($search ?? '') !== '' || ($filterDate ?? '') !== '' || ($filterUserIdRaw ?? '') === '' || (($filterUserIdRaw ?? '') !== '' && ($filterUserIdRaw ?? '') !== '120482');
 					@endphp
