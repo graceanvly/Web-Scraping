@@ -1126,6 +1126,16 @@ class BidController extends Controller
 			if ($stateId !== null) {
 				$bid->STATEID = $stateId;
 			}
+			$entityId = $lookup->resolveEntityId(
+				isset($bidData['ISSUING_ORGANIZATION']) ? (string) $bidData['ISSUING_ORGANIZATION'] : null,
+				$bid->EMAIL,
+				(string) ($bid->URL ?? ''),
+				$title,
+				$description
+			);
+			if ($entityId !== null && $entityId > 0) {
+				$bid->ENTITYID = $entityId;
+			}
 		} catch (\Throwable $e) {
 			Log::warning('Bid classification lookup failed', ['error' => $e->getMessage()]);
 		}

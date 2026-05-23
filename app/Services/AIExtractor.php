@@ -75,11 +75,12 @@ For each bid you return, include:
   List every distinct email/phone that is clearly relevant to responding to this bid (omit lines only when that type of contact truly does not appear). If the **Contact** block would duplicate the exact same lines already present in the narrative **as labeled contact fields**, you may skip repeating them.
 
 - CONTACT_EMAIL (single **best** email for bid questions or submissions: estimator@, bids@, purchasing@, or the explicitly labeled submission address. Use empty string "" if no email appears anywhere.)
+- ISSUING_ORGANIZATION (concise issuing buyer / procurement unit / company **name** whose entity record might be matched in a master entity list — e.g. "City of Miami", "State of Vermont DOT", "ACME Constructors LLC"; use "Not provided" when unknown.)
 
 Rules:
 1) Prefer the most specific source: PDF text first, then clicked detail pages and browser interaction states, then listing text.
 2) If a value is missing, write "Not provided" for that label instead of leaving it blank. Exception: POSTING_ENTITY must always be exactly one of government, private_company, or uncertain — use uncertain when unknown; never use "Not provided" for POSTING_ENTITY. Use empty string "" for CONTACT_EMAIL when no email exists.
-3) Respond with strict JSON only in the format: {"bids":[{...}]} including the fields above (TITLE, ENDDATE, NAICSCODE, URL, BID_CATEGORY, LOCATION_STATE, POSTING_ENTITY, CONTACT_EMAIL, DESCRIPTION).
+3) Respond with strict JSON only in the format: {"bids":[{...}]} including the fields above (TITLE, ENDDATE, NAICSCODE, URL, BID_CATEGORY, LOCATION_STATE, POSTING_ENTITY, CONTACT_EMAIL, ISSUING_ORGANIZATION, DESCRIPTION).
 4) Browser interaction states are page snapshots captured after the scraper clicked likely controls. Use them to find content revealed by buttons, tabs, accordions, dropdowns, "view details", "documents", "attachments", and similar controls.
 5) Do your best to find the bids: some sites require clicking links (e.g., "see all open bid opportunities") before listings appear. Only return actual bids; do not treat generic portal/home pages or unrelated content as bids.
 6) Bonfire Hub / similar portals: listings often appear as a table of "opportunities" with titles, due dates, and status. Extract one bid per opportunity row when the portal shows open/public opportunities.
@@ -198,6 +199,12 @@ SYS;
 
 			$contactEmail = $this->normalizeContactEmailFromExtract($bid['CONTACT_EMAIL'] ?? $bid['EMAIL'] ?? null);
 
+			$issuingOrg = $bid['ISSUING_ORGANIZATION'] ?? '';
+			if (is_array($issuingOrg)) {
+				$issuingOrg = implode(' ', $issuingOrg);
+			}
+			$issuingOrg = $this->normalizeIssuingOrganization((string) $issuingOrg);
+
 			return [
 				'TITLE' => (string) $title,
 				'ENDDATE' => (string) $endDate,
@@ -207,6 +214,7 @@ SYS;
 				'LOCATION_STATE' => (string) $locationState,
 				'POSTING_ENTITY' => $postingEntity,
 				'CONTACT_EMAIL' => $contactEmail,
+				'ISSUING_ORGANIZATION' => $issuingOrg,
 				'DESCRIPTION' => $desc,
 			];
 		}, $bids);
@@ -221,6 +229,7 @@ SYS;
 				'LOCATION_STATE' => '',
 				'POSTING_ENTITY' => 'uncertain',
 				'CONTACT_EMAIL' => '',
+				'ISSUING_ORGANIZATION' => '',
 				'DESCRIPTION' => $fullPdfText ?: ($text ?: 'No PDF or description found.'),
 			];
 		}
@@ -314,6 +323,16 @@ SYS;
 	/**
 	 * Canonical email for Bid.EMAIL field; empty string means unknown after normalization.
 	 */
+	private function normalizeIssuingOrganization(string $raw): string
+	{
+		$s = trim(preg_replace('/\s+/u', ' ', $raw));
+		if ($s === '' || strcasecmp($s, 'not provided') === 0 || strcasecmp($s, 'n/a') === 0) {
+			return '';
+		}
+
+		return mb_substr($s, 0, 500);
+	}
+
 	private function normalizeContactEmailFromExtract(mixed $raw): string
 	{
 		if (is_array($raw)) {
