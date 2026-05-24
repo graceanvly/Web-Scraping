@@ -62,6 +62,8 @@ return [
 	'scrape_title_rewrite_reserve_seconds' => max(30, min(900, (int) env('SCRAPER_TITLE_REWRITE_RESERVE_SECONDS', 90))),
 	/** Skip batched rewrite when more than this many titles (would be one oversized API call). */
 	'scrape_rewrite_max_titles' => max(10, min(500, (int) env('SCRAPER_REWRITE_MAX_TITLES', 120))),
+	/** Rewrite titles in chunks of this size so bulk SSE can refresh between OpenAI batches. */
+	'title_rewrite_chunk_titles' => max(4, min(35, (int) env('SCRAPER_TITLE_REWRITE_CHUNK', 10))),
 
 	/*
 	|--------------------------------------------------------------------------

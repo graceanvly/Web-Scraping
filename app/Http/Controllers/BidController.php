@@ -372,7 +372,17 @@ class BidController extends Controller
 				$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
 				$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $url, function (string $ev, array $ctx) use ($send) {
 					if ($ev === 'start') {
-						$send(['type' => 'status', 'step' => 'Rewriting ' . ($ctx['count'] ?? 0) . ' title(s)...']);
+						$total = (int) ($ctx['count'] ?? 0);
+						$chunks = (int) ($ctx['chunks'] ?? 1);
+						$batchHint = $chunks > 1 ? " ({$chunks} OpenAI batches)" : '';
+						$send([
+							'type' => 'status',
+							'step' => 'Rewriting ' . $total . ' title(s)' . $batchHint . '… SSE pauses until each batch returns (often 15–120s total). Watch “Elapsed this step”.',
+						]);
+					} elseif ($ev === 'chunk') {
+						$b = (int) ($ctx['chunk'] ?? 2);
+						$t = (int) ($ctx['total_chunks'] ?? 2);
+						$send(['type' => 'status', 'step' => "Rewriting titles — batch {$b}/{$t}… waiting on OpenAI."]);
 					} elseif ($ev === 'skip_time') {
 						$send(['type' => 'status', 'step' => 'Using extracted titles (rewrite skipped — near per-URL time limit).']);
 					} elseif ($ev === 'skip_many') {
@@ -852,7 +862,22 @@ class BidController extends Controller
 					$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
 					$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $url, function (string $ev, array $ctx) use ($send, $idx) {
 						if ($ev === 'start') {
-							$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Rewriting ' . ($ctx['count'] ?? 0) . ' title(s)...']);
+							$total = (int) ($ctx['count'] ?? 0);
+							$chunks = (int) ($ctx['chunks'] ?? 1);
+							$batchHint = $chunks > 1 ? " ({$chunks} OpenAI batches)" : '';
+							$send([
+								'type' => 'status',
+								'index' => $idx + 1,
+								'step' => 'Rewriting ' . $total . ' title(s)' . $batchHint . '… SSE pauses until each batch returns (often 15–120s total). Watch “Elapsed this step”.',
+							]);
+						} elseif ($ev === 'chunk') {
+							$b = (int) ($ctx['chunk'] ?? 2);
+							$t = (int) ($ctx['total_chunks'] ?? 2);
+							$send([
+								'type' => 'status',
+								'index' => $idx + 1,
+								'step' => "Rewriting titles — batch {$b}/{$t}… waiting on OpenAI.",
+							]);
 						} elseif ($ev === 'skip_time') {
 							$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Using extracted titles (rewrite skipped — near per-URL time limit).']);
 						} elseif ($ev === 'skip_many') {
@@ -1580,10 +1605,15 @@ class BidController extends Controller
 		return max(10, min(500, (int) config('scraper.scrape_rewrite_max_titles', 120)));
 	}
 
+	private function scrapeTitleRewriteChunkTitles(): int
+	{
+		return max(4, min(35, (int) config('scraper.title_rewrite_chunk_titles', 10)));
+	}
+
 	/**
 	 * Optionally skip batched rewrite (second OpenAI call) near time budget / huge title lists.
 	 *
-	 * @param callable|null $progress function (string $event, array $context):void — events: start, skip_time, skip_many
+	 * @param callable|null $progress function (string $event, array $context):void — events: start, chunk, skip_time, skip_many
 	 */
 	private function maybeRewriteScrapeTitles(AIExtractor $ai, array $rawTitles, float $urlStartedAt, string $url, ?callable $progress): array
 	{
@@ -1622,11 +1652,32 @@ class BidController extends Controller
 			return $rawTitles;
 		}
 
-		if ($progress !== null) {
-			$progress('start', ['count' => count($rawTitles)]);
+		$titlesFlat = array_values($rawTitles);
+		$n = count($titlesFlat);
+		$chunkSz = max(1, min($n, $this->scrapeTitleRewriteChunkTitles()));
+		if ($n <= $chunkSz) {
+			if ($progress !== null) {
+				$progress('start', ['count' => $n, 'chunks' => 1]);
+			}
+
+			return $ai->rewriteTitles($titlesFlat);
 		}
 
-		return $ai->rewriteTitles($rawTitles);
+		$batches = array_chunk($titlesFlat, $chunkSz);
+		$batchesTotal = count($batches);
+		if ($progress !== null) {
+			$progress('start', ['count' => $n, 'chunks' => $batchesTotal]);
+		}
+
+		$merged = [];
+		foreach ($batches as $i => $batch) {
+			if ($i > 0 && $progress !== null) {
+				$progress('chunk', ['chunk' => $i + 1, 'total_chunks' => $batchesTotal]);
+			}
+			$merged = array_merge($merged, $ai->rewriteTitles($batch));
+		}
+
+		return $merged;
 	}
 
 	private function guardUrlBudget(float $startedAt, int $maxSeconds, string $url): void

@@ -308,7 +308,7 @@ SYS;
 
 	/**
 	 * Use AI to rewrite raw scraped titles into clean, standardized format.
-	 * Batches all titles in one API call for efficiency.
+	 * Sends one Chat Completions request per invocation; bulk scrapes chunk large lists upstream.
 	 */
 	public function rewriteTitles(array $titles): array
 	{
@@ -316,9 +316,12 @@ SYS;
 			return $titles;
 		}
 		if (empty($this->apiKey)) {
-			\Illuminate\Support\Facades\Log::warning('AI title rewrite skipped: OPENAI_API_KEY is not configured.');
+			Log::warning('AI title rewrite skipped: OPENAI_API_KEY is not configured.');
 			return $titles;
 		}
+
+		Log::info('AI title rewrite starting', ['titles' => count($titles)]);
+		$rewriteStarted = microtime(true);
 
 		$system = <<<SYS
 You are a bid title editor. Rewrite each opportunity title (government solicitations or private-sector bid postings — e.g. GC sub-bid invitations) for clarity.
@@ -361,16 +364,21 @@ SYS;
 			$rewritten = $data['titles'] ?? [];
 
 			if (count($rewritten) === count($titles)) {
+				Log::info('AI title rewrite finished', [
+					'titles' => count($titles),
+					'elapsed_sec' => round(microtime(true) - $rewriteStarted, 2),
+				]);
+
 				return array_values($rewritten);
 			}
 
-			\Illuminate\Support\Facades\Log::warning('AI title rewrite count mismatch', [
+			Log::warning('AI title rewrite count mismatch', [
 				'input' => count($titles),
 				'output' => count($rewritten),
 			]);
 			return $titles;
 		} catch (\Throwable $e) {
-			\Illuminate\Support\Facades\Log::warning('AI title rewrite failed', ['error' => $e->getMessage()]);
+			Log::warning('AI title rewrite failed', ['error' => $e->getMessage()]);
 			return $titles;
 		}
 	}
