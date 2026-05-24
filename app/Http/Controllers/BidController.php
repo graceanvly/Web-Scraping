@@ -1048,6 +1048,28 @@ class BidController extends Controller
 		return redirect()->route('scrape.issues')->with('success', 'Issue deleted.');
 	}
 
+	/**
+	 * JSON for bid edit ENTITYID search (authenticated).
+	 * Query params: optional id=int (single label), optional q=str, optional limit (10–100).
+	 */
+	public function referenceEntitiesSearch(Request $request, BidReferenceLookupService $lookup)
+	{
+		if ($request->filled('id')) {
+			$id = (int) $request->query('id', 0);
+
+			return response()->json([
+				'resolved' => $id > 0 ? $lookup->getEntityOptionById($id) : null,
+			]);
+		}
+
+		$limit = (int) $request->query('limit', 40);
+		$limit = max(10, min(100, $limit));
+
+		return response()->json([
+			'results' => $lookup->searchEntitiesForSelect($request->string('q')->toString(), $limit),
+		]);
+	}
+
 	public function update(Request $request, Bid $bid)
 	{
 		$nullableStrings = ['DESCRIPTION', 'EMAIL', 'URL', 'NAICSCODE', 'SOLICIATIONNUMBER', 'THIRD_PARTY_IDENTIFIER', 'NSN', 'INLINEURL', 'COUNTRY_ID', 'raw_html', 'extracted_json'];

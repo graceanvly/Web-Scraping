@@ -195,19 +195,34 @@ class ScraperService
 			$needsHeadless = $isBrowserCheck || $isSpa || strlen($bestText) < 500;
 		}
 
+		/** True only when HTTP listing succeeded but text is “thin”; not SPA/cloudflare/browser-check/recoverable-http failure paths. */
+		$listingThinOnlyHeadlessTrigger = !$httpFailed && !$isBrowserCheck && !$isSpa && strlen($bestText) < 500;
+		if ($needsHeadless && $batchMode && $listingThinOnlyHeadlessTrigger && config('scraper.batch_skip_thin_headless')) {
+			Log::info('BATCH SKIPPING HEADLESS FOR THIN LISTING CONTENT', ['url' => $url, 'text_length' => strlen($bestText)]);
+			$needsHeadless = false;
+		}
+
+		$thinListingPuppeteerMaxSec = ($batchMode && $listingThinOnlyHeadlessTrigger && $needsHeadless)
+			? (int) config('scraper.batch_thin_listing_headless_max_sec', 42)
+			: null;
+
 		$report($needsHeadless ? 'Listing page needs browser render…' : 'Listing page loaded…');
 
 		if ($needsHeadless) {
 			$reason = $httpFailed ? $httpFailReason : ($isBrowserCheck ? 'browser check detected' : ($isSpa ? 'SPA detected' : 'thin content'));
 			Log::info("HEADLESS CHROME TRIGGERED ({$reason})", ['url' => $url, 'text_length' => strlen($bestText)]);
-			$report('Headless browser (Puppeteer)… this can take 1–2 minutes.');
+			if ($thinListingPuppeteerMaxSec !== null) {
+				$report("Headless browser (Puppeteer)… capped at ~{$thinListingPuppeteerMaxSec}s for thin listing.");
+			} else {
+				$report('Headless browser (Puppeteer)… this can take 1–2 minutes.');
+			}
 			try {
 				$this->ensureWithinBudget($startedAt, 'headless chrome fetch');
 				$puppetDelay = $isBrowserCheck ? 5000 : (($httpFailed || $isSpa) ? 4000 : 1500);
 				if ($this->isHeavyJsProcurementPortal($url)) {
 					$puppetDelay = max($puppetDelay, (int) env('SCRAPER_HEAVY_PORTAL_SETTLE_MS', 22000));
 				}
-				$renderedHtml = $this->renderWithPuppeteer($url, $puppetDelay, $startedAt, false);
+				$renderedHtml = $this->renderWithPuppeteer($url, $puppetDelay, $startedAt, false, $thinListingPuppeteerMaxSec);
 
 				if ($renderedHtml !== null) {
 					$renderedText = $this->htmlToText($renderedHtml);
@@ -1282,7 +1297,7 @@ class ScraperService
 		return $buf;
 	}
 
-	private function renderWithPuppeteer(string $url, int $delayMs, float $startedAt, bool $detailPagePass = false): ?string
+	private function renderWithPuppeteer(string $url, int $delayMs, float $startedAt, bool $detailPagePass = false, ?int $capListingProcessSeconds = null): ?string
 	{
 		$this->ensureWithinBudget($startedAt, 'before headless chrome');
 		$elapsed = microtime(true) - $startedAt;
@@ -1300,6 +1315,9 @@ class ScraperService
 			$processTimeoutSec = $heavy
 				? min($heavyPuppetCap, (int) max(25, $remaining))
 				: (int) max(20, min(85, $remaining));
+			if ($capListingProcessSeconds !== null && !$heavy) {
+				$processTimeoutSec = min($processTimeoutSec, max(15, $capListingProcessSeconds));
+			}
 		}
 		$maxDelayCap = $heavy ? 30000 : 6000;
 		$delayMs = min(max(0, $delayMs), $maxDelayCap);
@@ -1313,6 +1331,16 @@ class ScraperService
 		$defaultNavMs = ($detailPagePass && !$heavy) ? 45000 : ($heavy ? 90000 : 45000);
 		$navTimeoutMs = min($defaultNavMs, $processTimeoutSec * 1000);
 
+		Log::info('PUPPETEER START', [
+			'url' => $url,
+			'detail_page' => $detailPagePass,
+			'heavy_js_portal' => $heavy,
+			'subprocess_timeout_sec' => $processTimeoutSec,
+			'delay_ms' => $delayMs,
+			'nav_timeout_ms' => $navTimeoutMs,
+			'batch_cap_sec' => $capListingProcessSeconds,
+		]);
+
 		$process = new \Symfony\Component\Process\Process(
 			[$nodeBin, $script, $url, (string) $delayMs, (string) $navTimeoutMs],
 			base_path(),
@@ -1320,7 +1348,15 @@ class ScraperService
 			null,
 			$processTimeoutSec
 		);
+		$puppetStart = microtime(true);
 		$process->run();
+
+		Log::info('PUPPETEER END', [
+			'url' => $url,
+			'detail_page' => $detailPagePass,
+			'successful' => $process->isSuccessful(),
+			'elapsed_sec' => round(microtime(true) - $puppetStart, 2),
+		]);
 
 		if (!$process->isSuccessful()) {
 			$error = trim($process->getErrorOutput());

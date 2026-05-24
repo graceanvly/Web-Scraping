@@ -64,6 +64,16 @@ return [
 	'scrape_rewrite_max_titles' => max(10, min(500, (int) env('SCRAPER_REWRITE_MAX_TITLES', 120))),
 	/** Rewrite titles in chunks of this size so bulk SSE can refresh between OpenAI batches. */
 	'title_rewrite_chunk_titles' => max(4, min(35, (int) env('SCRAPER_TITLE_REWRITE_CHUNK', 10))),
+	/*
+	 * Batch listing Puppeteer: headless fires when extracted text &lt; 500 chars (“thin”).
+	 * The Node subprocess blocks the SSE stream with little logging; cap subprocess time here.
+	 */
+	'batch_thin_listing_headless_max_sec' => max(15, min(180, (int) env('SCRAPER_BATCH_THIN_HEADLESS_MAX_SEC', 42))),
+	/**
+	 * In batch mode, skip Puppeteer when headless would run only because of thin listing text
+	 * (HTTP succeeded; not SPA/browser-check/403)—faster batches; JS-only listings may be missed.
+	 */
+	'batch_skip_thin_headless' => filter_var(env('SCRAPER_BATCH_SKIP_THIN_HEADLESS', false), FILTER_VALIDATE_BOOL),
 
 	/*
 	|--------------------------------------------------------------------------

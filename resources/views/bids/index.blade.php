@@ -616,6 +616,7 @@
 		}
 
 		#editModal input[type="text"],
+		#editModal input[type="search"],
 		#editModal input[type="url"],
 		#editModal input[type="date"],
 		#editModal input[type="datetime-local"],
@@ -634,6 +635,44 @@
 
 		#editModal .edit-field-full {
 			grid-column: 1 / -1;
+		}
+
+		#editModal .entity-picker-inner {
+			position: relative;
+		}
+
+		#editModal #edit_entity_results {
+			list-style: none;
+			padding: 0;
+			margin: 0;
+			position: absolute;
+			left: 0;
+			right: 0;
+			top: calc(100% + 4px);
+			z-index: 40;
+			max-height: 240px;
+			overflow-y: auto;
+			border: 1px solid #e5e7eb;
+			border-radius: 8px;
+			background: #fff;
+			box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+		}
+
+		#editModal #edit_entity_results li {
+			padding: 0.48rem 0.72rem;
+			cursor: pointer;
+			font-size: 0.86rem;
+			line-height: 1.35;
+			border-bottom: 1px solid #f3f4f6;
+		}
+
+		#editModal #edit_entity_results li:hover,
+		#editModal #edit_entity_results li.entity-res-active {
+			background: #eff6ff;
+		}
+
+		#editModal #edit_entity_results li:last-child {
+			border-bottom: none;
 		}
 
 		#editModal details {
@@ -1244,6 +1283,27 @@
 					</div>
 
 					<p class="edit-field-full" style="margin:0.5rem 0 0; font-size:0.85rem; font-weight:700; color:#374151;">IDs</p>
+
+					<div class="edit-field-full entity-picker-wrap">
+						<label for="edit_entity_search">Entity <span style="font-weight:400; color:#6b7280;">(ENTITYID)</span></label>
+						<input type="hidden" id="edit_entity_id" name="ENTITYID" value="">
+						<div class="entity-picker-inner">
+							<input type="search" id="edit_entity_search" autocomplete="off" autocorrect="off"
+								spellcheck="false"
+								placeholder="Search master list by name, email, or numeric ID..."
+								style="margin-bottom:0.15rem;"
+								aria-autocomplete="list" aria-expanded="false" aria-controls="edit_entity_results">
+							<ul id="edit_entity_results" role="listbox" hidden></ul>
+						</div>
+						<div style="margin-top:0.25rem; display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center;">
+							<button type="button" id="edit_entity_clear"
+								style="margin:0; padding:0; border:none; background:none; cursor:pointer; color:#2563eb; text-decoration:underline; font-size:0.82rem;">
+								Clear entity
+							</button>
+							<span style="font-size:0.78rem; color:#6b7280;">Choose a suggestion to set ENTITYID for save.</span>
+						</div>
+					</div>
+
 					<div>
 						<label for="edit_category_id">CATEGORYID</label>
 						<input type="number" id="edit_category_id" name="CATEGORYID">
@@ -1281,10 +1341,6 @@
 					<details class="edit-field-full">
 						<summary>More IDs &amp; technical fields</summary>
 						<div class="edit-form-grid" style="margin-top:0.75rem;">
-							<div>
-								<label for="edit_entity_id">ENTITYID</label>
-								<input type="number" id="edit_entity_id" name="ENTITYID">
-							</div>
 							<div>
 								<label for="edit_bid_url_id">BID_URL_ID</label>
 								<input type="number" id="edit_bid_url_id" name="BID_URL_ID">
@@ -1372,6 +1428,9 @@
 		const bidsData = @json($bidsModalData);
 		const noEntityBidsData = @json($noEntityBidsModalData);
 		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+		const entitySearchUrl = @json(route('bids.reference.entities'));
+		let entityPickerReq = 0;
+		let entityPickerSelectedLabel = '';
 
 		document.addEventListener('click', function(e) {
 			const link = e.target.closest('.bid-detail-link');
@@ -1440,6 +1499,196 @@
 			return div.innerHTML;
 		}
 
+		function hideEntitySuggestions() {
+			const ul = document.getElementById('edit_entity_results');
+			const s = document.getElementById('edit_entity_search');
+			if (!ul) return;
+			ul.hidden = true;
+			ul.innerHTML = '';
+			if (s) {
+				s.setAttribute('aria-expanded', 'false');
+			}
+		}
+
+		function applyEntityChoice(id, label) {
+			document.getElementById('edit_entity_id').value = String(id);
+			document.getElementById('edit_entity_search').value = label;
+			entityPickerSelectedLabel = label;
+		}
+
+		function highlightEntityPickRows(rows, activeIdx) {
+			rows.forEach((li, i) => {
+				const on = activeIdx >= 0 && i === activeIdx;
+				li.classList.toggle('entity-res-active', on);
+				li.setAttribute('aria-selected', on ? 'true' : 'false');
+			});
+		}
+
+		async function setNumEditEntityFromBid(entityRaw) {
+			const hidden = document.getElementById('edit_entity_id');
+			const search = document.getElementById('edit_entity_search');
+			if (!hidden || !search) return;
+			entityPickerSelectedLabel = '';
+			const idStr = entityRaw !== null && entityRaw !== undefined && String(entityRaw) !== '' && String(entityRaw) !== '0'
+				? String(entityRaw) : '';
+			hidden.value = idStr;
+			hideEntitySuggestions();
+			if (!idStr) {
+				search.value = '';
+				return;
+			}
+			try {
+				const r = await fetch(entitySearchUrl + '?id=' + encodeURIComponent(idStr), {
+					headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
+				});
+				const data = await r.json();
+				if (data.resolved && data.resolved.label) {
+					search.value = data.resolved.label;
+					entityPickerSelectedLabel = data.resolved.label;
+				} else {
+					search.value = 'Entity #' + idStr;
+					entityPickerSelectedLabel = search.value;
+				}
+			} catch (_e) {
+				search.value = 'Entity #' + idStr;
+				entityPickerSelectedLabel = search.value;
+			}
+		}
+
+		async function runEntitySuggestionFetch(query) {
+			const ul = document.getElementById('edit_entity_results');
+			const search = document.getElementById('edit_entity_search');
+			if (!ul || !search) return;
+
+			entityPickerReq += 1;
+			const seq = entityPickerReq;
+			let data;
+			try {
+				const r = await fetch(entitySearchUrl + '?q=' + encodeURIComponent(query) + '&limit=40', {
+					headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
+				});
+				data = await r.json();
+			} catch (_e) {
+				return;
+			}
+			if (seq !== entityPickerReq || search.value.trim() !== query) return;
+
+			ul.innerHTML = '';
+			const items = Array.isArray(data.results) ? data.results : [];
+			if (!items.length) {
+				const li = document.createElement('li');
+				li.style.padding = '0.6rem';
+				li.style.color = '#6b7280';
+				li.textContent = 'No matches.';
+				ul.appendChild(li);
+			} else {
+				items.forEach(function (row) {
+					const li = document.createElement('li');
+					li.setAttribute('role', 'option');
+					li.dataset.entityId = String(row.id);
+					const lab = row.label || ('#' + row.id);
+					li.dataset.entityLabel = lab;
+					li.textContent = lab;
+					ul.appendChild(li);
+				});
+			}
+			ul.hidden = false;
+			search.setAttribute('aria-expanded', 'true');
+			highlightEntityPickRows([...ul.children].filter((li) => li.dataset.entityId), -1);
+		}
+
+		function bindEntityPickerAutocomplete() {
+			const hidden = document.getElementById('edit_entity_id');
+			const search = document.getElementById('edit_entity_search');
+			const ul = document.getElementById('edit_entity_results');
+			if (!hidden || !search || !ul || ul.dataset.bound === '1') return;
+			ul.dataset.bound = '1';
+
+			let timer = null;
+			let hl = -1;
+
+			search.addEventListener('input', function () {
+				hl = -1;
+				if (entityPickerSelectedLabel !== '' && search.value !== entityPickerSelectedLabel) {
+					hidden.value = '';
+				}
+				clearTimeout(timer);
+				const q = search.value.trim();
+				if (!q.length) {
+					hideEntitySuggestions();
+					return;
+				}
+				timer = setTimeout(function () {
+					runEntitySuggestionFetch(q);
+				}, 280);
+			});
+
+			search.addEventListener('keydown', function (e) {
+				const picks = [...ul.children].filter((li) => li.dataset.entityId);
+				if (!picks.length || ul.hidden) {
+					return;
+				}
+				if (e.key === 'ArrowDown') {
+					e.preventDefault();
+					if (hl < 0 || hl >= picks.length) {
+						hl = 0;
+					} else {
+						hl = (hl >= picks.length - 1 ? 0 : hl + 1);
+					}
+					highlightEntityPickRows(picks, hl);
+				} else if (e.key === 'ArrowUp') {
+					e.preventDefault();
+					if (hl <= 0) {
+						hl = picks.length - 1;
+					} else {
+						hl = hl - 1;
+					}
+					highlightEntityPickRows(picks, hl);
+				} else if (e.key === 'Enter' && hl >= 0 && picks[hl]) {
+					e.preventDefault();
+					const li = picks[hl];
+					applyEntityChoice(li.dataset.entityId, li.dataset.entityLabel || '');
+					hideEntitySuggestions();
+					hl = -1;
+				} else if (e.key === 'Escape') {
+					hideEntitySuggestions();
+					hl = -1;
+				}
+			});
+
+			ul.addEventListener('mousedown', function (ev) {
+				const li = ev.target.closest && ev.target.closest('li[data-entity-id]');
+				if (li) ev.preventDefault();
+			});
+
+			ul.addEventListener('click', function (ev) {
+				const li = ev.target.closest('li[data-entity-id]');
+				if (!li) return;
+				applyEntityChoice(li.dataset.entityId, li.dataset.entityLabel || '');
+				hideEntitySuggestions();
+				hl = -1;
+			});
+
+			document.getElementById('edit_entity_clear')?.addEventListener('click', function () {
+				hidden.value = '';
+				search.value = '';
+				entityPickerSelectedLabel = '';
+				hideEntitySuggestions();
+				hl = -1;
+			});
+
+			search.addEventListener('blur', function () {
+				setTimeout(hideEntitySuggestions, 220);
+				hl = -1;
+			});
+		}
+
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', bindEntityPickerAutocomplete);
+		} else {
+			bindEntityPickerAutocomplete();
+		}
+
 		function openEditModal(idx, sourceList = 'bids') {
 			const list = sourceList === 'noentities' ? noEntityBidsData : bidsData;
 			const b = list[idx];
@@ -1472,7 +1721,7 @@
 			document.getElementById('edit_needs_review').checked = !!b.NEEDS_REVIEW;
 			document.getElementById('edit_under_review').checked = !!b.UNDERREVIEW;
 			setNum('edit_category_id', b.CATEGORYID);
-			setNum('edit_entity_id', b.ENTITYID);
+			setNumEditEntityFromBid(b.ENTITYID);
 			setNum('edit_subscription_type_id', b.SUBSCRIPTIONTYPEID);
 			const userSel = document.getElementById('edit_user_id');
 			if (userSel) {

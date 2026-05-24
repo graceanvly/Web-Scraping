@@ -199,14 +199,195 @@ class BidReferenceLookupService
 		return $this->bestEntityIdByNameHints($rows, $idCol, $nameCols, $nameHints);
 	}
 
-	private function cachedEntities(): Collection
+	/**
+	 * Entity master table + column mapping for selectable queries / caches.
+	 *
+	 * @return array{table:string, id_col:string, email_cols:array<int, string>, name_cols:array<int, string>, web_cols:array<int, string>, cols:array<int, string>}|null
+	 */
+	private function entitySelectableSpec(): ?array
 	{
-		$table = (string) $this->cfg('entity_table', 'entity');
-		$idCol = (string) $this->cfg('entity_id_column', 'id');
+		$table = trim((string) $this->cfg('entity_table', 'entity'));
+		$idCol = trim((string) $this->cfg('entity_id_column', 'id'));
+		if ($table === '' || $idCol === '') {
+			return null;
+		}
+
 		$emailCols = array_values(array_unique(array_filter((array) $this->cfg('entity_email_columns', ['email']), fn ($c) => (string) trim((string) $c) !== '')));
 		$nameCols = array_values(array_unique(array_filter((array) $this->cfg('entity_name_columns', ['name']), fn ($c) => (string) trim((string) $c) !== '')));
 		$webCols = array_values(array_unique(array_filter((array) $this->cfg('entity_website_columns', []), fn ($c) => (string) trim((string) $c) !== '')));
 		$cols = array_values(array_unique(array_filter(array_merge([$idCol], $emailCols, $nameCols, $webCols), fn ($c) => (string) trim((string) $c) !== '')));
+		if ($cols === []) {
+			return null;
+		}
+
+		return [
+			'table' => $table,
+			'id_col' => $idCol,
+			'email_cols' => $emailCols,
+			'name_cols' => $nameCols,
+			'web_cols' => $webCols,
+			'cols' => $cols,
+		];
+	}
+
+	/**
+	 * One row formatted for bid edit autocomplete (resolve display label by id).
+	 *
+	 * @return array{id: int|string, label: string}|null
+	 */
+	public function getEntityOptionById(int $entityId): ?array
+	{
+		if (!$this->cfg('entity_resolve_enabled', true) || $entityId < 1) {
+			return null;
+		}
+
+		$spec = $this->entitySelectableSpec();
+		if ($spec === null) {
+			return null;
+		}
+
+		try {
+			$row = DB::table($spec['table'])
+				->select($spec['cols'])
+				->where($spec['id_col'], $entityId)
+				->first();
+		} catch (\Throwable $e) {
+			Log::warning('BidReferenceLookup: entity lookup failed', [
+				'table' => $spec['table'],
+				'error' => $e->getMessage(),
+			]);
+
+			return null;
+		}
+
+		if (!is_object($row)) {
+			return null;
+		}
+
+		return $this->entityRowToSelectOption($row, $spec['id_col'], $spec['name_cols'], $spec['email_cols']);
+	}
+
+	/**
+	 * Typeahead rows for ENTITYID on bid edit modal.
+	 *
+	 * @return array<int, array{id: int|string, label: string}>
+	 */
+	public function searchEntitiesForSelect(string $query, int $limit = 40): array
+	{
+		if (!$this->cfg('entity_resolve_enabled', true)) {
+			return [];
+		}
+
+		$spec = $this->entitySelectableSpec();
+		if ($spec === null) {
+			return [];
+		}
+
+		$limit = max(5, min(100, $limit));
+		$table = $spec['table'];
+		$idCol = $spec['id_col'];
+		$nameCols = $spec['name_cols'];
+		$emailCols = $spec['email_cols'];
+
+		try {
+			$builder = DB::table($table)->select($spec['cols']);
+			$needle = preg_replace('/[%_\\\\]/', '', mb_substr(trim($query), 0, 160));
+
+			if ($needle !== '') {
+				$builder->where(function ($w) use ($needle, $idCol, $nameCols, $emailCols) {
+					foreach ($nameCols as $col) {
+						$w->orWhere($col, 'like', '%' . $needle . '%');
+					}
+					foreach ($emailCols as $col) {
+						$w->orWhere($col, 'like', '%' . $needle . '%');
+					}
+					if (preg_match('/^\d+$/', trim($needle))) {
+						$w->orWhere($idCol, (int) $needle);
+					}
+				});
+			}
+
+			$builder->orderBy($idCol);
+			$rows = collect($builder->limit($limit)->get());
+		} catch (\Throwable $e) {
+			Log::warning('BidReferenceLookup: entity search failed', [
+				'table' => $table,
+				'error' => $e->getMessage(),
+			]);
+
+			return [];
+		}
+
+		$out = [];
+		foreach ($rows as $row) {
+			$opt = $this->entityRowToSelectOption($row, $idCol, $nameCols, $emailCols);
+			if ($opt !== null) {
+				$out[] = $opt;
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * @param array<int, string> $nameCols
+	 * @param array<int, string> $emailCols
+	 * @return array{id: int|string, label: string}|null
+	 */
+	private function entityRowToSelectOption(object $row, string $idCol, array $nameCols, array $emailCols): ?array
+	{
+		$idRaw = $this->rowAttr($row, $idCol);
+		if ($idRaw === null || $idRaw === '') {
+			return null;
+		}
+
+		$nameChunks = [];
+		foreach ($nameCols as $col) {
+			$v = $this->rowAttr($row, $col);
+			if ($v === null) {
+				continue;
+			}
+			$t = trim(preg_replace('/\s+/u', ' ', (string) $v));
+			if ($t !== '') {
+				$nameChunks[$t] = true;
+			}
+		}
+		$name = implode(' ', array_keys($nameChunks));
+		if ($name === '') {
+			$name = 'Entity';
+		}
+
+		$emailShow = '';
+		foreach ($emailCols as $col) {
+			$v = $this->rowAttr($row, $col);
+			if ($v === null) {
+				continue;
+			}
+			$t = strtolower(trim(strip_tags((string) $v)));
+			if ($t !== '' && filter_var($t, FILTER_VALIDATE_EMAIL)) {
+				$emailShow = $t;
+
+				break;
+			}
+		}
+
+		$labelSuffix = $emailShow !== '' ? ' · ' . $emailShow : '';
+
+		return [
+			'id' => is_numeric($idRaw) ? (int) $idRaw : (string) $idRaw,
+			'label' => $name . ' (#' . (string) $idRaw . ')' . $labelSuffix,
+		];
+	}
+
+	private function cachedEntities(): Collection
+	{
+		$spec = $this->entitySelectableSpec();
+		if ($spec === null) {
+			return collect();
+		}
+
+		$table = $spec['table'];
+		$cols = $spec['cols'];
 
 		$key = 'scraper.entities.' . md5(json_encode(compact('table', 'cols')));
 

@@ -29,6 +29,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/bids/{bid}', [BidController::class, 'show'])->name('bids.show');
     Route::put('/bids/{bid}', [BidController::class, 'update'])->name('bids.update');
     Route::delete('/bids/{bid}', [BidController::class, 'destroy'])->name('bids.destroy');
+    Route::get('/reference/entities', [BidController::class, 'referenceEntitiesSearch'])->name('bids.reference.entities');
     Route::post('/bidurl/scrape-all', [BidController::class, 'scrapeAll'])->name('bidurl.scrapeAll');
     Route::get('/scrape-stream', [BidController::class, 'scrapeStream'])->name('bidurl.scrapeStream');
     Route::get('/scrape-url-stream', [BidController::class, 'scrapeUrlStream'])->name('bids.scrapeUrlStream');
