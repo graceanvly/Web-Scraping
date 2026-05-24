@@ -1285,7 +1285,8 @@
 					<p class="edit-field-full" style="margin:0.5rem 0 0; font-size:0.85rem; font-weight:700; color:#374151;">IDs</p>
 
 					<div class="edit-field-full entity-picker-wrap">
-						<label for="edit_entity_search">Entity <span style="font-weight:400; color:#6b7280;">(ENTITYID)</span></label>
+						<label for="edit_entity_search">Entity <span style="font-weight:400; color:#6b7280;">(ENTITYID)</span>
+							<span id="edit_entity_id_hint" style="margin-left:0.35rem; font-weight:500; font-size:0.82rem; color:#0369a1; white-space:nowrap;" aria-live="polite"></span></label>
 						<input type="hidden" id="edit_entity_id" name="ENTITYID" value="">
 						<div class="entity-picker-inner">
 							<input type="search" id="edit_entity_search" autocomplete="off" autocorrect="off"
@@ -1499,6 +1500,18 @@
 			return div.innerHTML;
 		}
 
+		function refreshEntityIdHint() {
+			const hint = document.getElementById('edit_entity_id_hint');
+			const hidden = document.getElementById('edit_entity_id');
+			if (!hint || !hidden) return;
+			const raw = hidden.value.trim();
+			if (raw !== '' && raw !== '0') {
+				hint.textContent = '· Assigned #' + raw;
+			} else {
+				hint.textContent = '· No ENTITYID assigned';
+			}
+		}
+
 		function hideEntitySuggestions() {
 			const ul = document.getElementById('edit_entity_results');
 			const s = document.getElementById('edit_entity_search');
@@ -1514,6 +1527,7 @@
 			document.getElementById('edit_entity_id').value = String(id);
 			document.getElementById('edit_entity_search').value = label;
 			entityPickerSelectedLabel = label;
+			refreshEntityIdHint();
 		}
 
 		function highlightEntityPickRows(rows, activeIdx) {
@@ -1535,8 +1549,10 @@
 			hideEntitySuggestions();
 			if (!idStr) {
 				search.value = '';
+				refreshEntityIdHint();
 				return;
 			}
+			refreshEntityIdHint();
 			try {
 				const r = await fetch(entitySearchUrl + '?id=' + encodeURIComponent(idStr), {
 					headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
@@ -1611,6 +1627,7 @@
 				hl = -1;
 				if (entityPickerSelectedLabel !== '' && search.value !== entityPickerSelectedLabel) {
 					hidden.value = '';
+					refreshEntityIdHint();
 				}
 				clearTimeout(timer);
 				const q = search.value.trim();
@@ -1673,6 +1690,7 @@
 				hidden.value = '';
 				search.value = '';
 				entityPickerSelectedLabel = '';
+				refreshEntityIdHint();
 				hideEntitySuggestions();
 				hl = -1;
 			});
