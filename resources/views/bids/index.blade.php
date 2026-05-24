@@ -1217,7 +1217,11 @@
 						<input type="text" id="edit_title" name="TITLE" required maxlength="255">
 					</div>
 					<div class="edit-field-full">
-						<label for="edit_url">URL</label>
+						<div style="display:flex; align-items:center; gap:0.65rem; margin-bottom:0.35rem; flex-wrap:wrap;">
+							<label for="edit_url" style="margin:0;">URL</label>
+							<button type="button" id="edit_url_open_btn" class="secondary"
+								style="margin:0; padding:0.25rem 0.65rem; font-size:0.82rem;">Open</button>
+						</div>
 						<input type="text" id="edit_url" name="URL" maxlength="2048" placeholder="https://…">
 					</div>
 					<div class="edit-field-full">
@@ -1706,6 +1710,25 @@
 		} else {
 			bindEntityPickerAutocomplete();
 		}
+
+		document.getElementById('edit_url_open_btn')?.addEventListener('click', function () {
+			const input = document.getElementById('edit_url');
+			if (!input) return;
+			const raw = (input.value || '').trim();
+			if (!raw) return;
+			if (/^\s*javascript:/i.test(raw) || raw.startsWith('data:')) return;
+			let href = raw;
+			if (!/^https?:\/\//i.test(href)) {
+				href = 'https://' + href.replace(/^\/+/, '');
+			}
+			try {
+				const u = new URL(href);
+				if (u.protocol !== 'http:' && u.protocol !== 'https:') return;
+				window.open(u.href, '_blank', 'noopener,noreferrer');
+			} catch (_e) {
+				/* ignore malformed URLs */
+			}
+		});
 
 		function openEditModal(idx, sourceList = 'bids') {
 			const list = sourceList === 'noentities' ? noEntityBidsData : bidsData;
