@@ -1947,6 +1947,14 @@
 			progressLog.innerHTML = '';
 
 			let total = 0;
+			let bulkCurrentUrl = '';
+
+			function bulkProgressStepHtml(stepEscapedFragment) {
+				const top = bulkCurrentUrl
+					? '<div style="font-size:0.76rem;color:#64748b;word-break:break-all;margin-bottom:0.35rem;line-height:1.35;">' + escapeHtml(bulkCurrentUrl) + '</div>'
+					: '';
+				return top + '<div><span style="color:#2563eb;">Processing:</span> ' + stepEscapedFragment + '</div>';
+			}
 
 			let streamUrl = "{{ route('bidurl.scrapeStream') }}";
 			const au = document.getElementById('scrapeAssignUserId')?.value?.trim();
@@ -1997,24 +2005,27 @@
 				switch (ev.type) {
 					case 'start':
 						stopBulkStepElapsed();
+						bulkCurrentUrl = '';
 						total = ev.total;
 						progressTitle.textContent = 'Scraping ' + total + ' URL(s)...';
 						break;
 
 					case 'processing':
+						bulkCurrentUrl = ev.url || '';
 						restartBulkStepElapsed();
 						progressCounter.textContent = ev.index + ' / ' + total;
 						progressBar.style.width = Math.round((ev.index / total) * 100) + '%';
-						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtml(ev.url);
+						progressUrl.innerHTML = bulkProgressStepHtml(escapeHtml(ev.url));
 						break;
 
 					case 'status':
 						restartBulkStepElapsed();
-						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtml(ev.step);
+						progressUrl.innerHTML = bulkProgressStepHtml(escapeHtml(ev.step));
 						break;
 
 					case 'skip':
 						stopBulkStepElapsed();
+						bulkCurrentUrl = '';
 						progressCounter.textContent = ev.index + ' / ' + total;
 						progressBar.style.width = Math.round((ev.index / total) * 100) + '%';
 						addLogLine('Skipped: ' + ev.url + ' (' + ev.reason + ')', '#9ca3af');
@@ -2027,11 +2038,13 @@
 
 					case 'error':
 						stopBulkStepElapsed();
+						bulkCurrentUrl = '';
 						addLogLine('Error: ' + ev.url + ' — ' + ev.message, '#dc2626');
 						break;
 
 					case 'complete':
 						stopBulkStepElapsed();
+						bulkCurrentUrl = '';
 						progressBar.style.width = '100%';
 						progressBar.style.background = '#16a34a';
 						let msg = ev.total_saved + ' new bid(s) saved.';
@@ -2115,7 +2128,10 @@
 			progressCounter.textContent = '';
 			progressBar.style.width = '30%';
 			progressBar.style.background = '#2563eb';
-			progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtmlGlobal(url);
+			progressUrl.innerHTML =
+				'<div style="font-size:0.76rem;color:#64748b;word-break:break-all;margin-bottom:0.35rem;line-height:1.35;">'
+				+ escapeHtmlGlobal(url) + '</div>'
+				+ '<div><span style="color:#2563eb;">Processing:</span> Connecting…</div>';
 			restartSingleStepElapsed();
 			progressLog.innerHTML = '';
 
@@ -2168,7 +2184,10 @@
 					case 'status':
 						restartSingleStepElapsed();
 						progressBar.style.width = '50%';
-						progressUrl.innerHTML = '<span style="color:#2563eb;">Processing:</span> ' + escapeHtmlGlobal(ev.step);
+						progressUrl.innerHTML =
+							'<div style="font-size:0.76rem;color:#64748b;word-break:break-all;margin-bottom:0.35rem;line-height:1.35;">'
+							+ escapeHtmlGlobal(url) + '</div>'
+							+ '<div><span style="color:#2563eb;">Processing:</span> ' + escapeHtmlGlobal(ev.step) + '</div>';
 						break;
 					case 'saved_bid':
 						addSingleLogLine('Saved: ' + ev.title, '#16a34a');
