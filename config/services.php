@@ -1,6 +1,9 @@
 <?php
 
 $openAiExtractTimeout = max(30.0, (float) env('OPENAI_HTTP_TIMEOUT', 300));
+// OpenAI: read here (not via env() in services) so php artisan config:cache works. Default stream avoids
+// Guzzle CurlHandler + libcurl "curl_setopt_array … invalid cURL options" on some PHP builds.
+$openAiHttpHandler = strtolower(trim((string) env('OPENAI_HTTP_HANDLER', 'stream')));
 
 return [
 
@@ -43,6 +46,10 @@ return [
         // Title rewrite payloads are smaller; fail faster if the API stalls.
         'http_timeout_rewrite' => max(30.0, (float) env('OPENAI_HTTP_TIMEOUT_REWRITE', 120)),
         'http_connect_timeout' => max(5.0, (float) env('OPENAI_HTTP_CONNECT_TIMEOUT', 30)),
+        /** Guzzle StreamHandler when true; set OPENAI_HTTP_HANDLER=curl to force CurlHandler. */
+        'http_use_stream' => $openAiHttpHandler !== 'curl',
+        'extract_heartbeat' => filter_var(env('OPENAI_EXTRACT_HEARTBEAT', false), FILTER_VALIDATE_BOOL),
+        'extract_heartbeat_sec' => max(15, min(120, (int) env('OPENAI_EXTRACT_HEARTBEAT_SEC', 22))),
     ],
 
 ];

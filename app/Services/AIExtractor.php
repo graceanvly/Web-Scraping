@@ -26,7 +26,7 @@ class AIExtractor
 		$timeoutRewrite = max(30.0, (float) config('services.openai.http_timeout_rewrite', 120));
 		$connectTimeout = max(5.0, (float) config('services.openai.http_connect_timeout', 30));
 
-		$forceOpenAiStreams = strtolower(trim((string) env('OPENAI_HTTP_HANDLER', ''))) === 'stream';
+		$forceOpenAiStreams = (bool) config('services.openai.http_use_stream', true);
 
 		$extractOpts = [
 			'timeout' => $timeoutExtract,
@@ -720,11 +720,11 @@ SYS;
 		if ($heartbeatCb === null || !is_callable($heartbeatCb) || !extension_loaded('curl')) {
 			return;
 		}
-		if (!filter_var(env('OPENAI_EXTRACT_HEARTBEAT', false), FILTER_VALIDATE_BOOL)) {
+		if (!config('services.openai.extract_heartbeat', false)) {
 			return;
 		}
 
-		$interval = max(15, min(120, (int) env('OPENAI_EXTRACT_HEARTBEAT_SEC', 22)));
+		$interval = (int) config('services.openai.extract_heartbeat_sec', 22);
 
 		$lastFire = $waitStartedAt;
 
@@ -768,6 +768,9 @@ SYS;
 		foreach ($chain as $t) {
 			$m = strtolower($t->getMessage());
 			if (str_contains($m, 'curl_setopt_array')) {
+				return true;
+			}
+			if (str_contains($m, 'valid curl options')) {
 				return true;
 			}
 			if ($t instanceof \ValueError && str_contains($m, 'curl')) {
