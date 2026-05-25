@@ -45,7 +45,7 @@ class ScraperService
 			'Sec-Ch-Ua-Platform' => '"Windows"',
 			'Cache-Control' => 'max-age=0',
 		];
-		$cookieHeader = trim((string) env('SCRAPER_COOKIE', ''));
+		$cookieHeader = trim((string) config('scraper.scraper_cookie', ''));
 		if ($cookieHeader !== '') {
 			$headers['Cookie'] = $cookieHeader;
 		}
@@ -1436,7 +1436,7 @@ class ScraperService
 			$env['Path'] = dirname($nodeBin) . PATH_SEPARATOR . $env['Path'];
 		}
 
-		$puppeteerCache = trim((string) env('PUPPETEER_CACHE_DIR', ''));
+		$puppeteerCache = trim((string) config('scraper.puppeteer_cache_dir', ''));
 		if ($puppeteerCache === '' && !$isWindows) {
 			$puppeteerCache = storage_path('app/puppeteer-cache');
 		}
@@ -1446,31 +1446,31 @@ class ScraperService
 
 		$env['CHROME_CRASHPAD_DISABLED'] = '1';
 
-		if (filter_var(env('SCRAPER_CHROME_SINGLE_PROCESS', false), FILTER_VALIDATE_BOOLEAN)) {
+		if (filter_var(config('scraper.chrome_single_process', false), FILTER_VALIDATE_BOOLEAN)) {
 			$env['SCRAPER_CHROME_SINGLE_PROCESS'] = 'true';
 		}
-		$chromeUserData = trim((string) env('SCRAPER_CHROME_USER_DATA_DIR', ''));
+		$chromeUserData = trim((string) config('scraper.chrome_user_data_dir', ''));
 		if ($chromeUserData !== '') {
 			$env['SCRAPER_CHROME_USER_DATA_DIR'] = $chromeUserData;
 		}
 
-		$headlessOpt = trim((string) env('SCRAPER_CHROME_HEADLESS', ''));
+		$headlessOpt = trim((string) config('scraper.chrome_headless', ''));
 		if ($headlessOpt !== '') {
 			$env['SCRAPER_CHROME_HEADLESS'] = $headlessOpt;
 		}
-		if (filter_var(env('SCRAPER_CHROME_PIPE', false), FILTER_VALIDATE_BOOLEAN)) {
+		if (filter_var(config('scraper.chrome_pipe', false), FILTER_VALIDATE_BOOLEAN)) {
 			$env['SCRAPER_CHROME_PIPE'] = 'true';
 		}
-		$puppeteerExe = trim((string) env('PUPPETEER_EXECUTABLE_PATH', ''));
+		$puppeteerExe = trim((string) config('scraper.puppeteer_executable_path', ''));
 		if ($puppeteerExe !== '') {
 			$env['PUPPETEER_EXECUTABLE_PATH'] = $puppeteerExe;
 		}
-		$scraperChromeExe = trim((string) env('SCRAPER_CHROME_EXECUTABLE', ''));
+		$scraperChromeExe = trim((string) config('scraper.chrome_executable', ''));
 		if ($scraperChromeExe !== '') {
 			$env['SCRAPER_CHROME_EXECUTABLE'] = $scraperChromeExe;
 		}
 
-		$cookieHeader = trim((string) env('SCRAPER_COOKIE', ''));
+		$cookieHeader = trim((string) config('scraper.scraper_cookie', ''));
 		if ($cookieHeader !== '') {
 			$env['SCRAPER_COOKIE'] = $cookieHeader;
 		}

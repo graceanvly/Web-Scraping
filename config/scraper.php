@@ -96,4 +96,20 @@ return [
 	'ai_bulk_bid_page_pdf_text_chars' => max(2000, min(48000, (int) env('SCRAPER_AI_BULK_BID_PAGE_PDF_TEXT_CHARS', 9000))),
 	/** After per-field truncation, proportional shrink if combined bid-page excerpts still exceed this (bulk_mode only). */
 	'ai_bulk_bid_pages_total_budget_chars' => max(6000, min(200000, (int) env('SCRAPER_AI_BULK_PAGES_TOTAL_CHARS', 34000))),
+
+	/*
+	|--------------------------------------------------------------------------
+	| Puppeteer / Chrome (passed to Node; must use config() — not env() in services — when config:cached)
+	|--------------------------------------------------------------------------
+	*/
+	'puppeteer_cache_dir' => trim((string) env('PUPPETEER_CACHE_DIR', '')),
+	'chrome_single_process' => filter_var(env('SCRAPER_CHROME_SINGLE_PROCESS', false), FILTER_VALIDATE_BOOLEAN),
+	/** Writable base dir for ephemeral profiles (e.g. /tmp/chrome-scraper on EC2). */
+	'chrome_user_data_dir' => trim((string) env('SCRAPER_CHROME_USER_DATA_DIR', '')),
+	/** Empty = puppeteer-launch default; try "shell" if Chrome fails on Linux. */
+	'chrome_headless' => trim((string) env('SCRAPER_CHROME_HEADLESS', '')),
+	'chrome_pipe' => filter_var(env('SCRAPER_CHROME_PIPE', false), FILTER_VALIDATE_BOOLEAN),
+	'puppeteer_executable_path' => trim((string) env('PUPPETEER_EXECUTABLE_PATH', '')),
+	'chrome_executable' => trim((string) env('SCRAPER_CHROME_EXECUTABLE', '')),
+	'scraper_cookie' => trim((string) env('SCRAPER_COOKIE', '')),
 ];
