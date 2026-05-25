@@ -6,6 +6,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Handler\StreamHandler;
 use Illuminate\Support\Facades\Log;
+use Psr\Http\Message\ResponseInterface;
 
 class AIExtractor
 {
@@ -169,25 +170,40 @@ SYS;
 			'temperature' => 0.1,
 		];
 
+		$streamHeartbeatCb = is_callable($options['openai_heartbeat'] ?? null) ? $options['openai_heartbeat'] : null;
+		$postBody = $body;
+		if ($streamHeartbeatCb !== null) {
+			$postBody['stream'] = true;
+		}
+
 		$requestOptions = [
 			'headers' => [
 				'Authorization' => 'Bearer ' . $this->apiKey,
 				'Content-Type' => 'application/json',
 			],
-			'body' => json_encode($body),
+			'body' => json_encode($postBody),
 		];
 		if ($bulkTimeout !== null) {
 			$requestOptions['timeout'] = $bulkTimeout;
 		}
 
 		$extractWaitStarted = microtime(true);
-		$this->attachOpenAiExtractHeartbeatCurl($requestOptions, $options['openai_heartbeat'] ?? null, $extractWaitStarted);
+		// CURL progress pings conflict with streamed responses — use streamed chunks + pulse below instead.
+		$this->attachOpenAiExtractHeartbeatCurl(
+			$requestOptions,
+			$streamHeartbeatCb !== null ? null : ($options['openai_heartbeat'] ?? null),
+			$extractWaitStarted
+		);
 
 		$chatHttpClient = $this->httpClient;
 		$attemptedStreamAfterCurlSetoptFailure = false;
 		while (true) {
 			try {
-				$response = $chatHttpClient->post('https://api.openai.com/v1/chat/completions', $requestOptions);
+				$reqEffective = $requestOptions;
+				if ($streamHeartbeatCb !== null) {
+					$reqEffective['stream'] = true;
+				}
+				$response = $chatHttpClient->post('https://api.openai.com/v1/chat/completions', $reqEffective);
 				break;
 			} catch (\GuzzleHttp\Exception\ClientException $e) {
 				$status = $e->getResponse()?->getStatusCode();
@@ -235,9 +251,21 @@ SYS;
 			}
 		}
 
-		$json = json_decode((string) $response->getBody(), true);
-		$content = $json['choices'][0]['message']['content'] ?? '{}';
+		if ($streamHeartbeatCb !== null) {
+			Log::info('AI bid extract streamed from OpenAI (SSE progress pings)', ['url' => $URL]);
+			$content = $this->drainOpenAiChatCompletionStream($response, $streamHeartbeatCb, $extractWaitStarted);
+		} else {
+			$json = json_decode((string) $response->getBody(), true);
+			$content = is_array($json) ? ($json['choices'][0]['message']['content'] ?? '{}') : '{}';
+		}
+		if ($content === '') {
+			$content = '{}';
+		}
 		$data = json_decode($content, true);
+		if (!is_array($data)) {
+			Log::warning('AI extract assistant JSON decode failed', ['url' => $URL, 'snippet' => mb_substr($content, 0, 400)]);
+			$data = [];
+		}
 
 		$bids = $data['bids'] ?? [];
 
@@ -457,6 +485,86 @@ SYS;
 
 			return $this->openAiChatCompletionsStreamClient()->post('https://api.openai.com/v1/chat/completions', $requestOptions);
 		}
+	}
+
+	/**
+	 * Read OpenAI chat.completion.chunk SSE lines and assemble assistant JSON text while firing progress callback.
+	 * Used when scrape SSE needs pulses but Guzzle uses StreamHandler (no CURLOPT progress).
+	 *
+	 * @param callable(int $elapsedSeconds):void $pulseCb
+	 */
+	private function drainOpenAiChatCompletionStream(ResponseInterface $response, callable $pulseCb, float $waitStartedAt): string
+	{
+		$pulseEvery = max(12, min(90, (int) config('services.openai.extract_heartbeat_sec', 22)));
+		$lastPulse = microtime(true);
+		$accum = '';
+		$lineBuf = '';
+		$done = false;
+		$stream = $response->getBody();
+
+		while (!$stream->eof()) {
+			$tick = microtime(true);
+			if (($tick - $lastPulse) >= $pulseEvery) {
+				try {
+					($pulseCb)(max(0, (int) round($tick - $waitStartedAt)));
+				} catch (\Throwable) {
+				}
+				$lastPulse = $tick;
+			}
+
+			$chunk = $stream->read(2048);
+			if ($chunk === '') {
+				continue;
+			}
+			$lineBuf .= $chunk;
+			while (($pos = strpos($lineBuf, "\n")) !== false) {
+				$line = trim(substr($lineBuf, 0, $pos));
+				$lineBuf = substr($lineBuf, $pos + 1);
+				if ($line === '' || !str_starts_with($line, 'data:')) {
+					continue;
+				}
+				$payload = trim(substr($line, 5));
+				if ($payload === '[DONE]') {
+					$done = true;
+					break;
+				}
+				$evt = json_decode($payload, true);
+				if (!is_array($evt)) {
+					continue;
+				}
+				if (!empty($evt['error'])) {
+					$err = $evt['error'];
+					$msg = is_array($err) ? (string) ($err['message'] ?? json_encode($err, JSON_UNESCAPED_UNICODE)) : (string) $err;
+
+					throw new \RuntimeException('AI error: ' . $msg);
+				}
+				$delta = $evt['choices'][0]['delta'] ?? null;
+				if (is_array($delta) && isset($delta['content']) && is_string($delta['content'])) {
+					$accum .= $delta['content'];
+				}
+			}
+			if ($done) {
+				break;
+			}
+		}
+
+		if (!$done && trim($lineBuf) !== '') {
+			$line = trim($lineBuf);
+			if (str_starts_with($line, 'data:')) {
+				$payload = trim(substr($line, 5));
+				if ($payload !== '' && $payload !== '[DONE]') {
+					$evt = json_decode($payload, true);
+					if (is_array($evt) && isset($evt['choices'][0]['delta']['content'])) {
+						$d = $evt['choices'][0]['delta']['content'];
+						if (is_string($d)) {
+							$accum .= $d;
+						}
+					}
+				}
+			}
+		}
+
+		return $accum;
 	}
 
 	private function extractTitleFromUrl(string $URL): string

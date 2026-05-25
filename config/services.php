@@ -48,7 +48,8 @@ return [
         'http_connect_timeout' => max(5.0, (float) env('OPENAI_HTTP_CONNECT_TIMEOUT', 30)),
         /** Guzzle StreamHandler when true; set OPENAI_HTTP_HANDLER=curl to force CurlHandler. */
         'http_use_stream' => $openAiHttpHandler !== 'curl',
-        'extract_heartbeat' => filter_var(env('OPENAI_EXTRACT_HEARTBEAT', false), FILTER_VALIDATE_BOOL),
+        'extract_heartbeat' => filter_var(env('OPENAI_EXTRACT_HEARTBEAT', false), FILTER_VALIDATE_BOOLEAN),
+        /** Also throttles scrape-stream “still running” pings when OpenAI uses streamed chat completions (StreamHandler). */
         'extract_heartbeat_sec' => max(15, min(120, (int) env('OPENAI_EXTRACT_HEARTBEAT_SEC', 22))),
     ],
 
