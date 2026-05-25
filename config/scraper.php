@@ -105,6 +105,8 @@ return [
 	'pdf_timeout' => max(15, min(300, (int) env('SCRAPER_PDF_TIMEOUT', 60))),
 	/** Cap Smalot + pdftotext fallback wall time per PDF (misbehaving binaries can hang PHP indefinitely). */
 	'pdf_parse_timeout_sec' => max(10, min(300, (int) env('SCRAPER_PDF_PARSE_TIMEOUT', 45))),
+	/** Larger PDFs skip Smalot parse (often pathologically slow/hang); timed pdftotext only. */
+	'pdf_smalot_max_bytes' => max(32768, min(5242880, (int) env('SCRAPER_PDF_SMALOT_MAX_BYTES', 524288))),
 
 	/*
 	|--------------------------------------------------------------------------
