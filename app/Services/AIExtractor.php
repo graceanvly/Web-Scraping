@@ -636,7 +636,8 @@ SYS;
 
 	/**
 	 * Fire openai_heartbeat callback on a throttle while curl waits on OpenAI (keeps SSE from looking frozen).
-	 * No-op without ext-curl / callable; Guzzle+curl invokes progress during stalled downloads.
+	 * Uses CURLOPT_XFERINFOFUNCTION when available (CURLOPT_PROGRESSFUNCTION can fail curl_setopt_array on some PHP 8.4+/libcurl builds).
+	 * Set OPENAI_EXTRACT_HEARTBEAT=false to disable if your stack still errors.
 	 *
 	 * @param callable|null $heartbeatCb function (int $elapsedSeconds):void
 	 */
@@ -645,35 +646,40 @@ SYS;
 		if ($heartbeatCb === null || !is_callable($heartbeatCb) || !extension_loaded('curl')) {
 			return;
 		}
+		if (!filter_var(env('OPENAI_EXTRACT_HEARTBEAT', true), FILTER_VALIDATE_BOOL)) {
+			return;
+		}
 
 		$interval = max(15, min(120, (int) env('OPENAI_EXTRACT_HEARTBEAT_SEC', 22)));
 
 		$lastFire = $waitStartedAt;
 
+		$ping = function (...$_xferArgs) use ($heartbeatCb, $waitStartedAt, &$lastFire, $interval): int {
+			$now = microtime(true);
+			if (($now - $lastFire) < $interval) {
+				return 0;
+			}
+			$lastFire = $now;
+			try {
+				($heartbeatCb)(max(0, (int) round($now - $waitStartedAt)));
+			} catch (\Throwable) {
+				/* ignore SSE / controller errors */
+
+			}
+
+			return 0;
+		};
+
 		$curlOpts = [
 			\CURLOPT_NOPROGRESS => false,
-			\CURLOPT_PROGRESSFUNCTION => function (
-				mixed $_ch,
-				int $_downloadTotal,
-				int $_downloaded,
-				int $_uploadTotal,
-				int $_uploaded,
-			) use ($heartbeatCb, $waitStartedAt, &$lastFire, $interval): int {
-				$now = microtime(true);
-				if (($now - $lastFire) < $interval) {
-					return 0;
-				}
-				$lastFire = $now;
-				try {
-					($heartbeatCb)(max(0, (int) round($now - $waitStartedAt)));
-				} catch (\Throwable) {
-					/* ignore SSE / controller errors */
-
-				}
-
-				return 0;
-			},
 		];
+		if (\defined('CURLOPT_XFERINFOFUNCTION')) {
+			$curlOpts[\CURLOPT_XFERINFOFUNCTION] = $ping;
+		} elseif (\defined('CURLOPT_PROGRESSFUNCTION')) {
+			$curlOpts[\CURLOPT_PROGRESSFUNCTION] = $ping;
+		} else {
+			return;
+		}
 
 		// array_merge reindexes integer keys — would destroy CURLOPT_* constants and break curl_setopt_array.
 		$requestOptions['curl'] = array_replace($requestOptions['curl'] ?? [], $curlOpts);
