@@ -675,6 +675,7 @@ SYS;
 			},
 		];
 
-		$requestOptions['curl'] = array_merge($requestOptions['curl'] ?? [], $curlOpts);
+		// array_merge reindexes integer keys — would destroy CURLOPT_* constants and break curl_setopt_array.
+		$requestOptions['curl'] = array_replace($requestOptions['curl'] ?? [], $curlOpts);
 	}
 }
