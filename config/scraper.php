@@ -1,6 +1,15 @@
 <?php
 
-return [
+	return [
+
+	/*
+	|--------------------------------------------------------------------------
+	| Bid index (Oracle-safe listing)
+	|--------------------------------------------------------------------------
+	| Scraped bid_url rows can imply huge IN (...) lists — use EXISTS joins in code instead.
+	| Limit by CREATED to avoid scanning millions of bid rows unless ?historical=1.
+	*/
+	'bid_listing_recent_days' => max(0, min(3660, (int) env('SCRAPER_BID_LISTING_RECENT_DAYS', 180))), // 0 = no date window
 
 	/*
 	|--------------------------------------------------------------------------

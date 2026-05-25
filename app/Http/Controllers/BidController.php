@@ -34,16 +34,37 @@ class BidController extends Controller
 		$filterDate = trim((string) $request->query('date', ''));
 		$filterUserIdRaw = trim((string) ($request->query('userid')));
 		$showAll = $request->boolean('all');
+		$includeHistorical = $request->boolean('historical');
+		$bidListingRecentDays = (int) config('scraper.bid_listing_recent_days', 180);
 
-		$scrapedUrlIds = BidUrl::whereNotNull('last_scraped_at')->pluck('id')->all();
+		$hasScrapedBidUrls = BidUrl::whereNotNull('last_scraped_at')->exists();
 
-		if (empty($scrapedUrlIds)) {
+		$scopedToScrapedBidUrlExists = function (\Illuminate\Database\Eloquent\Builder $outer) {
+			$bidTable = (new Bid())->getTable();
+			$url = new BidUrl();
+			$urlTable = $url->getTable();
+			$urlPk = $url->getKeyName();
+
+			$outer->whereExists(function ($sub) use ($bidTable, $urlTable, $urlPk) {
+				$sub->selectRaw('1')
+					->from($urlTable)
+					->whereColumn("{$urlTable}.{$urlPk}", "{$bidTable}.BID_URL_ID")
+					->whereNotNull("{$urlTable}.last_scraped_at");
+			});
+
+			return $outer;
+		};
+
+		if (!$hasScrapedBidUrls) {
 			$bids = new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage);
 			$bids->withQueryString();
 			$noEntityBids = new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage);
 			$noEntityBids->withQueryString();
 		} else {
-			$applyBidListingFilters = function ($q) use ($search, $filterDate, $filterUserIdRaw) {
+			$applyBidListingFilters = function ($q) use ($search, $filterDate, $filterUserIdRaw, $includeHistorical, $bidListingRecentDays) {
+				if (!$includeHistorical && $bidListingRecentDays > 0) {
+					$q->where('CREATED', '>=', now()->subDays($bidListingRecentDays)->startOfDay());
+				}
 				if ($search !== '') {
 					$q->where(function ($q2) use ($search) {
 						$q2->where('TITLE', 'like', "%{$search}%")
@@ -59,14 +80,14 @@ class BidController extends Controller
 				}
 			};
 
-			$query = Bid::whereIn('BID_URL_ID', $scrapedUrlIds);
+			$query = $scopedToScrapedBidUrlExists(Bid::query());
 			$applyBidListingFilters($query);
 			$bids = $query->latest('CREATED')->paginate($perPage)->withQueryString();
 
-			$queryNoEntity = Bid::whereIn('BID_URL_ID', $scrapedUrlIds)
-				->where(function ($q) {
-					$q->whereNull('ENTITYID')->orWhere('ENTITYID', 0);
-				});
+			$queryNoEntity = $scopedToScrapedBidUrlExists(Bid::query());
+			$queryNoEntity->where(function ($q) {
+				$q->whereNull('ENTITYID')->orWhere('ENTITYID', 0);
+			});
 			$applyBidListingFilters($queryNoEntity);
 			$noEntityBids = $queryNoEntity->latest('CREATED')->paginate($perPage, ['*'], 'ne_page')->withQueryString();
 		}
@@ -90,7 +111,20 @@ class BidController extends Controller
 			Log::warning('Manila directory users not loaded', ['error' => $e->getMessage()]);
 		}
 
-		return view('bids.index', compact('bids', 'noEntityBids', 'issueCount', 'scrapeLogs', 'search', 'filterDate', 'filterUserIdRaw', 'showAll', 'latestDateLabel', 'manilaDirectoryUsers'));
+		return view('bids.index', compact(
+			'bids',
+			'noEntityBids',
+			'issueCount',
+			'scrapeLogs',
+			'search',
+			'filterDate',
+			'filterUserIdRaw',
+			'showAll',
+			'latestDateLabel',
+			'manilaDirectoryUsers',
+			'bidListingRecentDays',
+			'includeHistorical',
+		));
 	}
 
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)

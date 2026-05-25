@@ -936,14 +936,31 @@
 							<option value="{{ $dirUser['id'] }}" {{ (string) ($filterUserIdRaw ?? '') === (string) $dirUser['id'] ? 'selected' : '' }}>{{ $dirUser['label'] }}</option>
 						@endforeach
 					</select>
+					@if (($bidListingRecentDays ?? 0) > 0)
+						<label style="display:flex; align-items:center; gap:0.35rem; white-space:nowrap; font-size:0.82rem; color:#374151;"
+							title="Full history disables the recent CREATED window and can be slow on very large Oracle bid tables.">
+							<input type="checkbox" id="filterHistorical" name="historical" value="1" {{ !empty($includeHistorical) ? 'checked' : '' }} />
+							Include historical
+						</label>
+					@endif
 					@php
-						$bidsToolbarClear = ($search ?? '') !== '' || ($filterDate ?? '') !== '' || ($filterUserIdRaw ?? '') === '' || (($filterUserIdRaw ?? '') !== '' && ($filterUserIdRaw ?? '') !== '120482');
+						$bidsToolbarClear = ($search ?? '') !== '' || ($filterDate ?? '') !== '' || ($filterUserIdRaw ?? '') === '' || (($filterUserIdRaw ?? '') !== '' && ($filterUserIdRaw ?? '') !== '120482') || !empty($includeHistorical);
 					@endphp
 					@if ($bidsToolbarClear)
 						<a href="{{ route('bids.index', ['per_page' => request('per_page', 50), 'userid' => '120482']) }}" class="secondary">Clear</a>
 					@endif
 				</div>
 			</form>
+
+			@if (($bidListingRecentDays ?? 0) > 0 && empty($includeHistorical))
+				<p class="bid-listing-scope-hint" style="margin:-0.25rem 0 0.65rem 0; padding:0.45rem 0.65rem; background:#fafafa; border:1px solid #e5e7eb; border-radius:6px; font-size:0.82rem; color:#4b5563;">
+					Showing bids whose <strong>CREATED</strong> date falls within the last <strong>{{ $bidListingRecentDays }}</strong> days (configurable via <code>SCRAPER_BID_LISTING_RECENT_DAYS</code>). Check <strong>Include historical</strong> above to search all time — expect slower queries on huge tables.
+				</p>
+			@elseif (($bidListingRecentDays ?? 0) > 0 && !empty($includeHistorical))
+				<p class="bid-listing-scope-hint" style="margin:-0.25rem 0 0.65rem 0; padding:0.45rem 0.65rem; background:#fef3c7; border:1px solid #fcd34d; border-radius:6px; font-size:0.82rem; color:#92400e;">
+					Full-history mode: date window on <strong>CREATED</strong> is disabled. Queries may take longer when the bid table is very large.
+				</p>
+			@endif
 
 			@if (!empty($latestDateLabel))
 				<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem; padding:0.5rem 0.75rem; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:0.85rem; color:#1e40af;">
@@ -1810,6 +1827,8 @@
 
 		filterDate.addEventListener("change", () => filtersForm.requestSubmit());
 		filterUserId.addEventListener("change", () => filtersForm.requestSubmit());
+		const filterHistorical = document.getElementById("filterHistorical");
+		filterHistorical?.addEventListener("change", () => filtersForm.requestSubmit());
 		showEntries.addEventListener("change", () => {
 			const pageInput = filtersForm.querySelector('input[name="page"]');
 			if (pageInput) {
