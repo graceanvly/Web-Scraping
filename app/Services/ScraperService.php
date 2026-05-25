@@ -228,7 +228,11 @@ class ScraperService
 				if ($this->isHeavyJsProcurementPortal($url)) {
 					$puppetDelay = max($puppetDelay, (int) env('SCRAPER_HEAVY_PORTAL_SETTLE_MS', 22000));
 				}
-				$renderedHtml = $this->renderWithPuppeteer($url, $puppetDelay, $startedAt, false, $thinListingPuppeteerMaxSec);
+				$heavyPortalPulse = $this->isHeavyJsProcurementPortal($url);
+				$puppetPulseCb = fn (int $elapsed) => $report($heavyPortalPulse
+					? "Headless Chrome (~{$elapsed}s, heavy portal)… Bonfire/similar URLs often need ~1–3 min idle."
+					: "Headless Chrome (~{$elapsed}s)…");
+				$renderedHtml = $this->renderWithPuppeteer($url, $puppetDelay, $startedAt, false, $thinListingPuppeteerMaxSec, $puppetPulseCb);
 
 				if ($renderedHtml !== null) {
 					$renderedText = $this->htmlToText($renderedHtml);
@@ -318,7 +322,7 @@ class ScraperService
 				$this->ensureWithinBudget($startedAt, 'detail page request');
 				if ($headlessDetail) {
 					$detailDelay = max(2000, min(12000, (int) env('SCRAPER_DETAIL_PUPPETEER_DELAY_MS', 6000)));
-					$pageHtml = $this->renderWithPuppeteer($detail['URL'], $detailDelay, $startedAt, true);
+					$pageHtml = $this->renderWithPuppeteer($detail['URL'], $detailDelay, $startedAt, true, null, fn (int $elapsed) => $report("Chrome — detail (~{$elapsed}s)…"));
 					if ($pageHtml === null || trim($pageHtml) === '') {
 						throw new \RuntimeException('Headless detail fetch returned no HTML.');
 					}
@@ -1352,8 +1356,14 @@ class ScraperService
 		return $buf;
 	}
 
-	private function renderWithPuppeteer(string $url, int $delayMs, float $startedAt, bool $detailPagePass = false, ?int $capListingProcessSeconds = null): ?string
-	{
+	private function renderWithPuppeteer(
+		string $url,
+		int $delayMs,
+		float $startedAt,
+		bool $detailPagePass = false,
+		?int $capListingProcessSeconds = null,
+		?callable $pulseElapsedSec = null
+	): ?string {
 		$this->ensureWithinBudget($startedAt, 'before headless chrome');
 		$elapsed = microtime(true) - $startedAt;
 		$budgetCap = $this->fetchBudgetSeconds ?? $this->maxPerUrlSeconds;
@@ -1404,7 +1414,35 @@ class ScraperService
 			$processTimeoutSec
 		);
 		$puppetStart = microtime(true);
-		$process->run();
+		$pulseEvery = max(8.0, min(90.0, (float) config('scraper.puppeteer_sse_pulse_sec', 15)));
+
+		try {
+			if ($pulseElapsedSec !== null && $pulseEvery >= 8) {
+				$process->start();
+				$lastPulse = $puppetStart;
+				while ($process->isRunning()) {
+					$process->checkTimeout();
+					$now = microtime(true);
+					if (($now - $lastPulse) >= $pulseEvery) {
+						try {
+							($pulseElapsedSec)(max(0, (int) round($now - $puppetStart)));
+						} catch (\Throwable) {
+						}
+						$lastPulse = $now;
+					}
+					usleep(150_000);
+				}
+				$process->wait();
+			} else {
+				$process->run();
+			}
+		} catch (ProcessTimedOutException $e) {
+			try {
+				$process->stop(5);
+			} catch (\Throwable) {
+			}
+			throw $e;
+		}
 
 		Log::info('PUPPETEER END', [
 			'url' => $url,

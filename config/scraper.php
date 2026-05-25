@@ -123,4 +123,8 @@ return [
 	'puppeteer_executable_path' => trim((string) env('PUPPETEER_EXECUTABLE_PATH', '')),
 	'chrome_executable' => trim((string) env('SCRAPER_CHROME_EXECUTABLE', '')),
 	'scraper_cookie' => trim((string) env('SCRAPER_COOKIE', '')),
+	/**
+	 * SSE “still running” text while Puppeteer runs (heavy Bonfire / JS portals often need 60–90s idle).
+	 */
+	'puppeteer_sse_pulse_sec' => max(8, min(90, (int) env('SCRAPER_PUPPETEER_SSE_PULSE_SEC', 15))),
 ];
