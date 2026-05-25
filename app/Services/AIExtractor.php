@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Handler\StreamHandler;
 use Illuminate\Support\Facades\Log;
 
 class AIExtractor
@@ -10,6 +12,9 @@ class AIExtractor
 	private Client $httpClient;
 
 	private Client $httpClientRewrite;
+
+	/** Lazily-built client using PHP streams (no ext-curl) when cURL rejects Guzzle opts on some hosts */
+	private ?Client $openAiStreamFallbackClient = null;
 
 	private string $apiKey;
 
@@ -21,15 +26,23 @@ class AIExtractor
 		$timeoutRewrite = max(30.0, (float) config('services.openai.http_timeout_rewrite', 120));
 		$connectTimeout = max(5.0, (float) config('services.openai.http_connect_timeout', 30));
 
-		$this->httpClient = new Client([
+		$forceOpenAiStreams = strtolower(trim((string) env('OPENAI_HTTP_HANDLER', ''))) === 'stream';
+
+		$extractOpts = [
 			'timeout' => $timeoutExtract,
 			'connect_timeout' => $connectTimeout,
-		]);
-
-		$this->httpClientRewrite = new Client([
+		];
+		$rewriteOpts = [
 			'timeout' => min($timeoutExtract, $timeoutRewrite),
 			'connect_timeout' => $connectTimeout,
-		]);
+		];
+		if ($forceOpenAiStreams) {
+			$extractOpts['handler'] = HandlerStack::create(new StreamHandler());
+			$rewriteOpts['handler'] = HandlerStack::create(new StreamHandler());
+		}
+
+		$this->httpClient = new Client($extractOpts);
+		$this->httpClientRewrite = new Client($rewriteOpts);
 
 		$this->apiKey = (string) config('services.openai.key', '');
 		$this->model = (string) config('services.openai.model', 'gpt-4o-mini');
@@ -170,10 +183,11 @@ SYS;
 		$extractWaitStarted = microtime(true);
 		$this->attachOpenAiExtractHeartbeatCurl($requestOptions, $options['openai_heartbeat'] ?? null, $extractWaitStarted);
 
-		$curlHeartbeatRetryConsumed = false;
+		$chatHttpClient = $this->httpClient;
+		$attemptedStreamAfterCurlSetoptFailure = false;
 		while (true) {
 			try {
-				$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', $requestOptions);
+				$response = $chatHttpClient->post('https://api.openai.com/v1/chat/completions', $requestOptions);
 				break;
 			} catch (\GuzzleHttp\Exception\ClientException $e) {
 				$status = $e->getResponse()?->getStatusCode();
@@ -194,16 +208,13 @@ SYS;
 			} catch (\GuzzleHttp\Exception\ConnectException $e) {
 				throw new \RuntimeException('AI error: Could not connect to OpenAI API. Please check your server\'s internet connection.');
 			} catch (\Throwable $e) {
-				if (
-					!$curlHeartbeatRetryConsumed
-					&& isset($requestOptions['curl'])
-					&& $this->isCurlSetoptArrayInvalidOptionsThrowable($e)
-				) {
-					Log::warning('OpenAI extract: curl rejected custom heartbeat options — retrying without them.', [
+				if (!$attemptedStreamAfterCurlSetoptFailure && $this->isCurlSetoptArrayInvalidOptionsThrowable($e)) {
+					Log::warning('OpenAI Chat Completions: curl_setopt rejected (PHP/libcurl vs Guzzle); retrying via stream handler.', [
 						'url' => $URL,
 					]);
 					unset($requestOptions['curl']);
-					$curlHeartbeatRetryConsumed = true;
+					$chatHttpClient = $this->openAiChatCompletionsStreamClient();
+					$attemptedStreamAfterCurlSetoptFailure = true;
 					continue;
 				}
 
@@ -369,14 +380,20 @@ SYS;
 			'temperature' => 0.1,
 		];
 
+		$rewriteRequest = [
+			'headers' => [
+				'Authorization' => 'Bearer ' . $this->apiKey,
+				'Content-Type' => 'application/json',
+			],
+			'body' => json_encode($body),
+			'timeout' => min(
+				max(30.0, (float) config('services.openai.http_timeout', 300)),
+				max(30.0, (float) config('services.openai.http_timeout_rewrite', 120))
+			),
+		];
+
 		try {
-			$response = $this->httpClientRewrite->post('https://api.openai.com/v1/chat/completions', [
-				'headers' => [
-					'Authorization' => 'Bearer ' . $this->apiKey,
-					'Content-Type' => 'application/json',
-				],
-				'body' => json_encode($body),
-			]);
+			$response = $this->executeOpenAiRewritePostWithCurlFallback($rewriteRequest);
 
 			$json = json_decode((string) $response->getBody(), true);
 			$content = $json['choices'][0]['message']['content'] ?? '{}';
@@ -400,6 +417,45 @@ SYS;
 		} catch (\Throwable $e) {
 			Log::warning('AI title rewrite failed', ['error' => $e->getMessage()]);
 			return $titles;
+		}
+	}
+
+	/**
+	 * Chat Completions over Guzzle’s PHP stream handler (no ext-curl). Used when curl_setopt_array fails on the default client.
+	 */
+	private function openAiChatCompletionsStreamClient(): Client
+	{
+		if ($this->openAiStreamFallbackClient instanceof Client) {
+			return $this->openAiStreamFallbackClient;
+		}
+
+		$timeoutExtract = max(30.0, (float) config('services.openai.http_timeout', 300));
+		$connectTimeout = max(5.0, (float) config('services.openai.http_connect_timeout', 30));
+
+		$this->openAiStreamFallbackClient = new Client([
+			'timeout' => $timeoutExtract,
+			'connect_timeout' => $connectTimeout,
+			'handler' => HandlerStack::create(new StreamHandler()),
+		]);
+
+		return $this->openAiStreamFallbackClient;
+	}
+
+	/**
+	 * @param array<string, mixed> $requestOptions
+	 */
+	private function executeOpenAiRewritePostWithCurlFallback(array $requestOptions): \Psr\Http\Message\ResponseInterface
+	{
+		try {
+			return $this->httpClientRewrite->post('https://api.openai.com/v1/chat/completions', $requestOptions);
+		} catch (\Throwable $e) {
+			if (!$this->isCurlSetoptArrayInvalidOptionsThrowable($e)) {
+				throw $e;
+			}
+			Log::warning('OpenAI title rewrite: curl_setopt rejected; retrying via stream handler.');
+			unset($requestOptions['curl']);
+
+			return $this->openAiChatCompletionsStreamClient()->post('https://api.openai.com/v1/chat/completions', $requestOptions);
 		}
 	}
 
