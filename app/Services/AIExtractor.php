@@ -170,41 +170,58 @@ SYS;
 		$extractWaitStarted = microtime(true);
 		$this->attachOpenAiExtractHeartbeatCurl($requestOptions, $options['openai_heartbeat'] ?? null, $extractWaitStarted);
 
-		try {
-			$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', $requestOptions);
-		} catch (\GuzzleHttp\Exception\ClientException $e) {
-			$status = $e->getResponse()?->getStatusCode();
-			$responseBody = (string) ($e->getResponse()?->getBody() ?? '');
-			$errorData = json_decode($responseBody, true);
-			$apiMessage = $errorData['error']['message'] ?? '';
+		$curlHeartbeatRetryConsumed = false;
+		while (true) {
+			try {
+				$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', $requestOptions);
+				break;
+			} catch (\GuzzleHttp\Exception\ClientException $e) {
+				$status = $e->getResponse()?->getStatusCode();
+				$responseBody = (string) ($e->getResponse()?->getBody() ?? '');
+				$errorData = json_decode($responseBody, true);
+				$apiMessage = $errorData['error']['message'] ?? '';
 
-			if ($status === 401) {
-				throw new \RuntimeException('AI error: Invalid OpenAI API key. Please check the OPENAI_API_KEY value in your .env file.');
+				if ($status === 401) {
+					throw new \RuntimeException('AI error: Invalid OpenAI API key. Please check the OPENAI_API_KEY value in your .env file.');
+				}
+				if ($status === 429) {
+					throw new \RuntimeException('AI error: OpenAI rate limit or quota exceeded. ' . ($apiMessage ?: 'Please check your billing/usage at platform.openai.com.'));
+				}
+				if ($status === 404) {
+					throw new \RuntimeException("AI error: Model \"{$this->model}\" not found. Please check the OPENAI_MODEL value in your .env file.");
+				}
+				throw new \RuntimeException('AI error: OpenAI returned HTTP ' . $status . '. ' . ($apiMessage ?: $e->getMessage()));
+			} catch (\GuzzleHttp\Exception\ConnectException $e) {
+				throw new \RuntimeException('AI error: Could not connect to OpenAI API. Please check your server\'s internet connection.');
+			} catch (\Throwable $e) {
+				if (
+					!$curlHeartbeatRetryConsumed
+					&& isset($requestOptions['curl'])
+					&& $this->isCurlSetoptArrayInvalidOptionsThrowable($e)
+				) {
+					Log::warning('OpenAI extract: curl rejected custom heartbeat options — retrying without them.', [
+						'url' => $URL,
+					]);
+					unset($requestOptions['curl']);
+					$curlHeartbeatRetryConsumed = true;
+					continue;
+				}
+
+				$m = strtolower($e->getMessage());
+				if (
+					str_contains($m, 'timed out')
+					|| str_contains($m, 'timeout')
+					|| str_contains($m, 'curl error 28')
+					|| str_contains($m, 'operation timed out')
+					|| ($e instanceof \GuzzleHttp\Exception\TransferException)
+				) {
+					throw new \RuntimeException(
+						'AI error: Extract stalled or timed out. Try increasing OPENAI_HTTP_TIMEOUT (or OPENAI_HTTP_TIMEOUT_BULK for scrape-all), '
+						. 'or lower SCRAPER_AI_BULK_PAGES_TOTAL_CHARS / SCRAPER_AI_BULK_* excerpt sizes. Original: ' . $e->getMessage()
+					);
+				}
+				throw new \RuntimeException('AI error: ' . $e->getMessage());
 			}
-			if ($status === 429) {
-				throw new \RuntimeException('AI error: OpenAI rate limit or quota exceeded. ' . ($apiMessage ?: 'Please check your billing/usage at platform.openai.com.'));
-			}
-			if ($status === 404) {
-				throw new \RuntimeException("AI error: Model \"{$this->model}\" not found. Please check the OPENAI_MODEL value in your .env file.");
-			}
-			throw new \RuntimeException('AI error: OpenAI returned HTTP ' . $status . '. ' . ($apiMessage ?: $e->getMessage()));
-		} catch (\GuzzleHttp\Exception\ConnectException $e) {
-			throw new \RuntimeException('AI error: Could not connect to OpenAI API. Please check your server\'s internet connection.');
-		} catch (\Throwable $e) {
-			$m = strtolower($e->getMessage());
-			if (
-				str_contains($m, 'timed out')
-				|| str_contains($m, 'timeout')
-				|| str_contains($m, 'curl error 28')
-				|| str_contains($m, 'operation timed out')
-				|| ($e instanceof \GuzzleHttp\Exception\TransferException)
-			) {
-				throw new \RuntimeException(
-					'AI error: Extract stalled or timed out. Try increasing OPENAI_HTTP_TIMEOUT (or OPENAI_HTTP_TIMEOUT_BULK for scrape-all), '
-					. 'or lower SCRAPER_AI_BULK_PAGES_TOTAL_CHARS / SCRAPER_AI_BULK_* excerpt sizes. Original: ' . $e->getMessage()
-				);
-			}
-			throw new \RuntimeException('AI error: ' . $e->getMessage());
 		}
 
 		$json = json_decode((string) $response->getBody(), true);
@@ -637,7 +654,8 @@ SYS;
 	/**
 	 * Fire openai_heartbeat callback on a throttle while curl waits on OpenAI (keeps SSE from looking frozen).
 	 * Uses CURLOPT_XFERINFOFUNCTION when available (CURLOPT_PROGRESSFUNCTION can fail curl_setopt_array on some PHP 8.4+/libcurl builds).
-	 * Set OPENAI_EXTRACT_HEARTBEAT=false to disable if your stack still errors.
+	 * Disabled by default: many PHP+FPM stacks reject xfer/progress callbacks inside Guzzle’s curl_setopt_array.
+	 * Set OPENAI_EXTRACT_HEARTBEAT=true to try SSE pings (with automatic one-request retry without curl opts on failure).
 	 *
 	 * @param callable|null $heartbeatCb function (int $elapsedSeconds):void
 	 */
@@ -646,7 +664,7 @@ SYS;
 		if ($heartbeatCb === null || !is_callable($heartbeatCb) || !extension_loaded('curl')) {
 			return;
 		}
-		if (!filter_var(env('OPENAI_EXTRACT_HEARTBEAT', true), FILTER_VALIDATE_BOOL)) {
+		if (!filter_var(env('OPENAI_EXTRACT_HEARTBEAT', false), FILTER_VALIDATE_BOOL)) {
 			return;
 		}
 
@@ -683,5 +701,24 @@ SYS;
 
 		// array_merge reindexes integer keys — would destroy CURLOPT_* constants and break curl_setopt_array.
 		$requestOptions['curl'] = array_replace($requestOptions['curl'] ?? [], $curlOpts);
+	}
+
+	private function isCurlSetoptArrayInvalidOptionsThrowable(\Throwable $e): bool
+	{
+		$chain = [$e];
+		for ($prev = $e->getPrevious(); $prev instanceof \Throwable; $prev = $prev->getPrevious()) {
+			$chain[] = $prev;
+		}
+		foreach ($chain as $t) {
+			$m = strtolower($t->getMessage());
+			if (str_contains($m, 'curl_setopt_array')) {
+				return true;
+			}
+			if ($t instanceof \ValueError && str_contains($m, 'curl')) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 }
