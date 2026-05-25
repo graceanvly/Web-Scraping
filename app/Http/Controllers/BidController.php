@@ -358,7 +358,23 @@ class BidController extends Controller
 					'busy_listing_tables_ai_estimate' => !$heavyAiPayloadEstSingle && $listChars >= 4000,
 				]);
 				$aiExtractStarted = microtime(true);
-				$extracted = $ai->extract($url, $result['html'], $result['text'], $result['pdf_bids'] ?? [], $result['pdf_text'] ?? '', $result['bid_pages'] ?? []);
+				$extracted = $ai->extract(
+					$url,
+					$result['html'],
+					$result['text'],
+					$result['pdf_bids'] ?? [],
+					$result['pdf_text'] ?? '',
+					$result['bid_pages'] ?? [],
+					[
+						'openai_heartbeat' => function (int $elapsedSec) use ($send): void {
+							$send([
+								'type' => 'status',
+								'step' => 'OpenAI extract still running (~'
+									. $elapsedSec . 's). Large JSON replies can exceed several minutes — watch “Elapsed this step”.',
+							]);
+						},
+					]
+				);
 				Log::info('AI bid extract finished', [
 					'url' => $url,
 					'elapsed_sec' => round(microtime(true) - $aiExtractStarted, 2),
@@ -836,7 +852,17 @@ class BidController extends Controller
 						$result['pdf_bids'] ?? [],
 						$result['pdf_text'] ?? '',
 						$result['bid_pages'] ?? [],
-						['bulk_mode' => true]
+						[
+							'bulk_mode' => true,
+							'openai_heartbeat' => function (int $elapsedSec) use ($send, $idx): void {
+								$send([
+									'type' => 'status',
+									'index' => $idx + 1,
+									'step' => 'OpenAI extract still running (~'
+										. $elapsedSec . 's). Large JSON replies can exceed several minutes — watch “Elapsed this step”.',
+								]);
+							},
+						]
 					);
 					Log::info('AI bid extract finished', [
 						'url' => $url,

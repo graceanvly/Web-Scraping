@@ -167,6 +167,9 @@ SYS;
 			$requestOptions['timeout'] = $bulkTimeout;
 		}
 
+		$extractWaitStarted = microtime(true);
+		$this->attachOpenAiExtractHeartbeatCurl($requestOptions, $options['openai_heartbeat'] ?? null, $extractWaitStarted);
+
 		try {
 			$response = $this->httpClient->post('https://api.openai.com/v1/chat/completions', $requestOptions);
 		} catch (\GuzzleHttp\Exception\ClientException $e) {
@@ -629,5 +632,49 @@ SYS;
 			'bid_page_html' => (int) config('scraper.' . $pfx . 'bid_page_html_chars'),
 			'bid_page_pdf' => (int) config('scraper.' . $pfx . 'bid_page_pdf_text_chars'),
 		];
+	}
+
+	/**
+	 * Fire openai_heartbeat callback on a throttle while curl waits on OpenAI (keeps SSE from looking frozen).
+	 * No-op without ext-curl / callable; Guzzle+curl invokes progress during stalled downloads.
+	 *
+	 * @param callable|null $heartbeatCb function (int $elapsedSeconds):void
+	 */
+	private function attachOpenAiExtractHeartbeatCurl(array &$requestOptions, mixed $heartbeatCb, float $waitStartedAt): void
+	{
+		if ($heartbeatCb === null || !is_callable($heartbeatCb) || !extension_loaded('curl')) {
+			return;
+		}
+
+		$interval = max(15, min(120, (int) env('OPENAI_EXTRACT_HEARTBEAT_SEC', 22)));
+
+		$lastFire = $waitStartedAt;
+
+		$curlOpts = [
+			\CURLOPT_NOPROGRESS => false,
+			\CURLOPT_PROGRESSFUNCTION => function (
+				mixed $_ch,
+				int $_downloadTotal,
+				int $_downloaded,
+				int $_uploadTotal,
+				int $_uploaded,
+			) use ($heartbeatCb, $waitStartedAt, &$lastFire, $interval): int {
+				$now = microtime(true);
+				if (($now - $lastFire) < $interval) {
+					return 0;
+				}
+				$lastFire = $now;
+				try {
+					($heartbeatCb)(max(0, (int) round($now - $waitStartedAt)));
+				} catch (\Throwable) {
+					/* ignore SSE / controller errors */
+
+				}
+
+				return 0;
+			},
+		];
+
+		$requestOptions['curl'] = array_merge($requestOptions['curl'] ?? [], $curlOpts);
 	}
 }
