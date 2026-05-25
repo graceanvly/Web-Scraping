@@ -99,6 +99,15 @@ return [
 
 	/*
 	|--------------------------------------------------------------------------
+	| PDF download / parse (listing & detail URLs in ScraperService)
+	|--------------------------------------------------------------------------
+	*/
+	'pdf_timeout' => max(15, min(300, (int) env('SCRAPER_PDF_TIMEOUT', 60))),
+	/** Cap Smalot + pdftotext fallback wall time per PDF (misbehaving binaries can hang PHP indefinitely). */
+	'pdf_parse_timeout_sec' => max(10, min(300, (int) env('SCRAPER_PDF_PARSE_TIMEOUT', 45))),
+
+	/*
+	|--------------------------------------------------------------------------
 	| Puppeteer / Chrome (passed to Node; must use config() — not env() in services — when config:cached)
 	|--------------------------------------------------------------------------
 	*/

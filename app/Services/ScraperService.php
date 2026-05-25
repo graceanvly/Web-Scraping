@@ -9,13 +9,16 @@ use GuzzleHttp\Exception\TransferException;
 use Illuminate\Support\Facades\Log;
 use Psr\Http\Message\ResponseInterface;
 use Smalot\PdfParser\Parser;
+use Symfony\Component\Process\Exception\ProcessTimedOutException;
+use Symfony\Component\Process\Process;
 
 class ScraperService
 {
 	private Client $httpClient;
 	private int $maxPdfBytes = 5242880; // 5 MB limit per PDF to avoid parser memory failures.
 	private int $maxPdfParseBytes = 3145728; // Smalot can expand some PDFs heavily in memory.
-	private int $pdfTimeout = 30; // Seconds per PDF download.
+	private int $pdfTimeout = 30; // Seconds per PDF download (Guzzle HTTP + read_timeout).
+	private int $pdfParseTimeoutSec = 45; // Smalot + pdftotext fallback per listing/detail PDF.
 	private int $maxPdfDownloads = 5; // Avoid excessive PDF processing per page.
 	private int $maxInteractivePages = 8; // Browser-clicked states to feed into AI.
 	private int $maxInteractivePdfDownloads = 3; // PDFs discovered after UI clicks.
@@ -72,7 +75,8 @@ class ScraperService
 		$this->maxPerUrlSeconds = max(60, (int) env('SCRAPER_MAX_PER_URL_SECONDS', 180));
 		$this->maxHtmlBytes = max(524288, (int) env('SCRAPER_MAX_HTML_BYTES', 3145728));
 		$this->htmlToTextMaxChars = max(100000, (int) env('SCRAPER_HTML_TO_TEXT_CAP', 400000));
-		$this->pdfTimeout = max(15, min(180, (int) env('SCRAPER_PDF_TIMEOUT', 60)));
+		$this->pdfTimeout = max(15, min(300, (int) config('scraper.pdf_timeout', 60)));
+		$this->pdfParseTimeoutSec = max(10, min(300, (int) config('scraper.pdf_parse_timeout_sec', 45)));
 	}
 
 
@@ -1201,6 +1205,25 @@ class ScraperService
 		}
 	}
 
+	private function readPdfBodyWithBudget(ResponseInterface $response, float $startedAt): string
+	{
+		$stream = $response->getBody();
+		$raw = '';
+		while (!$stream->eof()) {
+			$this->ensureWithinBudget($startedAt, 'PDF download');
+			$chunk = $stream->read(262144);
+			if ($chunk === '') {
+				break;
+			}
+			$raw .= $chunk;
+			if (strlen($raw) > $this->maxPdfBytes) {
+				throw new \RuntimeException("PDF exceeds size limit (" . $this->formatBytes($this->maxPdfBytes) . ").");
+			}
+		}
+
+		return $raw;
+	}
+
 	private function fetchPdf(string $url, array $requestOptions, bool $authProvided, float $startedAt): array
 	{
 		$tempFile = null;
@@ -1228,14 +1251,18 @@ class ScraperService
 				throw new \RuntimeException("PDF is larger than the safe parser limit (" . $this->formatBytes($this->maxPdfParseBytes) . ").");
 			}
 
-			$this->ensureWithinBudget($startedAt, 'pdf body read');
-			$raw = $response->getBody()->getContents();
+			$raw = $this->readPdfBodyWithBudget($response, $startedAt);
 			if (strlen($raw) > $this->maxPdfBytes) {
 				throw new \RuntimeException("PDF exceeds size limit (" . $this->formatBytes($this->maxPdfBytes) . ").");
 			}
 			if (strlen($raw) > $this->maxPdfParseBytes) {
 				throw new \RuntimeException("PDF exceeds safe parser limit (" . $this->formatBytes($this->maxPdfParseBytes) . ").");
 			}
+
+			Log::info('PDF bytes received, extracting text', ['url' => $url, 'bytes' => strlen($raw)]);
+
+			$execBudget = max(90, $this->pdfParseTimeoutSec + $this->pdfTimeout + 45);
+			@ini_set('max_execution_time', (string) $execBudget);
 
 			$tempFile = tmpfile();
 			$meta = stream_get_meta_data($tempFile);
@@ -1245,9 +1272,20 @@ class ScraperService
 			$pdf = $parser->parseFile($meta['uri']);
 			$text = trim($pdf->getText());
 
-			if (empty($text) && function_exists('shell_exec')) {
-				$cmd = "pdftotext " . escapeshellarg($meta['uri']) . " -";
-				$text = shell_exec($cmd) ?: '';
+			if ($text === '') {
+				try {
+					$pdfPath = $meta['uri'];
+					$p = new Process(['pdftotext', $pdfPath, '-']);
+					$p->setTimeout(max(10.0, (float) $this->pdfParseTimeoutSec));
+					$p->run();
+					if ($p->isSuccessful()) {
+						$text = trim((string) $p->getOutput());
+					}
+				} catch (ProcessTimedOutException $e) {
+					Log::warning('PDF FETCH ERROR', ['url' => $url, 'error' => 'pdftotext timed out after ' . $this->pdfParseTimeoutSec . 's', 'hint' => '(raise SCRAPER_PDF_PARSE_TIMEOUT or skip PDF extraction)']);
+				} catch (\Throwable $e) {
+					// pdftotext missing or unusable — Smalot already returned empty
+				}
 			}
 
 			fclose($tempFile);
@@ -1264,8 +1302,12 @@ class ScraperService
 			}
 			$msg = $e->getMessage();
 			$hint = '';
-			if (stripos($msg, 'stream') !== false || stripos($msg, 'timeout') !== false) {
-				$hint = ' (try SCRAPER_PDF_TIMEOUT in .env; CDN may throttle server IPs)';
+			if (
+				stripos($msg, 'stream') !== false
+				|| stripos($msg, 'timeout') !== false
+				|| stripos($msg, 'timed out') !== false
+			) {
+				$hint = ' (try SCRAPER_PDF_TIMEOUT / SCRAPER_PDF_PARSE_TIMEOUT in .env; CDN may throttle server IPs)';
 			}
 			Log::warning('PDF FETCH ERROR', ['url' => $url, 'error' => $msg, 'hint' => $hint]);
 			return [
