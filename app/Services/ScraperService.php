@@ -1424,10 +1424,16 @@ class ScraperService
 					$process->checkTimeout();
 					$now = microtime(true);
 					if (($now - $lastPulse) >= $pulseEvery) {
+						$elapsedSec = max(0, (int) round($now - $puppetStart));
 						try {
-							($pulseElapsedSec)(max(0, (int) round($now - $puppetStart)));
+							($pulseElapsedSec)($elapsedSec);
 						} catch (\Throwable) {
 						}
+						Log::info('Puppeteer heartbeat (subprocess running)', [
+							'url' => $url,
+							'elapsed_sec' => round($now - $puppetStart, 2),
+							'subprocess_budget_sec' => $processTimeoutSec,
+						]);
 						$lastPulse = $now;
 					}
 					usleep(150_000);
@@ -1438,10 +1444,24 @@ class ScraperService
 			}
 		} catch (ProcessTimedOutException $e) {
 			try {
-				$process->stop(5);
+				$process->stop(10);
 			} catch (\Throwable) {
 			}
-			throw $e;
+			Log::warning('Puppeteer subprocess timed out (Symfony process limit)', [
+				'url' => $url,
+				'subprocess_timeout_sec' => $processTimeoutSec,
+				'elapsed_sec' => round(microtime(true) - $puppetStart, 2),
+				'hint' => 'If hangs persist, Chromium may survive the Node wrapper — ensure render-page.cjs/chrome kill runs (deploy latest) or lower SCRAPER_BATCH_THIN_LISTING_HEADLESS_MAX_SEC.',
+			]);
+			Log::info('PUPPETEER END', [
+				'url' => $url,
+				'detail_page' => $detailPagePass,
+				'successful' => false,
+				'timed_out' => true,
+				'elapsed_sec' => round(microtime(true) - $puppetStart, 2),
+			]);
+
+			return null;
 		}
 
 		Log::info('PUPPETEER END', [

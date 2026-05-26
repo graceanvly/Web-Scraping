@@ -10,6 +10,32 @@ if (!url) {
     process.exit(1);
 }
 
+/** @returns {Promise<void>} */
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Some sites + Chromium builds can wedge page.content() / browser.close() indefinitely.
+ * Promise.race gives a bounded wait; see ScraperService PUPPETEER logs + Symfony process timeout.
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {string} label
+ * @returns {Promise<T>}
+ */
+async function withTimeout(promise, ms, label) {
+    let timer;
+    const deadline = new Promise((_, rej) => {
+        timer = setTimeout(() => rej(new Error(`${label} exceeded ${ms}ms`)), ms);
+    });
+    try {
+        return await Promise.race([promise, deadline]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 (async () => {
     let browser;
     let profileDir = null;
@@ -36,6 +62,10 @@ if (!url) {
             Object.defineProperty(navigator, 'webdriver', { get: () => false });
         });
 
+        const safeNavMs = Math.min(Math.max(15000, navTimeout), 120000);
+        page.setDefaultTimeout(safeNavMs);
+        page.setDefaultNavigationTimeout(safeNavMs);
+
         let host = '';
         try {
             host = new URL(url).hostname.toLowerCase();
@@ -51,7 +81,6 @@ if (!url) {
             isBonfireOpp = false;
         }
 
-        const safeNavMs = Math.min(Math.max(15000, navTimeout), 120000);
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: safeNavMs });
 
         if (isBonfire && !isBonfireOpp) {
@@ -90,20 +119,53 @@ if (!url) {
         const maxSettle = isBonfireOpp ? 10000 : isBonfire ? 30000 : 8000;
         const settleMs = Math.min(Math.max(0, delay), maxSettle);
         if (settleMs > 0) {
-            await new Promise((r) => setTimeout(r, settleMs));
+            await sleep(settleMs);
         }
 
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await new Promise((r) => setTimeout(r, 800));
+        try {
+            await withTimeout(
+                page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)),
+                Math.min(20000, safeNavMs),
+                'page.evaluate(scroll)'
+            );
+        } catch {
+            //
+        }
+        await sleep(800);
 
-        const html = await page.content();
+        const contentBudget = Math.min(120000, Math.max(15000, safeNavMs + 15000));
+        const html = await withTimeout(page.content(), contentBudget, 'page.content()');
         process.stdout.write(html);
     } catch (err) {
         process.stderr.write(err.message + '\n');
         exitCode = 1;
     } finally {
         if (browser) {
-            await browser.close().catch(() => {});
+            /** @type {import('child_process').ChildProcess | null} */
+            let proc = null;
+            try {
+                proc = typeof browser.process === 'function' ? browser.process() : null;
+            } catch {
+                proc = null;
+            }
+            let closedCleanly = false;
+            try {
+                await Promise.race([
+                    browser.close().then(() => {
+                        closedCleanly = true;
+                    }),
+                    sleep(22000),
+                ]);
+            } catch {
+                //
+            }
+            if (!closedCleanly && proc && proc.pid && !proc.killed) {
+                try {
+                    proc.kill('SIGKILL');
+                } catch {
+                    //
+                }
+            }
         }
         removeChromeProfile(profileDir);
     }
