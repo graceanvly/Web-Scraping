@@ -264,7 +264,7 @@ class ScraperService
 
 		if (!$blocked && !$noOpenBids && (!$batchMode || $this->isHeavyJsProcurementPortal($url)) && $this->shouldCollectInteractivePages($bestHtml, $bestText)) {
 			$report('Interactive page scan (clicks/tabs)…');
-			$interactivePages = $this->collectInteractivePages($url, $startedAt, $requestOptions, $authProvided);
+			$interactivePages = $this->collectInteractivePages($url, $startedAt, $requestOptions, $authProvided, $report);
 			if (!empty($interactivePages)) {
 				$bidPages = array_merge($bidPages, $interactivePages);
 				Log::info('INTERACTIVE BID STATES FOUND', ['url' => $url, 'count' => count($interactivePages)]);
@@ -1086,7 +1086,7 @@ class ScraperService
 		return (bool) preg_match('/bid|bids|rfp|rfq|rfi|ifb|itb|solicitation|opportunit|procurement|proposal|quote|tender|addendum|attachment|document|due date|closing date/', $haystack);
 	}
 
-	private function collectInteractivePages(string $url, float $startedAt, array $requestOptions, bool $authProvided): array
+	private function collectInteractivePages(string $url, float $startedAt, array $requestOptions, bool $authProvided, ?callable $report = null): array
 	{
 		try {
 			$this->ensureWithinBudget($startedAt, 'interactive browser scan');
@@ -1114,7 +1114,61 @@ class ScraperService
 				null,
 				$subTimeout
 			);
-			$process->run();
+			Log::info('INTERACTIVE SCAN START', [
+				'url' => $url,
+				'subprocess_timeout_sec' => $subTimeout,
+				'heavy_portal' => $this->isHeavyJsProcurementPortal($url),
+			]);
+			if ($report !== null) {
+				try {
+					($report)('Interactive browser scan starting (Chrome subprocess)…');
+				} catch (\Throwable) {
+				}
+			}
+
+			$interpStart = microtime(true);
+			$pulseEvery = max(8.0, min(90.0, (float) config('scraper.puppeteer_sse_pulse_sec', 15)));
+
+			try {
+				$process->start();
+				$lastPulse = $interpStart;
+				while ($process->isRunning()) {
+					$process->checkTimeout();
+					$now = microtime(true);
+					if (($now - $lastPulse) >= $pulseEvery) {
+						$elapsedRound = round($now - $interpStart, 2);
+						Log::info('Interactive scan heartbeat (subprocess running)', [
+							'url' => $url,
+							'elapsed_sec' => $elapsedRound,
+							'subprocess_budget_sec' => $subTimeout,
+						]);
+						if ($report !== null) {
+							try {
+								($report)(sprintf(
+									'Interactive scan (~%ds)… Bonfire / tab-heavy portals often need several minutes idle.',
+									(int) round($now - $interpStart)
+								));
+							} catch (\Throwable) {
+							}
+						}
+						$lastPulse = $now;
+					}
+					usleep(150_000);
+				}
+				$process->wait();
+			} catch (ProcessTimedOutException) {
+				try {
+					$process->stop(10);
+				} catch (\Throwable) {
+				}
+				Log::warning('Interactive scan subprocess timed out', [
+					'url' => $url,
+					'subprocess_timeout_sec' => $subTimeout,
+					'elapsed_sec' => round(microtime(true) - $interpStart, 2),
+				]);
+
+				return [];
+			}
 
 			if (!$process->isSuccessful()) {
 				$err = trim($process->getErrorOutput());
@@ -1131,6 +1185,12 @@ class ScraperService
 				$this->logPuppeteerDiagnostics($url, $err);
 				return [];
 			}
+
+			Log::info('INTERACTIVE SCAN END', [
+				'url' => $url,
+				'successful' => true,
+				'elapsed_sec' => round(microtime(true) - $interpStart, 2),
+			]);
 
 			$data = json_decode($process->getOutput(), true);
 			if (!is_array($data) || empty($data['pages']) || !is_array($data['pages'])) {
