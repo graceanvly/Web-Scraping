@@ -51,6 +51,11 @@ return [
         'extract_heartbeat' => filter_var(env('OPENAI_EXTRACT_HEARTBEAT', false), FILTER_VALIDATE_BOOLEAN),
         /** Also throttles scrape-stream “still running” pings when OpenAI uses streamed chat completions (StreamHandler). */
         'extract_heartbeat_sec' => max(15, min(120, (int) env('OPENAI_EXTRACT_HEARTBEAT_SEC', 22))),
+        /**
+         * Bounds each underlying fread wait so scrape SSE can heartbeat during long gaps before tokens
+         * when stream_select is unavailable (typical HTTPS/chunk OpenAI responses).
+         */
+        'sse_stream_read_timeout_sec' => max(1, min(30, (int) env('OPENAI_SSE_STREAM_READ_TIMEOUT_SEC', 2))),
     ],
 
 ];

@@ -540,8 +540,8 @@ SYS;
 	 * Read OpenAI chat.completion.chunk SSE lines and assemble assistant JSON text while firing progress callback.
 	 * Used when scrape SSE needs pulses but Guzzle uses StreamHandler (no CURLOPT progress).
 	 *
-	 * When possible, waits with stream_select(1s) before fread so heartbeats still fire during long
-	 * model "thinking" gaps before the first SSE chunk (blocking read() would otherwise freeze pulses).
+	 * When stream_select is unsupported, stream_set_timeout bounds each Guzzle fread so the loop can
+	 * still reach heartbeat logic during long pre-token silence (see services.openai.sse_stream_read_timeout_sec).
 	 *
 	 * @param callable(int $elapsedSeconds):void $pulseCb
 	 */
@@ -554,6 +554,11 @@ SYS;
 		$done = false;
 		$stream = $response->getBody();
 		$phpResource = $this->unwrapPhpStreamResourceFromBody($stream);
+		/** When stream_select fails (HTTPS/chunked wrappers), fread would block until tokens — bounded timeout yields idle loops for SSE heartbeats/logs. */
+		$streamReadSliceSec = max(1, min(30, (int) config('services.openai.sse_stream_read_timeout_sec', 2)));
+		if (is_resource($phpResource)) {
+			@stream_set_timeout($phpResource, $streamReadSliceSec, 0);
+		}
 		// HTTP/1.1 chunked TLS streams often cannot be passed to stream_select() (filtered stream —
 		// PHP 8 throws ValueError: "No stream arrays were passed" after stripping invalid fds).
 		$selectEnabled = is_resource($phpResource);
