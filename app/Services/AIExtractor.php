@@ -554,6 +554,9 @@ SYS;
 		$done = false;
 		$stream = $response->getBody();
 		$phpResource = $this->unwrapPhpStreamResourceFromBody($stream);
+		// HTTP/1.1 chunked TLS streams often cannot be passed to stream_select() (filtered stream —
+		// PHP 8 throws ValueError: "No stream arrays were passed" after stripping invalid fds).
+		$selectEnabled = is_resource($phpResource);
 
 		while (!$stream->eof()) {
 			$tick = microtime(true);
@@ -562,19 +565,29 @@ SYS;
 			}
 
 			$chunk = '';
-			if (is_resource($phpResource)) {
+			if ($selectEnabled && is_resource($phpResource)) {
 				$read = [$phpResource];
-				$write = null;
-				$except = null;
-				$sel = @stream_select($read, $write, $except, 1, 0);
-				if ($sel === false) {
-					$chunk = $stream->read(8192);
-				} elseif ($sel > 0) {
-					$chunk = $stream->read(65536);
-				} else {
-					continue;
+				// PHP 8+: null write/except can contribute to ValueError — use empty arrays (by ref).
+				$write = [];
+				$except = [];
+				$sel = 0;
+				try {
+					$sel = stream_select($read, $write, $except, 1, 0);
+				} catch (\ValueError) {
+					$selectEnabled = false;
 				}
-			} else {
+
+				if ($selectEnabled) {
+					if ($sel === false) {
+						$chunk = $stream->read(8192);
+					} elseif ($sel > 0) {
+						$chunk = $stream->read(65536);
+					} else {
+						continue;
+					}
+				}
+			}
+			if ($chunk === '') {
 				$chunk = $stream->read(8192);
 			}
 			if ($chunk === '') {
