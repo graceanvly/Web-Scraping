@@ -204,6 +204,9 @@ SYS;
 				$reqEffective = $requestOptions;
 				if ($streamHeartbeatCb !== null) {
 					$reqEffective['stream'] = true;
+					Log::info('AI bid extract OpenAI POST in flight — logs may dwell until streamed response opens', [
+						'url' => $URL,
+					]);
 				}
 				$response = $chatHttpClient->post('https://api.openai.com/v1/chat/completions', $reqEffective);
 				break;
