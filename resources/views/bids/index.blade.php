@@ -1006,6 +1006,14 @@
 								</td>
 								<td>
 									<div class="action-buttons">
+										@if ($safbDetailUrl = \App\Support\StateAndFederalBidsShowBidUrl::urlForBid($bid->TITLE ?? '', $bid->ID ?? $bid->id ?? null))
+											<a href="{{ $safbDetailUrl }}" target="_blank" rel="noopener noreferrer"
+												class="safb-detail-link"
+												style="display:inline-block; padding:0.28rem 0.55rem; font-size:0.78rem; background:#059669; color:#fff; border-radius:4px; text-decoration:none; white-space:nowrap;"
+												title="Open this bid on stateandfederalbids.com" aria-label="Open on State and Federal bids site">
+												SAFB ↗
+											</a>
+										@endif
 										<button type="button" class="secondary" onclick="openEditModal({{ $idx }}, 'bids')"
 											title="Edit bid" aria-label="Edit bid">
 											✏️
@@ -1143,6 +1151,14 @@
 							</td>
 							<td>
 								<div class="action-buttons">
+									@if ($safbDetailUrlNe = \App\Support\StateAndFederalBidsShowBidUrl::urlForBid($bid->TITLE ?? '', $bid->ID ?? $bid->id ?? null))
+										<a href="{{ $safbDetailUrlNe }}" target="_blank" rel="noopener noreferrer"
+											class="safb-detail-link"
+											style="display:inline-block; padding:0.28rem 0.55rem; font-size:0.78rem; background:#059669; color:#fff; border-radius:4px; text-decoration:none; white-space:nowrap;"
+											title="Open this bid on stateandfederalbids.com" aria-label="Open on State and Federal bids site">
+											SAFB ↗
+										</a>
+									@endif
 									<button type="button" class="secondary" onclick="openEditModal({{ $idx }}, 'noentities')"
 										title="Edit bid" aria-label="Edit bid">
 										✏️

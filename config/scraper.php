@@ -13,6 +13,17 @@
 
 	/*
 	|--------------------------------------------------------------------------
+	| State & Federal Bids — ShowBid deep link (scraped row → production site)
+	|--------------------------------------------------------------------------
+	| Trailing slash optional; slug is appended after ShowBid/. See App\Support\StateAndFederalBidsShowBidUrl.
+	*/
+	'stateandfederalbids_showbid_base_url' => rtrim((string) env(
+		'SCRAPER_STATEANDFEDERALBIDS_SHOWBID_BASE_URL',
+		'https://www.stateandfederalbids.com/bids/ShowBid/'
+	), '/') . '/',
+
+	/*
+	|--------------------------------------------------------------------------
 	| Directory users (bid assignee dropdown)
 	|--------------------------------------------------------------------------
 	| Oracle/production often uses a legacy user table, not Laravel's `users`.

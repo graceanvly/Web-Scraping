@@ -5,8 +5,10 @@ namespace App\Services;
 use GuzzleHttp\Client;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Handler\StreamHandler;
+use GuzzleHttp\Psr7\Stream as GuzzleStream;
 use Illuminate\Support\Facades\Log;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\StreamInterface;
 
 class AIExtractor
 {
@@ -253,7 +255,7 @@ SYS;
 
 		if ($streamHeartbeatCb !== null) {
 			Log::info('AI bid extract streamed from OpenAI (SSE progress pings)', ['url' => $URL]);
-			$content = $this->drainOpenAiChatCompletionStream($response, $streamHeartbeatCb, $extractWaitStarted);
+			$content = $this->drainOpenAiChatCompletionStream($response, $streamHeartbeatCb, $extractWaitStarted, $URL);
 		} else {
 			$json = json_decode((string) $response->getBody(), true);
 			$content = is_array($json) ? ($json['choices'][0]['message']['content'] ?? '{}') : '{}';
@@ -488,31 +490,93 @@ SYS;
 	}
 
 	/**
+	 * Best-effort: reach the underlying PHP socket/resource behind Guzzle PSR-7 decorators so callers can stream_select().
+	 */
+	private function unwrapPhpStreamResourceFromBody(StreamInterface $body): mixed
+	{
+		$current = $body;
+		for ($depth = 0; $depth < 16 && $current instanceof StreamInterface; $depth++) {
+			if ($current instanceof GuzzleStream) {
+				$rp = new \ReflectionProperty(GuzzleStream::class, 'stream');
+				$rp->setAccessible(true);
+				$r = $rp->getValue($current);
+
+				return is_resource($r) ? $r : null;
+			}
+			$next = null;
+			foreach (['remoteStream', 'stream'] as $prop) {
+				try {
+					$rp = new \ReflectionProperty($current, $prop);
+					$rp->setAccessible(true);
+					$candidate = $rp->getValue($current);
+					if ($candidate instanceof StreamInterface) {
+						$next = $candidate;
+						break;
+					}
+				} catch (\ReflectionException) {
+				}
+			}
+			if (!$next instanceof StreamInterface) {
+				break;
+			}
+			$current = $next;
+		}
+
+		return null;
+	}
+
+	private function pulseOpenAiStreamHeartbeat(callable $pulseCb, float $waitStartedAt, float $tick, float &$lastPulse, string $urlForLog): void
+	{
+		$elapsedRounded = round($tick - $waitStartedAt, 2);
+		try {
+			($pulseCb)(max(0, (int) round($tick - $waitStartedAt)));
+		} catch (\Throwable) {
+		}
+		Log::info('OpenAI extract heartbeat (stream wait)', ['url' => $urlForLog, 'elapsed_sec' => $elapsedRounded]);
+		$lastPulse = $tick;
+	}
+
+	/**
 	 * Read OpenAI chat.completion.chunk SSE lines and assemble assistant JSON text while firing progress callback.
 	 * Used when scrape SSE needs pulses but Guzzle uses StreamHandler (no CURLOPT progress).
 	 *
+	 * When possible, waits with stream_select(1s) before fread so heartbeats still fire during long
+	 * model "thinking" gaps before the first SSE chunk (blocking read() would otherwise freeze pulses).
+	 *
 	 * @param callable(int $elapsedSeconds):void $pulseCb
 	 */
-	private function drainOpenAiChatCompletionStream(ResponseInterface $response, callable $pulseCb, float $waitStartedAt): string
+	private function drainOpenAiChatCompletionStream(ResponseInterface $response, callable $pulseCb, float $waitStartedAt, string $urlForLog): string
 	{
-		$pulseEvery = max(12, min(90, (int) config('services.openai.extract_heartbeat_sec', 22)));
+		$pulseEvery = max(8, min(90, (int) config('services.openai.extract_heartbeat_sec', 22)));
 		$lastPulse = microtime(true);
 		$accum = '';
 		$lineBuf = '';
 		$done = false;
 		$stream = $response->getBody();
+		$phpResource = $this->unwrapPhpStreamResourceFromBody($stream);
 
 		while (!$stream->eof()) {
 			$tick = microtime(true);
 			if (($tick - $lastPulse) >= $pulseEvery) {
-				try {
-					($pulseCb)(max(0, (int) round($tick - $waitStartedAt)));
-				} catch (\Throwable) {
-				}
-				$lastPulse = $tick;
+				$this->pulseOpenAiStreamHeartbeat($pulseCb, $waitStartedAt, $tick, $lastPulse, $urlForLog);
 			}
 
-			$chunk = $stream->read(2048);
+			$chunk = '';
+			if (is_resource($phpResource)) {
+				$read = [$phpResource];
+				$write = null;
+				$except = null;
+				$sel = @stream_select($read, $write, $except, 1, 0);
+				if ($sel === false) {
+					$chunk = $stream->read(8192);
+				} elseif ($sel > 0) {
+					$chunk = $stream->read(65536);
+				} else {
+					continue;
+				}
+			} else {
+				$chunk = $stream->read(8192);
+			}
 			if ($chunk === '') {
 				continue;
 			}
