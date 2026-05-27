@@ -121,9 +121,54 @@
 		#bidsTable tbody td:nth-child(5),
 		#noEntityBidsTable thead th:nth-child(5),
 		#noEntityBidsTable tbody td:nth-child(5) {
-			width: 6rem;
+			width: 5.25rem;
+			min-width: 5rem;
 			text-align: center;
 			vertical-align: middle;
+		}
+
+		/* URL column: compact icon links (Open + SAFB) */
+		.url-col-icons {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 0.35rem;
+			flex-wrap: nowrap;
+		}
+
+		a.url-col-icon {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 1.75rem;
+			height: 1.75rem;
+			border-radius: 6px;
+			color: #fff;
+			line-height: 0;
+			flex-shrink: 0;
+			text-decoration: none;
+			box-sizing: border-box;
+		}
+
+		a.url-col-icon svg {
+			width: 0.95rem;
+			height: 0.95rem;
+		}
+
+		a.url-col-icon--open {
+			background: #2563eb;
+		}
+
+		a.url-col-icon--open:hover {
+			background: #1d4ed8;
+		}
+
+		a.url-col-icon--safb {
+			background: #059669;
+		}
+
+		a.url-col-icon--safb:hover {
+			background: #047857;
 		}
 
 		#bidsTable thead th:nth-child(6),
@@ -995,25 +1040,34 @@
 									{{ $bid->CREATED ? \Carbon\Carbon::parse($bid->CREATED)->format('M d') : '—' }}
 								</td>
 								<td>
-									@if ($bid->URL)
-										<a href="{{ $bid->URL }}" target="_blank" rel="noopener noreferrer"
-											style="display:inline-block; padding:0.3rem 0.7rem; font-size:0.8rem; background:#2563eb; color:#fff; border-radius:4px; text-decoration:none; white-space:nowrap;">
-											Open ↗
-										</a>
+									@php
+										$safbDetailUrl = \App\Support\StateAndFederalBidsShowBidUrl::urlForBid($bid->TITLE ?? '', $bid->ID ?? $bid->id ?? null, $bid->THIRD_PARTY_IDENTIFIER ?? null);
+									@endphp
+									@if ($bid->URL || $safbDetailUrl)
+										<div class="url-col-icons" role="group" aria-label="Listing links">
+											@if ($bid->URL)
+												<a href="{{ $bid->URL }}" target="_blank" rel="noopener noreferrer"
+													class="url-col-icon url-col-icon--open"
+													title="Open listing URL"
+													aria-label="Open listing URL">
+													<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+												</a>
+											@endif
+											@if ($safbDetailUrl)
+												<a href="{{ $safbDetailUrl }}" target="_blank" rel="noopener noreferrer"
+													class="safb-detail-link url-col-icon url-col-icon--safb"
+													title="Open on stateandfederalbids.com"
+													aria-label="Open on State and Federal Bids">
+													<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+												</a>
+											@endif
+										</div>
 									@else
 										<span style="color:#9ca3af;">—</span>
 									@endif
 								</td>
 								<td>
 									<div class="action-buttons">
-										@if ($safbDetailUrl = \App\Support\StateAndFederalBidsShowBidUrl::urlForBid($bid->TITLE ?? '', $bid->ID ?? $bid->id ?? null))
-											<a href="{{ $safbDetailUrl }}" target="_blank" rel="noopener noreferrer"
-												class="safb-detail-link"
-												style="display:inline-block; padding:0.28rem 0.55rem; font-size:0.78rem; background:#059669; color:#fff; border-radius:4px; text-decoration:none; white-space:nowrap;"
-												title="Open this bid on stateandfederalbids.com" aria-label="Open on State and Federal bids site">
-												SAFB ↗
-											</a>
-										@endif
 										<button type="button" class="secondary" onclick="openEditModal({{ $idx }}, 'bids')"
 											title="Edit bid" aria-label="Edit bid">
 											✏️
@@ -1140,25 +1194,34 @@
 								{{ $bid->CREATED ? \Carbon\Carbon::parse($bid->CREATED)->format('M d') : '—' }}
 							</td>
 							<td>
-								@if ($bid->URL)
-									<a href="{{ $bid->URL }}" target="_blank" rel="noopener noreferrer"
-										style="display:inline-block; padding:0.3rem 0.7rem; font-size:0.8rem; background:#2563eb; color:#fff; border-radius:4px; text-decoration:none; white-space:nowrap;">
-										Open ↗
-									</a>
+								@php
+									$safbDetailUrlNe = \App\Support\StateAndFederalBidsShowBidUrl::urlForBid($bid->TITLE ?? '', $bid->ID ?? $bid->id ?? null, $bid->THIRD_PARTY_IDENTIFIER ?? null);
+								@endphp
+								@if ($bid->URL || $safbDetailUrlNe)
+									<div class="url-col-icons" role="group" aria-label="Listing links">
+										@if ($bid->URL)
+											<a href="{{ $bid->URL }}" target="_blank" rel="noopener noreferrer"
+												class="url-col-icon url-col-icon--open"
+												title="Open listing URL"
+												aria-label="Open listing URL">
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+											</a>
+										@endif
+										@if ($safbDetailUrlNe)
+											<a href="{{ $safbDetailUrlNe }}" target="_blank" rel="noopener noreferrer"
+												class="safb-detail-link url-col-icon url-col-icon--safb"
+												title="Open on stateandfederalbids.com"
+												aria-label="Open on State and Federal Bids">
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+											</a>
+										@endif
+									</div>
 								@else
 									<span style="color:#9ca3af;">—</span>
 								@endif
 							</td>
 							<td>
 								<div class="action-buttons">
-									@if ($safbDetailUrlNe = \App\Support\StateAndFederalBidsShowBidUrl::urlForBid($bid->TITLE ?? '', $bid->ID ?? $bid->id ?? null))
-										<a href="{{ $safbDetailUrlNe }}" target="_blank" rel="noopener noreferrer"
-											class="safb-detail-link"
-											style="display:inline-block; padding:0.28rem 0.55rem; font-size:0.78rem; background:#059669; color:#fff; border-radius:4px; text-decoration:none; white-space:nowrap;"
-											title="Open this bid on stateandfederalbids.com" aria-label="Open on State and Federal bids site">
-											SAFB ↗
-										</a>
-									@endif
 									<button type="button" class="secondary" onclick="openEditModal({{ $idx }}, 'noentities')"
 										title="Edit bid" aria-label="Edit bid">
 										✏️

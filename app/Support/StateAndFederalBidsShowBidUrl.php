@@ -7,8 +7,9 @@ namespace App\Support;
  * so listing links match production URLs under stateandfederalbids.com.
  *
  * The live site derives the numeric bid PK from DirectAction.decodeIDFromURL (substring
- * after the last hyphen). That PK must match this app's Bid primary key ID when the scrape
- * DB shares identifiers with master ODS; otherwise links may 404 or show the wrong bid.
+ * after the last hyphen). Prefer Bid.THIRD_PARTY_IDENTIFIER when it is numeric (production ODS id).
+ * Scraper Bid.ID comes from BID_SEQ and differs from SAFB prod unless
+ * SCRAPER_STATEANDFEDERALBIDS_SHOWBID_TRUST_LOCAL_BID_ID=true on a shared-write Oracle.
  */
 final class StateAndFederalBidsShowBidUrl
 {
@@ -72,11 +73,41 @@ final class StateAndFederalBidsShowBidUrl
 	}
 
 	/**
-	 * Full ShowBid URL for a bid row, or null if no primary key.
+	 * ODS PK for ShowBid slug suffix: numeric THIRD_PARTY_IDENTIFIER, else Bid.ID only if trusted.
 	 */
-	public static function urlForBid(?string $title, int|string|null $bidId): ?string
+	public static function resolveShowBidPk(int|string|null $bidId, ?string $thirdPartyIdentifier = null): ?string
 	{
-		$slug = self::encodeBidSlug($title, $bidId);
+		$tp = trim((string) ($thirdPartyIdentifier ?? ''));
+		if ($tp !== '' && preg_match('/^\d+$/', $tp) === 1) {
+			return $tp;
+		}
+
+		$trustLocal = filter_var(config('scraper.stateandfederalbids_showbid_trust_local_bid_id', false), FILTER_VALIDATE_BOOL);
+		if (!$trustLocal) {
+			return null;
+		}
+
+		if ($bidId === null || $bidId === '') {
+			return null;
+		}
+
+		return preg_match('/^\d+$/', (string) $bidId) === 1 ? (string) $bidId : null;
+	}
+
+	/**
+	 * Full ShowBid URL for a bid row, or null when no usable ODS pk (see resolveShowBidPk).
+	 *
+	 * @param int|string|null $bidId        Local bid primary key (BID_SEQ unless shared Oracle).
+	 * @param ?string          $thirdPartyId Bid.THIRD_PARTY_IDENTIFIER — production numeric id when set.
+	 */
+	public static function urlForBid(?string $title, int|string|null $bidId, ?string $thirdPartyId = null): ?string
+	{
+		$pk = self::resolveShowBidPk($bidId, $thirdPartyId);
+		if ($pk === null) {
+			return null;
+		}
+
+		$slug = self::encodeBidSlug($title, $pk);
 
 		return $slug !== null ? self::showBidUrl($slug) : null;
 	}

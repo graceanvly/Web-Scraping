@@ -22,6 +22,17 @@
 		'https://www.stateandfederalbids.com/bids/ShowBid/'
 	), '/') . '/',
 
+	/**
+	 * ShowBid slug suffix must be stateandfederalbids.com’s ODS bid PK (decoded from URL).
+	 * Scraped bids get a local BID_SEQ id that usually does NOT match production — links error.
+	 * When false (default): only build ShowBid URLs if THIRD_PARTY_IDENTIFIER is a numeric ODS id.
+	 * When true: use scraper Bid.ID like legacy behavior (same Oracle/write DB as SAFB prod only).
+	 */
+	'stateandfederalbids_showbid_trust_local_bid_id' => filter_var(
+		env('SCRAPER_STATEANDFEDERALBIDS_SHOWBID_TRUST_LOCAL_BID_ID', false),
+		FILTER_VALIDATE_BOOL
+	),
+
 	/*
 	|--------------------------------------------------------------------------
 	| Directory users (bid assignee dropdown)

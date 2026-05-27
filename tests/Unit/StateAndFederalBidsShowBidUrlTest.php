@@ -51,13 +51,35 @@ class StateAndFederalBidsShowBidUrlTest extends TestCase
 		);
 	}
 
-	public function test_url_for_bid_builds_full_url(): void
+	public function test_url_for_bid_builds_full_url_when_trusting_local_pk(): void
 	{
 		Config::set('scraper.stateandfederalbids_showbid_base_url', 'https://www.example.com/bids/ShowBid/');
+		Config::set('scraper.stateandfederalbids_showbid_trust_local_bid_id', true);
 
 		$this->assertSame(
 			'https://www.example.com/bids/ShowBid/A-5',
 			StateAndFederalBidsShowBidUrl::urlForBid('A', 5)
+		);
+	}
+
+	public function test_url_for_bid_null_without_trust_when_no_numeric_third_party(): void
+	{
+		Config::set('scraper.stateandfederalbids_showbid_base_url', 'https://www.example.com/bids/ShowBid/');
+		Config::set('scraper.stateandfederalbids_showbid_trust_local_bid_id', false);
+
+		$this->assertNull(StateAndFederalBidsShowBidUrl::urlForBid('A', 5));
+		$this->assertNull(StateAndFederalBidsShowBidUrl::urlForBid('A', 5, ''));
+		$this->assertNull(StateAndFederalBidsShowBidUrl::urlForBid('A', 5, 'not-numeric'));
+	}
+
+	public function test_url_for_bid_uses_numeric_third_party_without_trusting_local(): void
+	{
+		Config::set('scraper.stateandfederalbids_showbid_base_url', 'https://www.example.com/bids/ShowBid/');
+		Config::set('scraper.stateandfederalbids_showbid_trust_local_bid_id', false);
+
+		$this->assertSame(
+			'https://www.example.com/bids/ShowBid/A-999',
+			StateAndFederalBidsShowBidUrl::urlForBid('A', 5, '999')
 		);
 	}
 }
