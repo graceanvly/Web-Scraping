@@ -190,6 +190,8 @@ SYS;
 		}
 
 		$extractWaitStarted = microtime(true);
+		/** Hard cap for POST + SSE drain (Guzzle total timeout is not always honored mid–blocking fread on StreamHandler). */
+		$extractMaxWallClockSec = $bulkTimeout ?? max(30.0, (float) config('services.openai.http_timeout', 300));
 		// CURL progress pings conflict with streamed responses — use streamed chunks + pulse below instead.
 		$this->attachOpenAiExtractHeartbeatCurl(
 			$requestOptions,
@@ -258,7 +260,7 @@ SYS;
 
 		if ($streamHeartbeatCb !== null) {
 			Log::info('AI bid extract streamed from OpenAI (SSE progress pings)', ['url' => $URL]);
-			$content = $this->drainOpenAiChatCompletionStream($response, $streamHeartbeatCb, $extractWaitStarted, $URL);
+			$content = $this->drainOpenAiChatCompletionStream($response, $streamHeartbeatCb, $extractWaitStarted, $URL, $extractMaxWallClockSec);
 		} else {
 			$json = json_decode((string) $response->getBody(), true);
 			$content = is_array($json) ? ($json['choices'][0]['message']['content'] ?? '{}') : '{}';
@@ -547,8 +549,9 @@ SYS;
 	 * still reach heartbeat logic during long pre-token silence (see services.openai.sse_stream_read_timeout_sec).
 	 *
 	 * @param callable(int $elapsedSeconds):void $pulseCb
+	 * @param float $maxWallClockSec POST + drain wall clock (OPENAI_HTTP_TIMEOUT / OPENAI_HTTP_TIMEOUT_BULK).
 	 */
-	private function drainOpenAiChatCompletionStream(ResponseInterface $response, callable $pulseCb, float $waitStartedAt, string $urlForLog): string
+	private function drainOpenAiChatCompletionStream(ResponseInterface $response, callable $pulseCb, float $waitStartedAt, string $urlForLog, float $maxWallClockSec): string
 	{
 		$pulseEvery = max(8, min(90, (int) config('services.openai.extract_heartbeat_sec', 22)));
 		$lastPulse = microtime(true);
@@ -557,6 +560,11 @@ SYS;
 		$done = false;
 		$stream = $response->getBody();
 		$phpResource = $this->unwrapPhpStreamResourceFromBody($stream);
+		if (!is_resource($phpResource)) {
+			Log::warning('OpenAI SSE: could not unwrap underlying PHP stream; fread may block longer than heartbeat interval.', [
+				'url' => $urlForLog,
+			]);
+		}
 		/** When stream_select fails (HTTPS/chunked wrappers), fread would block until tokens — bounded timeout yields idle loops for SSE heartbeats/logs. */
 		$streamReadSliceSec = max(1, min(30, (int) config('services.openai.sse_stream_read_timeout_sec', 2)));
 		if (is_resource($phpResource)) {
@@ -568,6 +576,13 @@ SYS;
 
 		while (!$stream->eof()) {
 			$tick = microtime(true);
+			if (($tick - $waitStartedAt) >= $maxWallClockSec) {
+				throw new \RuntimeException(
+					'AI error: Extract exceeded maximum wall-clock time (' . (int) round($maxWallClockSec)
+					. 's) while reading OpenAI SSE. '
+					. 'Lower OPENAI_HTTP_TIMEOUT_BULK / OPENAI_HTTP_TIMEOUT to fail faster and continue to the next URL, or retry.'
+				);
+			}
 			if (($tick - $lastPulse) >= $pulseEvery) {
 				$this->pulseOpenAiStreamHeartbeat($pulseCb, $waitStartedAt, $tick, $lastPulse, $urlForLog);
 			}
