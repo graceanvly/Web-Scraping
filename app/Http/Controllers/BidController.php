@@ -778,8 +778,10 @@ class BidController extends Controller
 		}
 
 		$assignUserId = $this->resolveOptionalManilaAssignUserId($request->query('assign_user_id'));
+		$singlePerUrlFiveMin = $request->boolean('single_url_max');
+		$urlMaxBudget = $singlePerUrlFiveMin ? 300 : $this->scrapeUrlMaxSeconds();
 
-		return new StreamedResponse(function () use ($scraper, $ai, $assignUserId) {
+		return new StreamedResponse(function () use ($scraper, $ai, $assignUserId, $urlMaxBudget, $singlePerUrlFiveMin) {
 			$send = function ($data) {
 				echo "data: " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
 				if (ob_get_level())
@@ -794,7 +796,16 @@ class BidController extends Controller
 			$totalSkipped = 0;
 			$totalIssues = 0;
 
-			$send(['type' => 'start', 'total' => $total]);
+			if ($singlePerUrlFiveMin) {
+				Log::info('Bulk scrape-stream: single per-URL max 300s enforced (SCRAPER_URL_MAX_SECONDS ignored per row).');
+			}
+
+			$send([
+				'type' => 'start',
+				'total' => $total,
+				'url_max_budget_sec' => $urlMaxBudget,
+				'single_per_url_cap' => $singlePerUrlFiveMin,
+			]);
 
 			foreach ($bidUrls as $idx => $bidUrl) {
 				$url = trim((string) ($bidUrl->URL ?? $bidUrl->url ?? ''));
@@ -832,6 +843,8 @@ class BidController extends Controller
 						},
 					]);
 
+					$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
+
 					if (!empty($result['blocked'])) {
 						$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
 						$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by site protection/firewall.' . $reason);
@@ -861,6 +874,8 @@ class BidController extends Controller
 					if (ob_get_level())
 						ob_flush();
 					flush();
+
+					$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
 
 					$listingCharsPreAi = strlen($result['text'] ?? '');
 					$pdfCharsPreAi = strlen($result['pdf_text'] ?? '');
@@ -905,7 +920,7 @@ class BidController extends Controller
 						'bids_returned' => count($extracted['bids'] ?? []),
 					]);
 
-					$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
+					$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
 
 					$today = \Carbon\Carbon::today();
 					$filteredBids = collect($extracted['bids'] ?? [])->filter(function ($bid) use ($today) {
@@ -948,13 +963,14 @@ class BidController extends Controller
 							$n = $ctx['count'] ?? 0;
 							$send(['type' => 'status', 'index' => $idx + 1, 'step' => "Using extracted titles (rewrite skipped — {$n} opportunities)."]);
 						}
-					});
+					}, $urlMaxBudget);
 					$titleMap = array_combine($rawTitles, $rewrittenTitles);
 
-					$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
+					$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
 					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Saving bids...']);
 
 					foreach ($filteredBids as $bidData) {
+						$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
 						$rawTitle = $bidData['TITLE'] ?? null;
 						if (!$rawTitle)
 							continue;
@@ -1716,12 +1732,17 @@ class BidController extends Controller
 	 * Optionally skip batched rewrite (second OpenAI call) near time budget / huge title lists.
 	 *
 	 * @param callable|null $progress function (string $event, array $context):void — events: start, chunk, skip_time, skip_many
+	 * @param ?int           $urlMaxSecondsBudget override per-row cap (e.g. 300 for scrape-stream “single per-URL max”).
 	 */
-	private function maybeRewriteScrapeTitles(AIExtractor $ai, array $rawTitles, float $urlStartedAt, string $url, ?callable $progress): array
+	private function maybeRewriteScrapeTitles(AIExtractor $ai, array $rawTitles, float $urlStartedAt, string $url, ?callable $progress, ?int $urlMaxSecondsBudget = null): array
 	{
 		if ($rawTitles === []) {
 			return [];
 		}
+
+		$maxSec = $urlMaxSecondsBudget !== null
+			? max(60, min(7200, $urlMaxSecondsBudget))
+			: $this->scrapeUrlMaxSeconds();
 
 		$maxTitles = $this->scrapeRewriteMaxTitles();
 		if (count($rawTitles) > $maxTitles) {
@@ -1738,7 +1759,6 @@ class BidController extends Controller
 		}
 
 		$elapsed = microtime(true) - $urlStartedAt;
-		$maxSec = $this->scrapeUrlMaxSeconds();
 		$reserve = $this->scrapeTitleRewriteReserveSeconds();
 		if ($elapsed > $maxSec - $reserve) {
 			Log::warning('Title rewrite skipped: URL nearing per-row time budget', [
@@ -1762,6 +1782,8 @@ class BidController extends Controller
 				$progress('start', ['count' => $n, 'chunks' => 1]);
 			}
 
+			$this->guardUrlBudget($urlStartedAt, $maxSec, $url);
+
 			return $ai->rewriteTitles($titlesFlat);
 		}
 
@@ -1773,6 +1795,7 @@ class BidController extends Controller
 
 		$merged = [];
 		foreach ($batches as $i => $batch) {
+			$this->guardUrlBudget($urlStartedAt, $maxSec, $url);
 			if ($i > 0 && $progress !== null) {
 				$progress('chunk', ['chunk' => $i + 1, 'total_chunks' => $batchesTotal]);
 			}

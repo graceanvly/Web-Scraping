@@ -476,6 +476,36 @@
 			padding-top: 0.15rem;
 		}
 
+		.scrape-panel-footer-bulk {
+			flex-direction: column;
+			align-items: stretch;
+			gap: 0.65rem;
+		}
+
+		.scrape-checkbox-label {
+			display: flex;
+			align-items: flex-start;
+			gap: 0.45rem;
+			font-size: 0.82rem;
+			color: #475569;
+			line-height: 1.35;
+			cursor: pointer;
+			margin: 0;
+			font-weight: 500;
+		}
+
+		.scrape-checkbox-label input[type="checkbox"] {
+			margin: 0.12rem 0 0;
+			flex-shrink: 0;
+		}
+
+		.scrape-panel-footer-actions {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0.75rem;
+		}
+
 		.scrape-panel-footer #scrapeAllBtn {
 			padding: 0.62rem 1.25rem;
 			font-size: 0.95rem;
@@ -884,11 +914,17 @@
 						@endforeach
 					</select>
 				</div>
-				<div class="scrape-panel-footer">
-					<button id="scrapeAllBtn" type="button" class="contrast" onclick="startScrapeAll()">
-						Scrape All
-					</button>
-					<a href="{{ route('bidurl.index') }}" class="scrape-link-secondary">Manage Bid URLs →</a>
+				<div class="scrape-panel-footer scrape-panel-footer-bulk">
+					<label class="scrape-checkbox-label" title="Caps each Bid URL row at 5 minutes (fetch + AI + saves); then moves on. Unchecked uses SCRAPER_URL_MAX_SECONDS (typically 8 min).">
+						<input type="checkbox" id="singleUrlMaxCap" />
+						Single per-URL max (5 min)
+					</label>
+					<div class="scrape-panel-footer-actions">
+						<button id="scrapeAllBtn" type="button" class="contrast" onclick="startScrapeAll()">
+							Scrape All
+						</button>
+						<a href="{{ route('bidurl.index') }}" class="scrape-link-secondary">Manage Bid URLs →</a>
+					</div>
 				</div>
 			</div>
 
@@ -2059,6 +2095,9 @@
 			if (au) {
 				streamUrl += (streamUrl.indexOf('?') === -1 ? '?' : '&') + 'assign_user_id=' + encodeURIComponent(au);
 			}
+			if (document.getElementById('singleUrlMaxCap')?.checked) {
+				streamUrl += (streamUrl.indexOf('?') === -1 ? '?' : '&') + 'single_url_max=1';
+			}
 
 			fetch(streamUrl, {
 				method: 'GET',
@@ -2105,7 +2144,7 @@
 						stopBulkStepElapsed();
 						bulkCurrentUrl = '';
 						total = ev.total;
-						progressTitle.textContent = 'Scraping ' + total + ' URL(s)...';
+						progressTitle.textContent = 'Scraping ' + total + ' URL(s)...' + (ev.single_per_url_cap ? ' · 5 min max per URL' : '');
 						break;
 
 					case 'processing':
