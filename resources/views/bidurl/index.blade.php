@@ -416,6 +416,7 @@
 					<span class="badge">{{ $bidUrls->total() }} total</span>
 				</div>
 				<div class="header-actions">
+					<button class="btn btn-secondary" type="button" onclick="openSetLastScraped()">Set Last Scraped</button>
 					<button class="btn btn-primary" type="button" onclick="openAdd()">+ Add Bid URL</button>
 				</div>
 			</div>
@@ -592,6 +593,37 @@
 		</article>
 	</dialog>
 
+	<dialog id="setLastScrapedModal">
+		<article>
+			<h3>Set Last Scraped</h3>
+			<form id="setLastScrapedForm" method="POST" action="{{ route('bidurl.setLastScraped') }}">
+				@csrf
+				<label for="set_last_scraped_bid_url_id">Bid URL</label>
+				<select id="set_last_scraped_bid_url_id" name="bid_url_id" required>
+					<option value="" disabled selected>Select a Bid URL</option>
+					@foreach ($bidUrlOptions as $option)
+						<option value="{{ $option->id }}">
+							{{ $option->name ?: $option->url }}@if ($option->name) ({{ \Illuminate\Support\Str::limit($option->url, 60) }})@endif
+						</option>
+					@endforeach
+				</select>
+
+				<label for="set_last_scraped_at">Last Scraped</label>
+				<input type="datetime-local" id="set_last_scraped_at" name="last_scraped_at">
+
+				<label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.75rem;">
+					<input type="checkbox" id="clear_last_scraped" name="clear_last_scraped" value="1">
+					Clear last scraped (set to Never)
+				</label>
+
+				<footer style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
+					<button class="secondary" type="button" onclick="setLastScrapedModal.close()">Cancel</button>
+					<button class="contrast" type="submit">Save</button>
+				</footer>
+			</form>
+		</article>
+	</dialog>
+
 	<dialog id="editModal">
 		<article>
 			<h3>Edit Bid URL</h3>
@@ -622,6 +654,9 @@
 		const detailsModal = document.getElementById('detailsModal');
 		const detailsContent = document.getElementById('detailsContent');
 		const addModal = document.getElementById('addModal');
+		const setLastScrapedModal = document.getElementById('setLastScrapedModal');
+		const setLastScrapedAtInput = document.getElementById('set_last_scraped_at');
+		const clearLastScrapedInput = document.getElementById('clear_last_scraped');
 		const editModal = document.getElementById('editModal');
 		const editForm = document.getElementById('editForm');
 		const filtersForm = document.getElementById('filtersForm');
@@ -638,6 +673,44 @@
 			document.getElementById('add_password').value = '';
 			addModal.showModal();
 		}
+
+		function formatDateTimeLocal(date) {
+			const pad = (value) => String(value).padStart(2, '0');
+			return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+		}
+
+		function openSetLastScraped(bidUrl) {
+			const select = document.getElementById('set_last_scraped_bid_url_id');
+			if (bidUrl && bidUrl.id) {
+				select.value = String(bidUrl.id);
+			} else {
+				select.selectedIndex = 0;
+			}
+
+			clearLastScrapedInput.checked = false;
+			setLastScrapedAtInput.disabled = false;
+			setLastScrapedAtInput.required = true;
+
+			if (bidUrl && bidUrl.last_scraped_at) {
+				const parsed = new Date(bidUrl.last_scraped_at);
+				setLastScrapedAtInput.value = Number.isNaN(parsed.getTime()) ? formatDateTimeLocal(new Date()) : formatDateTimeLocal(parsed);
+			} else {
+				setLastScrapedAtInput.value = formatDateTimeLocal(new Date());
+			}
+
+			setLastScrapedModal.showModal();
+		}
+
+		clearLastScrapedInput?.addEventListener('change', () => {
+			const clear = clearLastScrapedInput.checked;
+			setLastScrapedAtInput.disabled = clear;
+			setLastScrapedAtInput.required = !clear;
+			if (clear) {
+				setLastScrapedAtInput.value = '';
+			} else if (!setLastScrapedAtInput.value) {
+				setLastScrapedAtInput.value = formatDateTimeLocal(new Date());
+			}
+		});
 
 		function openDetails(bidUrl) {
 			const failureFields = bidUrl.failure_message ? `
