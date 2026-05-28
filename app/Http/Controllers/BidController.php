@@ -9,6 +9,7 @@ use App\Models\ScrapeLog;
 use App\Services\AIExtractor;
 use App\Services\BidReferenceLookupService;
 use App\Services\ScraperService;
+use App\Support\ThirdPartyProcurementPortalUrl;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -231,19 +232,11 @@ class BidController extends Controller
 
 				$detailUrl = trim((string) ($bidData['URL'] ?? $validated['URL']));
 				$detailUrl = $detailUrl !== '' ? $detailUrl : $validated['URL'];
+				$savedUrl = ThirdPartyProcurementPortalUrl::savedBidUrl($validated['URL'], $detailUrl);
 
 				$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
-				$exists = Bid::where('TITLE', $title)
-					->where(function ($q) use ($detailUrl, $endDate) {
-						$q->where('URL', $detailUrl);
-						if ($endDate) {
-							$q->orWhere(function ($q2) use ($endDate) {
-								$q2->where('ENDDATE', $endDate);
-							});
-						}
-					})
-					->exists();
+				$exists = $this->scrapeBidAlreadyExists($title, $savedUrl, $endDate);
 
 				if ($exists) {
 					$duplicates[] = $title;
@@ -268,7 +261,7 @@ class BidController extends Controller
 				}
 
 				$bid = new Bid();
-				$bid->URL = $detailUrl;
+				$bid->URL = $savedUrl;
 				$bid->TITLE = $title;
 				$bid->ENDDATE = $endDate;
 				$bid->NAICSCODE = $this->normalizeNaicsCode(
@@ -462,15 +455,10 @@ class BidController extends Controller
 
 					$detailUrl = trim((string) ($bidData['URL'] ?? $url));
 					$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
+					$savedUrl = ThirdPartyProcurementPortalUrl::savedBidUrl($url, $detailUrl);
 					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
-					$exists = Bid::where('TITLE', $title)
-						->where(function ($q) use ($detailUrl, $endDate) {
-							$q->where('URL', $detailUrl);
-							if ($endDate) { $q->orWhere('ENDDATE', $endDate); }
-						})->exists();
-
-					if ($exists) { $duplicateCount++; continue; }
+					if ($this->scrapeBidAlreadyExists($title, $savedUrl, $endDate)) { $duplicateCount++; continue; }
 
 					$description = $bidData['DESCRIPTION'] ?? '';
 					if (is_array($description)) $description = $this->formatDescriptionArray($description);
@@ -481,7 +469,7 @@ class BidController extends Controller
 					if (!$this->looksLikeBid($title, $description, $url, $endDate)) continue;
 
 					$bid = new Bid();
-					$bid->URL = $detailUrl;
+					$bid->URL = $savedUrl;
 					$bid->TITLE = $title;
 					$bid->ENDDATE = $endDate;
 					$bid->NAICSCODE = $this->normalizeNaicsCode($bidData['NAICSCODE'] ?? null, $description, $title, $url);
@@ -643,21 +631,11 @@ class BidController extends Controller
 
 					$detailUrl = trim((string) ($bidData['URL'] ?? $url));
 					$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
+					$savedUrl = ThirdPartyProcurementPortalUrl::savedBidUrl($url, $detailUrl);
 
 					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
-					$exists = Bid::where('TITLE', $title)
-						->where(function ($q) use ($detailUrl, $endDate) {
-							$q->where('URL', $detailUrl);
-							if ($endDate) {
-								$q->orWhere(function ($q2) use ($endDate) {
-									$q2->where('ENDDATE', $endDate);
-								});
-							}
-						})
-						->exists();
-
-					if ($exists) {
+					if ($this->scrapeBidAlreadyExists($title, $savedUrl, $endDate)) {
 						$duplicatesThisUrl++;
 						continue;
 					}
@@ -680,7 +658,7 @@ class BidController extends Controller
 					}
 
 					$bid = new Bid();
-					$bid->URL = $detailUrl;
+					$bid->URL = $savedUrl;
 					$bid->TITLE = $title;
 					$bid->ENDDATE = $endDate;
 					$bid->NAICSCODE = $this->normalizeNaicsCode(
@@ -979,17 +957,10 @@ class BidController extends Controller
 
 						$detailUrl = trim((string) ($bidData['URL'] ?? $url));
 						$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
+						$savedUrl = ThirdPartyProcurementPortalUrl::savedBidUrl($url, $detailUrl);
 						$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
-						$exists = Bid::where('TITLE', $title)
-							->where(function ($q) use ($detailUrl, $endDate) {
-								$q->where('URL', $detailUrl);
-								if ($endDate) {
-									$q->orWhere('ENDDATE', $endDate);
-								}
-							})->exists();
-
-						if ($exists) {
+						if ($this->scrapeBidAlreadyExists($title, $savedUrl, $endDate)) {
 							$duplicatesThisUrl++;
 							continue;
 						}
@@ -1009,7 +980,7 @@ class BidController extends Controller
 						}
 
 						$bid = new Bid();
-						$bid->URL = $detailUrl;
+						$bid->URL = $savedUrl;
 						$bid->TITLE = $title;
 						$bid->ENDDATE = $endDate;
 						$bid->NAICSCODE = $this->normalizeNaicsCode($bidData['NAICSCODE'] ?? null, $description, $title, $url);
@@ -1818,6 +1789,26 @@ class BidController extends Controller
 		$m = (int) floor($seconds / 60);
 		$s = (int) ($seconds - $m * 60);
 		return $m > 0 ? "{$m}m {$s}s" : "{$s}s";
+	}
+
+	private function scrapeBidAlreadyExists(string $title, string $savedUrl, ?string $endDate): bool
+	{
+		return Bid::where('TITLE', $title)
+			->where(function ($q) use ($savedUrl, $endDate) {
+				if ($savedUrl === '') {
+					$q->where(function ($q2) {
+						$q2->whereNull('URL')->orWhere('URL', '');
+					});
+				} else {
+					$q->where('URL', $savedUrl);
+				}
+				if ($endDate) {
+					$q->orWhere(function ($q2) use ($endDate) {
+						$q2->where('ENDDATE', $endDate);
+					});
+				}
+			})
+			->exists();
 	}
 
 	private function looksLikeBid(?string $title, ?string $description, ?string $url, ?string $endDate): bool
