@@ -26,6 +26,8 @@ class ScraperService
 	private int $maxPerUrlSeconds = 180; // Hard cap per URL scrape (HTTP + Puppeteer + follow-ups); see SCRAPER_MAX_PER_URL_SECONDS.
 	/** @var int|null Raised for one fetch() on heavy JS portals (SCRAPER_HEAVY_PORTAL_MAX_URL_SECONDS). */
 	private ?int $fetchBudgetSeconds = null;
+	/** @var int|null Set when scrape-stream passes url_max_seconds (e.g. 300 for “Single per-URL max”). */
+	private ?int $strictUrlMaxSeconds = null;
 	private int $requestTimeout = 60; // General HTTP request timeout.
 	private int $maxHtmlBytes = 3145728; // Max raw HTML stored per response (3 MB).
 	private int $htmlToTextMaxChars = 400000; // Cap DOM parsing to avoid multi-minute hangs on huge pages.
@@ -117,8 +119,10 @@ class ScraperService
 		}
 
 		$this->fetchBudgetSeconds = null;
+		$this->strictUrlMaxSeconds = null;
 		if ($strictBudget !== null) {
 			$this->fetchBudgetSeconds = $strictBudget;
+			$this->strictUrlMaxSeconds = $strictBudget;
 			Log::info('Fetch using strict per-URL wall-clock budget', ['url' => $url, 'budget_sec' => $strictBudget]);
 		} elseif ($this->isHeavyJsProcurementPortal($url)) {
 			$heavyBudget = max(60, (int) env('SCRAPER_HEAVY_PORTAL_MAX_URL_SECONDS', 540));
@@ -214,6 +218,16 @@ class ScraperService
 			$needsHeadless = false;
 		}
 
+		$minBatchSkipHeadlessChars = max(500, (int) config('scraper.batch_skip_headless_min_listing_chars', 800));
+		if ($needsHeadless && $batchMode && !$httpFailed && !$isBrowserCheck && strlen($bestText) >= $minBatchSkipHeadlessChars) {
+			Log::info('BATCH SKIPPING HEADLESS — listing HTTP text is sufficient', [
+				'url' => $url,
+				'text_length' => strlen($bestText),
+				'trigger' => $httpFailed ? 'http_failed' : ($isBrowserCheck ? 'browser_check' : ($isSpa ? 'spa' : 'thin')),
+			]);
+			$needsHeadless = false;
+		}
+
 		$thinListingPuppeteerMaxSec = ($batchMode && $listingThinOnlyHeadlessTrigger && $needsHeadless)
 			? (int) config('scraper.batch_thin_listing_headless_max_sec', 42)
 			: null;
@@ -233,6 +247,9 @@ class ScraperService
 				$puppetDelay = $isBrowserCheck ? 5000 : (($httpFailed || $isSpa) ? 4000 : 1500);
 				if ($this->isHeavyJsProcurementPortal($url)) {
 					$puppetDelay = max($puppetDelay, (int) env('SCRAPER_HEAVY_PORTAL_SETTLE_MS', 22000));
+					if ($this->strictUrlMaxSeconds !== null) {
+						$puppetDelay = min($puppetDelay, max(1000, (int) config('scraper.strict_budget_heavy_settle_ms', 8000)));
+					}
 				}
 				$heavyPortalPulse = $this->isHeavyJsProcurementPortal($url);
 				$puppetPulseCb = fn (int $elapsed) => $report($heavyPortalPulse
@@ -268,12 +285,18 @@ class ScraperService
 
 		$bestText = $this->prependComplianceNewsPrimaryDescription($finalUrl, $bestText);
 
-		if (!$blocked && !$noOpenBids && (!$batchMode || $this->isHeavyJsProcurementPortal($url)) && $this->shouldCollectInteractivePages($bestHtml, $bestText)) {
-			$report('Interactive page scan (clicks/tabs)…');
-			$interactivePages = $this->collectInteractivePages($url, $startedAt, $requestOptions, $authProvided, $report);
-			if (!empty($interactivePages)) {
-				$bidPages = array_merge($bidPages, $interactivePages);
-				Log::info('INTERACTIVE BID STATES FOUND', ['url' => $url, 'count' => count($interactivePages)]);
+		if (!$blocked && !$noOpenBids && $this->shouldCollectInteractivePages($bestHtml, $bestText)) {
+			$runInteractive = !$batchMode
+				|| ($this->isHeavyJsProcurementPortal($url) && $this->strictUrlMaxSeconds === null);
+			if ($runInteractive) {
+				$report('Interactive page scan (clicks/tabs)…');
+				$interactivePages = $this->collectInteractivePages($url, $startedAt, $requestOptions, $authProvided, $report);
+				if (!empty($interactivePages)) {
+					$bidPages = array_merge($bidPages, $interactivePages);
+					Log::info('INTERACTIVE BID STATES FOUND', ['url' => $url, 'count' => count($interactivePages)]);
+				}
+			} elseif ($batchMode && $this->strictUrlMaxSeconds !== null && $this->isHeavyJsProcurementPortal($url)) {
+				Log::info('INTERACTIVE SCAN SKIPPED (strict per-URL budget)', ['url' => $url]);
 			}
 		}
 
@@ -396,6 +419,7 @@ class ScraperService
 		];
 		} finally {
 			$this->fetchBudgetSeconds = null;
+			$this->strictUrlMaxSeconds = null;
 		}
 	}
 
@@ -763,6 +787,23 @@ class ScraperService
 			'budget_sec' => $this->fetchWallClockCap(),
 			'elapsed_sec' => round(microtime(true) - $startedAt, 2),
 		]);
+	}
+
+	private function fetchAiReserveSeconds(): int
+	{
+		if ($this->strictUrlMaxSeconds === null) {
+			return 0;
+		}
+
+		return max(60, (int) config('scraper.strict_budget_ai_reserve_seconds', 120));
+	}
+
+	private function strictHeavyPuppeteerMaxSec(float $startedAt): int
+	{
+		$remaining = $this->fetchWallClockCap() - (microtime(true) - $startedAt) - 3;
+		$cap = max(30, min(240, (int) config('scraper.strict_budget_heavy_puppeteer_max_sec', 90)));
+
+		return (int) max(25, min($cap, $remaining - $this->fetchAiReserveSeconds()));
 	}
 
 	private function logPuppeteerDiagnostics(string $url, string $stderr): void
@@ -1468,10 +1509,14 @@ class ScraperService
 		if ($detailPagePass) {
 			$processTimeoutSec = (int) max(35, min(150, $remaining));
 		} else {
-			$heavyPuppetCap = max(90, (int) env('SCRAPER_HEAVY_PORTAL_PUPPETEER_MAX_SEC', 240));
-			$processTimeoutSec = $heavy
-				? min($heavyPuppetCap, (int) max(25, $remaining))
-				: (int) max(20, min(85, $remaining));
+			if ($heavy && $this->strictUrlMaxSeconds !== null) {
+				$processTimeoutSec = $this->strictHeavyPuppeteerMaxSec($startedAt);
+			} else {
+				$heavyPuppetCap = max(90, (int) env('SCRAPER_HEAVY_PORTAL_PUPPETEER_MAX_SEC', 240));
+				$processTimeoutSec = $heavy
+					? min($heavyPuppetCap, (int) max(25, $remaining))
+					: (int) max(20, min(85, $remaining));
+			}
 			if ($capListingProcessSeconds !== null && !$heavy) {
 				$processTimeoutSec = min($processTimeoutSec, max(15, $capListingProcessSeconds));
 			}
@@ -1496,6 +1541,8 @@ class ScraperService
 			'delay_ms' => $delayMs,
 			'nav_timeout_ms' => $navTimeoutMs,
 			'batch_cap_sec' => $capListingProcessSeconds,
+			'fetch_budget_remaining_sec' => round(max(0, $remaining), 1),
+			'strict_budget' => $this->strictUrlMaxSeconds !== null,
 		]);
 
 		$process = new \Symfony\Component\Process\Process(
@@ -1537,6 +1584,7 @@ class ScraperService
 						'url' => $url,
 						'elapsed_sec' => round($now - $puppetStart, 2),
 						'subprocess_budget_sec' => $processTimeoutSec,
+						'fetch_budget_remaining_sec' => round(max(0, $this->fetchWallClockCap() - (microtime(true) - $startedAt)), 1),
 					]);
 					$lastPulse = $now;
 				}
