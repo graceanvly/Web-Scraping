@@ -153,6 +153,13 @@ SYS;
 			? max(30.0, (float) config('services.openai.http_timeout_bulk_extract', 300))
 			: null;
 
+		if (isset($options['max_wall_clock_sec'])) {
+			$wallCap = max(15.0, (float) $options['max_wall_clock_sec']);
+			if ($bulkTimeout !== null) {
+				$bulkTimeout = min($bulkTimeout, $wallCap);
+			}
+		}
+
 		Log::info('AI bid extract POST payload', [
 			'url' => $URL,
 			'bulk_mode' => !empty($options['bulk_mode']),
@@ -160,6 +167,7 @@ SYS;
 			'bid_pages_in_prompt' => count($promptUser['bid_pages'] ?? []),
 			'combined_bid_page_excerpt_chars' => $combinedBidExcerpts,
 			'guzzle_timeout_sec' => $bulkTimeout ?? max(30.0, (float) config('services.openai.http_timeout', 300)),
+			'max_wall_clock_sec' => isset($options['max_wall_clock_sec']) ? (float) $options['max_wall_clock_sec'] : null,
 		]);
 
 		$body = [
@@ -192,6 +200,9 @@ SYS;
 		$extractWaitStarted = microtime(true);
 		/** Hard cap for POST + SSE drain (Guzzle total timeout is not always honored mid–blocking fread on StreamHandler). */
 		$extractMaxWallClockSec = $bulkTimeout ?? max(30.0, (float) config('services.openai.http_timeout', 300));
+		if (isset($options['max_wall_clock_sec'])) {
+			$extractMaxWallClockSec = min($extractMaxWallClockSec, max(15.0, (float) $options['max_wall_clock_sec']));
+		}
 		// CURL progress pings conflict with streamed responses — use streamed chunks + pulse below instead.
 		$this->attachOpenAiExtractHeartbeatCurl(
 			$requestOptions,

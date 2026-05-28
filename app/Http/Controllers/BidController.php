@@ -816,6 +816,7 @@ class BidController extends Controller
 					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Fetching page...']);
 					$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null, [
 						'batch' => true,
+						'url_max_seconds' => $urlMaxBudget,
 						'on_progress' => function (string $message) use ($send, $idx) {
 							$send(['type' => 'status', 'index' => $idx + 1, 'step' => $message]);
 						},
@@ -872,6 +873,7 @@ class BidController extends Controller
 						'busy_listing_tables_ai_estimate' => !$heavyAiPayload && $listingCharsPreAi >= 4000,
 					]);
 					$aiExtractStarted = microtime(true);
+					$remainingAiSec = $this->remainingUrlBudgetSeconds($urlStartedAt, $urlMaxBudget);
 					$extracted = $ai->extract(
 						$url,
 						$result['html'],
@@ -881,6 +883,7 @@ class BidController extends Controller
 						$result['bid_pages'] ?? [],
 						[
 							'bulk_mode' => true,
+							'max_wall_clock_sec' => $remainingAiSec,
 							'openai_heartbeat' => function (int $elapsedSec) use ($send, $idx): void {
 								$send([
 									'type' => 'status',
@@ -1012,6 +1015,14 @@ class BidController extends Controller
 					$send(['type' => 'done_url', 'index' => $idx + 1, 'url' => $url, 'saved' => $savedThisUrl, 'duplicates' => $duplicatesThisUrl]);
 
 				} catch (\Throwable $e) {
+					if ($this->isUrlBudgetTimeout($e)) {
+						$msg = $this->friendlyExceptionMessage($e);
+						Log::warning('Scrape skipped — per-URL time limit', ['url' => $url, 'budget_sec' => $urlMaxBudget, 'error' => $e->getMessage()]);
+						$this->logIssue($bidUrl->id, $url, 'warning', $msg);
+						$totalIssues++;
+						$send(['type' => 'skip', 'index' => $idx + 1, 'url' => $url, 'reason' => $msg]);
+						continue;
+					}
 					Log::error('Scrape failed for URL: ' . $url, ['error' => $e->getMessage()]);
 					$this->logIssue($bidUrl->id, $url, 'error', $this->friendlyExceptionMessage($e));
 					$this->moveBidUrlToFailed($bidUrl, $this->friendlyExceptionMessage($e));
@@ -1782,6 +1793,19 @@ class BidController extends Controller
 		if ($elapsed > $maxSeconds) {
 			throw new \RuntimeException("Processing this URL took too long ({$this->formatElapsed($elapsed)}). Skipping to avoid blocking other URLs.");
 		}
+	}
+
+	private function remainingUrlBudgetSeconds(float $startedAt, int $maxSeconds): int
+	{
+		return max(0, (int) floor($maxSeconds - (microtime(true) - $startedAt)));
+	}
+
+	private function isUrlBudgetTimeout(\Throwable $e): bool
+	{
+		$msg = $e->getMessage();
+
+		return str_contains($msg, 'Processing this URL took too long')
+			|| str_contains($msg, 'Scrape timed out while processing');
 	}
 
 	private function formatElapsed(float $seconds): string

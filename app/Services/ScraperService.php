@@ -87,6 +87,9 @@ class ScraperService
 		$startedAt = microtime(true);
 		$onProgress = $options['on_progress'] ?? null;
 		$batchMode = !empty($options['batch']);
+		$strictBudget = isset($options['url_max_seconds'])
+			? max(60, min(7200, (int) $options['url_max_seconds']))
+			: null;
 		$maxDetailLinks = $batchMode ? max(0, min(8, (int) env('SCRAPER_BATCH_MAX_DETAIL_PAGES', 3))) : 8;
 		$maxListingPdfs = $batchMode ? max(0, min($this->maxPdfDownloads, (int) env('SCRAPER_BATCH_MAX_LISTING_PDFS', 2))) : $this->maxPdfDownloads;
 		$maxDetailPdfsPerPage = $batchMode ? max(0, min(3, (int) env('SCRAPER_BATCH_MAX_DETAIL_PDFS', 1))) : PHP_INT_MAX;
@@ -114,7 +117,10 @@ class ScraperService
 		}
 
 		$this->fetchBudgetSeconds = null;
-		if ($this->isHeavyJsProcurementPortal($url)) {
+		if ($strictBudget !== null) {
+			$this->fetchBudgetSeconds = $strictBudget;
+			Log::info('Fetch using strict per-URL wall-clock budget', ['url' => $url, 'budget_sec' => $strictBudget]);
+		} elseif ($this->isHeavyJsProcurementPortal($url)) {
 			$heavyBudget = max(60, (int) env('SCRAPER_HEAVY_PORTAL_MAX_URL_SECONDS', 540));
 			$this->fetchBudgetSeconds = max($this->maxPerUrlSeconds, $heavyBudget);
 		}
@@ -730,11 +736,33 @@ class ScraperService
 
 	private function ensureWithinBudget(float $startedAt, string $context): void
 	{
-		$elapsed = microtime(true) - $startedAt;
-		$cap = $this->fetchBudgetSeconds ?? $this->maxPerUrlSeconds;
-		if ($elapsed > $cap) {
+		if ($this->fetchWallClockExceeded($startedAt)) {
 			throw new \RuntimeException("Scrape timed out while processing {$context}. Please retry later or reduce the amount of content to download.");
 		}
+	}
+
+	private function fetchWallClockCap(): int
+	{
+		return $this->fetchBudgetSeconds ?? $this->maxPerUrlSeconds;
+	}
+
+	private function fetchWallClockExceeded(float $startedAt): bool
+	{
+		return (microtime(true) - $startedAt) > $this->fetchWallClockCap();
+	}
+
+	private function stopSubprocessForFetchBudget(\Symfony\Component\Process\Process $process, float $startedAt, string $url, string $context): void
+	{
+		try {
+			$process->stop(10, defined('SIGKILL') ? SIGKILL : 9);
+		} catch (\Throwable) {
+		}
+		Log::warning('Subprocess stopped — per-URL fetch budget exceeded', [
+			'url' => $url,
+			'context' => $context,
+			'budget_sec' => $this->fetchWallClockCap(),
+			'elapsed_sec' => round(microtime(true) - $startedAt, 2),
+		]);
 	}
 
 	private function logPuppeteerDiagnostics(string $url, string $stderr): void
@@ -1134,6 +1162,10 @@ class ScraperService
 				$lastPulse = $interpStart;
 				while ($process->isRunning()) {
 					$process->checkTimeout();
+					if ($this->fetchWallClockExceeded($startedAt)) {
+						$this->stopSubprocessForFetchBudget($process, $startedAt, $url, 'interactive browser scan');
+						return [];
+					}
 					$now = microtime(true);
 					if (($now - $lastPulse) >= $pulseEvery) {
 						$elapsedRound = round($now - $interpStart, 2);
@@ -1477,31 +1509,40 @@ class ScraperService
 		$pulseEvery = max(8.0, min(90.0, (float) config('scraper.puppeteer_sse_pulse_sec', 15)));
 
 		try {
-			if ($pulseElapsedSec !== null && $pulseEvery >= 8) {
-				$process->start();
-				$lastPulse = $puppetStart;
-				while ($process->isRunning()) {
-					$process->checkTimeout();
-					$now = microtime(true);
-					if (($now - $lastPulse) >= $pulseEvery) {
-						$elapsedSec = max(0, (int) round($now - $puppetStart));
-						try {
-							($pulseElapsedSec)($elapsedSec);
-						} catch (\Throwable) {
-						}
-						Log::info('Puppeteer heartbeat (subprocess running)', [
-							'url' => $url,
-							'elapsed_sec' => round($now - $puppetStart, 2),
-							'subprocess_budget_sec' => $processTimeoutSec,
-						]);
-						$lastPulse = $now;
-					}
-					usleep(150_000);
+			$process->start();
+			$lastPulse = $puppetStart;
+			while ($process->isRunning()) {
+				$process->checkTimeout();
+				if ($this->fetchWallClockExceeded($startedAt)) {
+					$this->stopSubprocessForFetchBudget($process, $startedAt, $url, 'headless chrome');
+					Log::info('PUPPETEER END', [
+						'url' => $url,
+						'detail_page' => $detailPagePass,
+						'successful' => false,
+						'timed_out' => true,
+						'budget_exceeded' => true,
+						'elapsed_sec' => round(microtime(true) - $puppetStart, 2),
+					]);
+
+					return null;
 				}
-				$process->wait();
-			} else {
-				$process->run();
+				$now = microtime(true);
+				if ($pulseElapsedSec !== null && ($now - $lastPulse) >= $pulseEvery) {
+					$elapsedSec = max(0, (int) round($now - $puppetStart));
+					try {
+						($pulseElapsedSec)($elapsedSec);
+					} catch (\Throwable) {
+					}
+					Log::info('Puppeteer heartbeat (subprocess running)', [
+						'url' => $url,
+						'elapsed_sec' => round($now - $puppetStart, 2),
+						'subprocess_budget_sec' => $processTimeoutSec,
+					]);
+					$lastPulse = $now;
+				}
+				usleep(150_000);
 			}
+			$process->wait();
 		} catch (ProcessTimedOutException $e) {
 			try {
 				$process->stop(10);
