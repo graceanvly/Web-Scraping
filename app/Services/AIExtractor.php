@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\EntityNameMatch;
 use GuzzleHttp\Client;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Handler\StreamHandler;
@@ -105,7 +106,7 @@ For each bid you return, include:
   List every distinct email/phone that is clearly relevant to responding to this bid (omit lines only when that type of contact truly does not appear). If the **Contact** block would duplicate the exact same lines already present in the narrative **as labeled contact fields**, you may skip repeating them.
 
 - CONTACT_EMAIL (single **best** email for bid questions or submissions: estimator@, bids@, purchasing@, or the explicitly labeled submission address. Use empty string "" if no email appears anywhere.)
-- ISSUING_ORGANIZATION (concise issuing buyer / procurement unit / company **name** whose entity record might be matched in a master entity list — e.g. "City of Miami", "State of Vermont DOT", "ACME Constructors LLC"; use "Not provided" when unknown.)
+- ISSUING_ORGANIZATION (concise **buying agency** / school district / procurement unit name for master entity matching — e.g. "City of Miami", "Routt County", "Bellingham Public Schools"; use the agency named in page headers, footers, or "Issued by" blocks — **not** portal vendor names like Bonfire, BidNet Direct, DemandStar, PlanetBids, IonWave; use "Not provided" when unknown.)
 - ISSUING_ADDRESS (mailing/street/office address shown for the **issuing agency or contracting office**: building, street line(s), city, state/province, postal code when visibly part of solicitation / contact boilerplate — not merely the vague project geography unless labeled as departmental address; use "Not provided" when none appears.)
 - ISSUING_CONTACT_PHONE (voice phone number(s) for questions or procurement for that issuing office — digits, extensions; separate multiple entries with commas; use "Not provided" or empty string "" when none appears.)
 
@@ -699,6 +700,11 @@ SYS;
 	{
 		$s = trim(preg_replace('/\s+/u', ' ', $raw));
 		if ($s === '' || strcasecmp($s, 'not provided') === 0 || strcasecmp($s, 'n/a') === 0) {
+			return '';
+		}
+
+		$s = EntityNameMatch::stripPortalVendorNames($s);
+		if ($s === '' || mb_strlen($s) < 3) {
 			return '';
 		}
 

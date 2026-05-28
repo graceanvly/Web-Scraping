@@ -62,8 +62,8 @@
 	|--------------------------------------------------------------------------
 	| ENTITY reference (ENTITYID on bid)
 	|--------------------------------------------------------------------------
-	| Rows are matched in order: email (exact), website/email domain vs bid URL host,
-	| then fuzzy name using ISSUING_ORGANIZATION (AI) plus light patterns from text.
+	| Rows are matched in order: Bid URL name, email (exact), website/email domain vs non-portal URL hosts
+	| (listing + detail), then fuzzy name using ISSUING_ORGANIZATION (AI) plus structured text patterns.
 	| Point entity_table / columns at your Oracle (or MySQL) master entity list.
 	*/
 	'entity_resolve_enabled' => filter_var(env('SCRAPER_ENTITY_RESOLVE_ENABLED', true), FILTER_VALIDATE_BOOL),

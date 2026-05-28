@@ -274,7 +274,7 @@ class BidController extends Controller
 				$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
 				$bid->CREATED = now();
 				$bid->LAST_MODIFIED = now();
-				$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
+				$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description, $validated['URL']);
 				$this->applyScrapeCreatedBidDefaults($bid);
 				$bid->save();
 
@@ -477,7 +477,7 @@ class BidController extends Controller
 					$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
-					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
+					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description, $url);
 					$this->applyScrapeAssignUserId($bid, $assignUserId);
 					$this->applyScrapeCreatedBidDefaults($bid);
 					$bid->save();
@@ -672,7 +672,14 @@ class BidController extends Controller
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
 					$bid->BID_URL_ID = $bidUrl->id;
-					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
+					$this->applyBidReferenceFieldsFromScrape(
+						$bid,
+						$bidData,
+						$title,
+						$description,
+						$url,
+						$bidUrl->name ?? null
+					);
 					$this->applyScrapeAssignUserId($bid, $assignUserId);
 					$this->applyScrapeCreatedBidDefaults($bid);
 					$bid->save();
@@ -992,7 +999,14 @@ class BidController extends Controller
 						$bid->CREATED = now();
 						$bid->LAST_MODIFIED = now();
 						$bid->BID_URL_ID = $bidUrl->id;
-						$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description);
+						$this->applyBidReferenceFieldsFromScrape(
+							$bid,
+							$bidData,
+							$title,
+							$description,
+							$url,
+							$bidUrl->name ?? null
+						);
 						$this->applyScrapeAssignUserId($bid, $assignUserId);
 						$this->applyScrapeCreatedBidDefaults($bid);
 						$bid->save();
@@ -1327,8 +1341,14 @@ class BidController extends Controller
 		return null;
 	}
 
-	private function applyBidReferenceFieldsFromScrape(Bid $bid, array $bidData, string $title, string $description): void
-	{
+	private function applyBidReferenceFieldsFromScrape(
+		Bid $bid,
+		array $bidData,
+		string $title,
+		string $description,
+		?string $sourceListingUrl = null,
+		?string $bidUrlName = null
+	): void {
 		try {
 			$lookup = app(BidReferenceLookupService::class);
 			$catId = $lookup->resolveCategoryId($bidData['BID_CATEGORY'] ?? null, $title, $description);
@@ -1344,7 +1364,9 @@ class BidController extends Controller
 				$bid->EMAIL,
 				(string) ($bid->URL ?? ''),
 				$title,
-				$description
+				$description,
+				$sourceListingUrl,
+				$bidUrlName
 			);
 			if ($entityId !== null && $entityId > 0) {
 				$bid->ENTITYID = $entityId;

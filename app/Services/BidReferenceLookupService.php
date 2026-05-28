@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\EntityNameMatch;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -117,7 +118,9 @@ class BidReferenceLookupService
 		?string $resolvedBidEmail,
 		string $bidDetailUrl,
 		string $title,
-		string $description
+		string $description,
+		?string $sourceListingUrl = null,
+		?string $bidUrlName = null
 	): ?int {
 		if (!$this->cfg('entity_resolve_enabled', true)) {
 			return null;
@@ -136,6 +139,19 @@ class BidReferenceLookupService
 			return null;
 		}
 
+		$bidUrlNameHint = $this->normalizeOrganizationHintText($bidUrlName);
+		if ($bidUrlNameHint !== '' && $nameCols !== []) {
+			$fromBidUrlName = $this->bestEntityIdByNameHints($rows, $idCol, $nameCols, [$bidUrlNameHint], 72.0);
+			if ($fromBidUrlName !== null) {
+				Log::info('Entity matched from Bid URL name', [
+					'entity_id' => $fromBidUrlName,
+					'bid_url_name' => $bidUrlNameHint,
+				]);
+
+				return $fromBidUrlName;
+			}
+		}
+
 		$emailComparable = $this->normalizeComparableEmail($resolvedBidEmail);
 		if ($emailComparable !== '') {
 			$ids = [];
@@ -151,12 +167,14 @@ class BidReferenceLookupService
 				}
 			}
 			if ($ids !== []) {
-				return min(array_unique($ids));
+				$entityId = min(array_unique($ids));
+				Log::info('Entity matched from bid contact email', ['entity_id' => $entityId, 'email' => $emailComparable]);
+
+				return $entityId;
 			}
 		}
 
-		$bidHost = $this->normalizeUrlHost($bidDetailUrl);
-		if ($bidHost !== '') {
+		foreach (EntityNameMatch::meaningfulUrlHosts($bidDetailUrl, (string) $sourceListingUrl) as $bidHost) {
 			$ids = [];
 
 			foreach ($rows as $row) {
@@ -178,7 +196,7 @@ class BidReferenceLookupService
 					if ($urlRaw === null || trim((string) $urlRaw) === '') {
 						continue;
 					}
-					$wh = $this->normalizeUrlHost((string) $urlRaw);
+					$wh = EntityNameMatch::normalizeUrlHost((string) $urlRaw);
 					if ($wh !== '' && ($bidHost === $wh || str_ends_with($bidHost, '.' . $wh) || str_ends_with($wh, '.' . $bidHost))) {
 						$ids[] = (int) $idRaw;
 						continue 2;
@@ -187,16 +205,34 @@ class BidReferenceLookupService
 			}
 
 			if ($ids !== []) {
-				return min(array_unique($ids));
+				$entityId = min(array_unique($ids));
+				Log::info('Entity matched from URL host', ['entity_id' => $entityId, 'host' => $bidHost]);
+
+				return $entityId;
 			}
 		}
 
-		$nameHints = $this->collectEntityNameHints($issuingOrganizationHint, $title, $description);
+		$nameHints = $this->collectEntityNameHints(
+			$issuingOrganizationHint,
+			$title,
+			$description,
+			$bidUrlName,
+			$sourceListingUrl,
+			$bidDetailUrl
+		);
 		if ($nameHints === []) {
 			return null;
 		}
 
-		return $this->bestEntityIdByNameHints($rows, $idCol, $nameCols, $nameHints);
+		$entityId = $this->bestEntityIdByNameHints($rows, $idCol, $nameCols, $nameHints, 78.0);
+		if ($entityId !== null) {
+			Log::info('Entity matched from organization name hints', [
+				'entity_id' => $entityId,
+				'hints' => array_slice($nameHints, 0, 4),
+			]);
+		}
+
+		return $entityId;
 	}
 
 	/**
@@ -447,24 +483,6 @@ class BidReferenceLookupService
 		return preg_match('/^[a-z0-9.-]+$/', $domain) ? $domain : '';
 	}
 
-	private function normalizeUrlHost(string $url): string
-	{
-		$url = trim($url);
-		if ($url === '') {
-			return '';
-		}
-		if (!preg_match('#^[a-z][a-z0-9+.-]*:/#i', $url)) {
-			$url = 'https://' . $url;
-		}
-		$host = parse_url($url, PHP_URL_HOST);
-		if (!$host || !is_string($host)) {
-			return '';
-		}
-		$host = strtolower($host);
-
-		return preg_replace('/^www\./', '', $host);
-	}
-
 	private function hostnameBelongsToRegistrableDomain(string $host, string $domain): bool
 	{
 		$domain = strtolower($domain);
@@ -480,14 +498,27 @@ class BidReferenceLookupService
 	}
 
 	/** @return array<int, string> */
-	private function collectEntityNameHints(?string $issuingOrganizationHint, string $title, string $description): array
-	{
+	private function collectEntityNameHints(
+		?string $issuingOrganizationHint,
+		string $title,
+		string $description,
+		?string $bidUrlName = null,
+		?string $sourceListingUrl = null,
+		?string $bidDetailUrl = null
+	): array {
 		$list = [];
 
-		foreach ([$issuingOrganizationHint] as $h) {
+		foreach ([$bidUrlName, $issuingOrganizationHint] as $h) {
 			$x = $this->normalizeOrganizationHintText($h);
 			if ($x !== '') {
 				$list[] = $x;
+			}
+		}
+
+		foreach ([$sourceListingUrl, $bidDetailUrl] as $url) {
+			$subHint = EntityNameMatch::organizationHintFromSubdomain((string) $url);
+			if ($subHint !== '') {
+				$list[] = $subHint;
 			}
 		}
 
@@ -515,7 +546,8 @@ class BidReferenceLookupService
 		if ($s === '' || strcasecmp($s, 'Not provided') === 0 || strcasecmp($s, 'N/A') === 0) {
 			return '';
 		}
-		if (mb_strlen($s) < 3) {
+		$s = EntityNameMatch::stripPortalVendorNames($s);
+		if ($s === '' || mb_strlen($s) < 3) {
 			return '';
 		}
 
@@ -534,8 +566,11 @@ class BidReferenceLookupService
 			'/\bAwarding\s+Agency\s*:\s*([^\r\n]{3,240})/iu',
 			'/\bAgency\s*:\s*([^\r\n]{3,240})/iu',
 			'/\bIssuing\s+organization\s*:\s*([^\r\n]{3,240})/iu',
+			'/\bIssuing\s+Organization\s*:\s*([^\r\n]{3,240})/iu',
 			'/\bBuyer\s*:\s*([^\r\n]{3,240})/iu',
 			'/\bProcuring\s+[Ee]ntity\s*:\s*([^\r\n]{3,240})/iu',
+			'/\bDepartment\s*:\s*([^\r\n]{3,240})/iu',
+			'/\bSchool\s+District\s*:\s*([^\r\n]{3,240})/iu',
 		];
 		$candidates = [];
 		foreach ($patterns as $re) {
@@ -558,13 +593,12 @@ class BidReferenceLookupService
 	 * @param array<int, string> $nameCols
 	 * @param array<int, string> $nameHints
 	 */
-	private function bestEntityIdByNameHints(Collection $rows, string $idCol, array $nameCols, array $nameHints): ?int
+	private function bestEntityIdByNameHints(Collection $rows, string $idCol, array $nameCols, array $nameHints, float $threshold = 78.0): ?int
 	{
 		if ($nameCols === []) {
 			return null;
 		}
 
-		$threshold = 78.0;
 		/** @var array<int, float> $scores */
 		$scores = [];
 
@@ -582,6 +616,7 @@ class BidReferenceLookupService
 					continue;
 				}
 				$nameLower = mb_strtolower($nameRaw);
+				$nameKey = EntityNameMatch::canonicalKey($nameRaw);
 
 				foreach ($nameHints as $hint) {
 					$h = trim($hint);
@@ -592,6 +627,11 @@ class BidReferenceLookupService
 						continue;
 					}
 					$hLower = mb_strtolower($h);
+					$hKey = EntityNameMatch::canonicalKey($h);
+
+					if ($hKey !== '' && $hKey === $nameKey) {
+						return $idInt;
+					}
 
 					if ($hLower === $nameLower) {
 						return $idInt;
@@ -608,6 +648,8 @@ class BidReferenceLookupService
 					if ($strippedCompare) {
 						$pct = max($pct, 88.0);
 					}
+
+					$pct = max($pct, EntityNameMatch::tokenOverlapScore($h, $nameRaw));
 
 					$scores[$idInt] = max($scores[$idInt] ?? 0.0, $pct);
 				}
