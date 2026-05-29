@@ -881,6 +881,9 @@ class BidController extends Controller
 					]);
 					$aiExtractStarted = microtime(true);
 					$remainingAiSec = $this->remainingUrlBudgetSeconds($urlStartedAt, $urlMaxBudget);
+					// Bound a single (possibly stalled) OpenAI extract so it cannot eat the whole per-URL budget.
+					$aiExtractCap = max(30, (int) config('scraper.ai_bulk_extract_max_seconds', 150));
+					$remainingAiSec = $remainingAiSec > 0 ? min($remainingAiSec, $aiExtractCap) : $aiExtractCap;
 					$extracted = $ai->extract(
 						$url,
 						$result['html'],
@@ -1686,6 +1689,9 @@ class BidController extends Controller
 		}
 
 		$message = strtolower($e->getMessage());
+		if (str_contains($message, 'extract exceeded maximum wall-clock time')) {
+			return 'AI extraction took too long for this URL and was skipped. It will be retried on the next run.';
+		}
 		if (str_contains($message, 'timed out')) {
 			return 'The site took too long to respond. Please try again later.';
 		}
@@ -1827,7 +1833,8 @@ class BidController extends Controller
 		$msg = $e->getMessage();
 
 		return str_contains($msg, 'Processing this URL took too long')
-			|| str_contains($msg, 'Scrape timed out while processing');
+			|| str_contains($msg, 'Scrape timed out while processing')
+			|| str_contains($msg, 'Extract exceeded maximum wall-clock time');
 	}
 
 	private function formatElapsed(float $seconds): string

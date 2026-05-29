@@ -135,6 +135,12 @@
 	'ai_bulk_bid_page_pdf_text_chars' => max(2000, min(48000, (int) env('SCRAPER_AI_BULK_BID_PAGE_PDF_TEXT_CHARS', 9000))),
 	/** After per-field truncation, proportional shrink if combined bid-page excerpts still exceed this (bulk_mode only). */
 	'ai_bulk_bid_pages_total_budget_chars' => max(6000, min(200000, (int) env('SCRAPER_AI_BULK_PAGES_TOTAL_CHARS', 34000))),
+	/**
+	 * Max wall-clock seconds for a single bulk AI extract call. Bounds a slow/stalled OpenAI stream so one URL
+	 * cannot consume nearly the whole per-URL budget; the URL is abandoned and the run continues. Still capped by
+	 * the remaining per-URL budget.
+	 */
+	'ai_bulk_extract_max_seconds' => max(30, min(600, (int) env('SCRAPER_AI_BULK_EXTRACT_MAX_SECONDS', 150))),
 
 	/*
 	|--------------------------------------------------------------------------
