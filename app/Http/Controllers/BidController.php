@@ -12,6 +12,7 @@ use App\Services\ScraperService;
 use App\Support\ThirdPartyProcurementPortalUrl;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -767,6 +768,20 @@ class BidController extends Controller
 		$urlMaxBudget = $singlePerUrlFiveMin ? 300 : $this->scrapeUrlMaxSeconds();
 
 		return new StreamedResponse(function () use ($scraper, $ai, $assignUserId, $urlMaxBudget, $singlePerUrlFiveMin) {
+			// "Latest run wins": claim ownership so an older run (e.g. user refreshed the page and re-clicked
+			// Scrape All) self-terminates instead of running to completion in the background and overlapping.
+			$runKey = 'scrape:stream:active_run';
+			$runId = bin2hex(random_bytes(8));
+			Cache::put($runKey, $runId, now()->addHours(6));
+
+			$shouldStop = function () use ($runKey, $runId): bool {
+				if (function_exists('connection_aborted') && connection_aborted() === 1) {
+					return true;
+				}
+
+				return Cache::get($runKey) !== $runId;
+			};
+
 			$send = function ($data) {
 				echo "data: " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
 				if (ob_get_level())
@@ -793,6 +808,18 @@ class BidController extends Controller
 			]);
 
 			foreach ($bidUrls as $idx => $bidUrl) {
+				if ($shouldStop()) {
+					Log::info('Bulk scrape-stream stopped — superseded by a newer run or client disconnected.', [
+						'run_id' => $runId,
+						'stopped_before_index' => $idx + 1,
+						'total' => $total,
+					]);
+
+					return;
+				}
+				// Extend ownership for long runs (we are confirmed owner from the check above).
+				Cache::put($runKey, $runId, now()->addHours(6));
+
 				$url = trim((string) ($bidUrl->URL ?? $bidUrl->url ?? ''));
 
 				if ($url === '') {
@@ -1046,6 +1073,10 @@ class BidController extends Controller
 					$totalIssues++;
 					$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => $this->friendlyExceptionMessage($e)]);
 				}
+			}
+
+			if (Cache::get($runKey) === $runId) {
+				Cache::forget($runKey);
 			}
 
 			$send([
