@@ -10,6 +10,9 @@ use Illuminate\Support\Facades\Log;
 
 class BidReferenceLookupService
 {
+	/** @var array<string, int|null> Per-request memo of resolveEntityId results (same Bid URL repeats across its bids). */
+	private array $entityResolveMemo = [];
+
 	private function cfg(string $key, mixed $default = null): mixed
 	{
 		return config("scraper.{$key}", $default);
@@ -126,22 +129,53 @@ class BidReferenceLookupService
 			return null;
 		}
 
-		$rows = $this->cachedEntities();
-		if ($rows->isEmpty()) {
+		$index = $this->cachedEntityMatchIndex();
+		if ($index['names'] === [] && $index['email'] === [] && $index['domain'] === []) {
 			return null;
 		}
 
-		$idCol = (string) $this->cfg('entity_id_column', 'id');
-		$emailCols = array_values(array_filter($this->cfg('entity_email_columns', ['email']), fn ($c) => (string) $c !== ''));
-		$nameCols = array_values(array_filter($this->cfg('entity_name_columns', ['name']), fn ($c) => (string) $c !== ''));
-		$webCols = array_values(array_filter($this->cfg('entity_website_columns', []), fn ($c) => (string) $c !== ''));
-		if ($emailCols === [] && $nameCols === [] && $webCols === []) {
-			return null;
+		$memoKey = md5(json_encode([
+			$bidUrlName,
+			$resolvedBidEmail,
+			$bidDetailUrl,
+			$sourceListingUrl,
+			$issuingOrganizationHint,
+			mb_substr($title, 0, 120),
+		]));
+		if (array_key_exists($memoKey, $this->entityResolveMemo)) {
+			return $this->entityResolveMemo[$memoKey];
 		}
 
+		$result = $this->resolveEntityIdFromIndex(
+			$index,
+			$issuingOrganizationHint,
+			$resolvedBidEmail,
+			$bidDetailUrl,
+			$title,
+			$description,
+			$sourceListingUrl,
+			$bidUrlName
+		);
+
+		return $this->entityResolveMemo[$memoKey] = $result;
+	}
+
+	/**
+	 * @param array{email: array<string, list<int>>, domain: array<string, list<int>>, canon: array<string, list<int>>, names: list<array{id:int, lower:string, canon:string, tokens:list<string>}>} $index
+	 */
+	private function resolveEntityIdFromIndex(
+		array $index,
+		?string $issuingOrganizationHint,
+		?string $resolvedBidEmail,
+		string $bidDetailUrl,
+		string $title,
+		string $description,
+		?string $sourceListingUrl,
+		?string $bidUrlName
+	): ?int {
 		$bidUrlNameHint = $this->normalizeOrganizationHintText($bidUrlName);
-		if ($bidUrlNameHint !== '' && $nameCols !== []) {
-			$fromBidUrlName = $this->bestEntityIdByNameHints($rows, $idCol, $nameCols, [$bidUrlNameHint], 72.0);
+		if ($bidUrlNameHint !== '') {
+			$fromBidUrlName = $this->bestEntityIdFromNames($index['names'], [$bidUrlNameHint], 72.0);
 			if ($fromBidUrlName !== null) {
 				Log::info('Entity matched from Bid URL name', [
 					'entity_id' => $fromBidUrlName,
@@ -153,59 +187,17 @@ class BidReferenceLookupService
 		}
 
 		$emailComparable = $this->normalizeComparableEmail($resolvedBidEmail);
-		if ($emailComparable !== '') {
-			$ids = [];
-			foreach ($rows as $row) {
-				foreach ($this->rowEmailValues($row, $emailCols) as $e) {
-					if ($emailComparable === $e) {
-						$idRaw = $this->rowAttr($row, $idCol);
-						if ($idRaw !== null && $idRaw !== '') {
-							$ids[] = (int) $idRaw;
-						}
-						break;
-					}
-				}
-			}
-			if ($ids !== []) {
-				$entityId = min(array_unique($ids));
-				Log::info('Entity matched from bid contact email', ['entity_id' => $entityId, 'email' => $emailComparable]);
+		if ($emailComparable !== '' && isset($index['email'][$emailComparable])) {
+			$entityId = min($index['email'][$emailComparable]);
+			Log::info('Entity matched from bid contact email', ['entity_id' => $entityId, 'email' => $emailComparable]);
 
-				return $entityId;
-			}
+			return $entityId;
 		}
 
 		foreach (EntityNameMatch::meaningfulUrlHosts($bidDetailUrl, (string) $sourceListingUrl) as $bidHost) {
-			$ids = [];
-
-			foreach ($rows as $row) {
-				$idRaw = $this->rowAttr($row, $idCol);
-				if ($idRaw === null || $idRaw === '') {
-					continue;
-				}
-
-				foreach ($this->rowEmailValues($row, $emailCols) as $fullEmail) {
-					$domain = $this->emailDomain($fullEmail);
-					if ($domain !== '' && $this->hostnameBelongsToRegistrableDomain($bidHost, $domain)) {
-						$ids[] = (int) $idRaw;
-						continue 2;
-					}
-				}
-
-				foreach ($webCols as $webCol) {
-					$urlRaw = $this->rowAttr($row, $webCol);
-					if ($urlRaw === null || trim((string) $urlRaw) === '') {
-						continue;
-					}
-					$wh = EntityNameMatch::normalizeUrlHost((string) $urlRaw);
-					if ($wh !== '' && ($bidHost === $wh || str_ends_with($bidHost, '.' . $wh) || str_ends_with($wh, '.' . $bidHost))) {
-						$ids[] = (int) $idRaw;
-						continue 2;
-					}
-				}
-			}
-
+			$ids = $this->entityIdsForHost($index['domain'], $bidHost);
 			if ($ids !== []) {
-				$entityId = min(array_unique($ids));
+				$entityId = min($ids);
 				Log::info('Entity matched from URL host', ['entity_id' => $entityId, 'host' => $bidHost]);
 
 				return $entityId;
@@ -224,7 +216,7 @@ class BidReferenceLookupService
 			return null;
 		}
 
-		$entityId = $this->bestEntityIdByNameHints($rows, $idCol, $nameCols, $nameHints, 78.0);
+		$entityId = $this->bestEntityIdFromNames($index['names'], $nameHints, 78.0);
 		if ($entityId !== null) {
 			Log::info('Entity matched from organization name hints', [
 				'entity_id' => $entityId,
@@ -233,6 +225,213 @@ class BidReferenceLookupService
 		}
 
 		return $entityId;
+	}
+
+	/**
+	 * Entity ids whose email-domain or website host matches the bid host (or a parent suffix of it).
+	 *
+	 * @param array<string, list<int>> $domainMap
+	 * @return list<int>
+	 */
+	private function entityIdsForHost(array $domainMap, string $host): array
+	{
+		$host = EntityNameMatch::normalizeUrlHost($host);
+		if ($host === '') {
+			return [];
+		}
+
+		$labels = explode('.', $host);
+		$ids = [];
+		// Suffixes with at least 2 labels (so we never match a bare TLD).
+		for ($i = 0; $i <= count($labels) - 2; $i++) {
+			$suffix = implode('.', array_slice($labels, $i));
+			if (isset($domainMap[$suffix])) {
+				foreach ($domainMap[$suffix] as $id) {
+					$ids[] = $id;
+				}
+			}
+		}
+
+		return array_values(array_unique($ids));
+	}
+
+	/**
+	 * Precomputed lookup maps for entity matching, cached so per-bid resolution is cheap.
+	 *
+	 * @return array{email: array<string, list<int>>, domain: array<string, list<int>>, canon: array<string, list<int>>, names: list<array{id:int, lower:string, canon:string, tokens:list<string>}>}
+	 */
+	private function cachedEntityMatchIndex(): array
+	{
+		$empty = ['email' => [], 'domain' => [], 'canon' => [], 'names' => []];
+
+		$spec = $this->entitySelectableSpec();
+		if ($spec === null) {
+			return $empty;
+		}
+
+		$key = 'scraper.entity_match_index.' . md5(json_encode([
+			$spec['table'],
+			$spec['cols'],
+			$spec['id_col'],
+			$spec['email_cols'],
+			$spec['name_cols'],
+			$spec['web_cols'],
+		]));
+
+		return Cache::remember($key, 3600, function () use ($spec, $empty) {
+			$rows = $this->cachedEntities();
+			if ($rows->isEmpty()) {
+				return $empty;
+			}
+
+			$idCol = $spec['id_col'];
+			$emailCols = $spec['email_cols'];
+			$nameCols = $spec['name_cols'];
+			$webCols = $spec['web_cols'];
+
+			$email = [];
+			$domain = [];
+			$canon = [];
+			$names = [];
+
+			foreach ($rows as $row) {
+				$idRaw = $this->rowAttr($row, $idCol);
+				if ($idRaw === null || $idRaw === '') {
+					continue;
+				}
+				$id = (int) $idRaw;
+
+				foreach ($this->rowEmailValues($row, $emailCols) as $e) {
+					$email[$e][] = $id;
+					$d = $this->emailDomain($e);
+					if ($d !== '') {
+						$domain[$d][] = $id;
+					}
+				}
+
+				foreach ($webCols as $webCol) {
+					$urlRaw = $this->rowAttr($row, $webCol);
+					if ($urlRaw === null || trim((string) $urlRaw) === '') {
+						continue;
+					}
+					$wh = EntityNameMatch::normalizeUrlHost((string) $urlRaw);
+					if ($wh !== '') {
+						$domain[$wh][] = $id;
+					}
+				}
+
+				foreach ($nameCols as $ncol) {
+					$nameRaw = $this->rowAttr($row, $ncol);
+					$nameRaw = $nameRaw !== null && $nameRaw !== '' ? trim((string) $nameRaw) : '';
+					if ($nameRaw === '' || mb_strlen($nameRaw) < 3) {
+						continue;
+					}
+					$ck = EntityNameMatch::canonicalKey($nameRaw);
+					if ($ck !== '') {
+						$canon[$ck][] = $id;
+					}
+					$names[] = [
+						'id' => $id,
+						'lower' => mb_strtolower($nameRaw),
+						'canon' => $ck,
+						'tokens' => EntityNameMatch::significantTokens($nameRaw),
+					];
+				}
+			}
+
+			$dedupe = static function (array $map): array {
+				foreach ($map as $k => $ids) {
+					$map[$k] = array_values(array_unique($ids));
+				}
+
+				return $map;
+			};
+
+			return [
+				'email' => $dedupe($email),
+				'domain' => $dedupe($domain),
+				'canon' => $dedupe($canon),
+				'names' => $names,
+			];
+		});
+	}
+
+	/**
+	 * Best entity id for name hints using precomputed entity name entries (no per-row regex).
+	 *
+	 * @param list<array{id:int, lower:string, canon:string, tokens:list<string>}> $names
+	 * @param array<int, string> $hints
+	 */
+	private function bestEntityIdFromNames(array $names, array $hints, float $threshold): ?int
+	{
+		if ($names === []) {
+			return null;
+		}
+
+		$prepared = [];
+		foreach ($hints as $hint) {
+			$h = trim((string) $hint);
+			if ($h === '' || mb_strlen($h) < 4 || mb_strlen($h) > 220) {
+				continue;
+			}
+			$prepared[] = [
+				'lower' => mb_strtolower($h),
+				'canon' => EntityNameMatch::canonicalKey($h),
+				'tokens' => EntityNameMatch::significantTokens($h),
+			];
+		}
+		if ($prepared === []) {
+			return null;
+		}
+
+		/** @var array<int, float> $scores */
+		$scores = [];
+
+		foreach ($names as $entry) {
+			$id = $entry['id'];
+			$nameLower = $entry['lower'];
+			$nameCanon = $entry['canon'];
+
+			foreach ($prepared as $p) {
+				if ($p['canon'] !== '' && $p['canon'] === $nameCanon) {
+					return $id;
+				}
+				if ($p['lower'] === $nameLower) {
+					return $id;
+				}
+
+				similar_text($p['lower'], $nameLower, $pct);
+				$pct = (float) $pct;
+
+				if (mb_strlen($p['lower']) >= 8 && (str_contains($nameLower, $p['lower']) || str_contains($p['lower'], $nameLower))) {
+					$pct = max($pct, 88.0);
+				}
+
+				$pct = max($pct, EntityNameMatch::tokenOverlapTokens($p['tokens'], $entry['tokens']));
+
+				$scores[$id] = max($scores[$id] ?? 0.0, $pct);
+			}
+		}
+
+		if ($scores === []) {
+			return null;
+		}
+
+		$bestScore = max($scores);
+		if ($bestScore < $threshold) {
+			return null;
+		}
+
+		$tied = [];
+		foreach ($scores as $id => $sc) {
+			if ($sc >= $threshold && abs($sc - $bestScore) < 1e-5) {
+				$tied[] = (int) $id;
+			}
+		}
+
+		sort($tied);
+
+		return count($tied) === 1 ? $tied[0] : null;
 	}
 
 	/**
@@ -483,20 +682,6 @@ class BidReferenceLookupService
 		return preg_match('/^[a-z0-9.-]+$/', $domain) ? $domain : '';
 	}
 
-	private function hostnameBelongsToRegistrableDomain(string $host, string $domain): bool
-	{
-		$domain = strtolower($domain);
-		$host = strtolower($host);
-		if ($host === '') {
-			return false;
-		}
-		if ($host === $domain) {
-			return true;
-		}
-
-		return str_ends_with($host, '.' . $domain);
-	}
-
 	/** @return array<int, string> */
 	private function collectEntityNameHints(
 		?string $issuingOrganizationHint,
@@ -587,94 +772,6 @@ class BidReferenceLookupService
 		}
 
 		return $candidates;
-	}
-
-	/**
-	 * @param array<int, string> $nameCols
-	 * @param array<int, string> $nameHints
-	 */
-	private function bestEntityIdByNameHints(Collection $rows, string $idCol, array $nameCols, array $nameHints, float $threshold = 78.0): ?int
-	{
-		if ($nameCols === []) {
-			return null;
-		}
-
-		/** @var array<int, float> $scores */
-		$scores = [];
-
-		foreach ($rows as $row) {
-			$idRaw = $this->rowAttr($row, $idCol);
-			if ($idRaw === null || $idRaw === '') {
-				continue;
-			}
-			$idInt = (int) $idRaw;
-
-			foreach ($nameCols as $ncol) {
-				$nameRaw = $this->rowAttr($row, $ncol);
-				$nameRaw = $nameRaw !== null && $nameRaw !== '' ? trim((string) $nameRaw) : '';
-				if ($nameRaw === '' || mb_strlen($nameRaw) < 3) {
-					continue;
-				}
-				$nameLower = mb_strtolower($nameRaw);
-				$nameKey = EntityNameMatch::canonicalKey($nameRaw);
-
-				foreach ($nameHints as $hint) {
-					$h = trim($hint);
-					if ($h === '') {
-						continue;
-					}
-					if (mb_strlen($h) < 4 || mb_strlen($h) > 220) {
-						continue;
-					}
-					$hLower = mb_strtolower($h);
-					$hKey = EntityNameMatch::canonicalKey($h);
-
-					if ($hKey !== '' && $hKey === $nameKey) {
-						return $idInt;
-					}
-
-					if ($hLower === $nameLower) {
-						return $idInt;
-					}
-
-					similar_text($hLower, $nameLower, $pct);
-					$pct = (float) $pct;
-
-					$strippedCompare = mb_strlen($hLower) >= 8 && (
-						str_contains($nameLower, $hLower)
-						|| str_contains($hLower, $nameLower)
-						|| str_contains(str_replace([',', '.'], '', $nameLower), str_replace([',', '.'], '', $hLower))
-					);
-					if ($strippedCompare) {
-						$pct = max($pct, 88.0);
-					}
-
-					$pct = max($pct, EntityNameMatch::tokenOverlapScore($h, $nameRaw));
-
-					$scores[$idInt] = max($scores[$idInt] ?? 0.0, $pct);
-				}
-			}
-		}
-
-		if ($scores === []) {
-			return null;
-		}
-
-		$bestScore = max($scores);
-		if ($bestScore < $threshold) {
-			return null;
-		}
-
-		$tied = [];
-		foreach ($scores as $id => $sc) {
-			if ($sc >= $threshold && abs($sc - $bestScore) < 1e-5) {
-				$tied[] = (int) $id;
-			}
-		}
-
-		sort($tied);
-
-		return count($tied) === 1 ? $tied[0] : null;
 	}
 
 	private function normalizeHint(?string $s): string

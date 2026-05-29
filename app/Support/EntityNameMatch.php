@@ -165,8 +165,17 @@ final class EntityNameMatch
 
 	public static function tokenOverlapScore(string $hint, string $entityName): float
 	{
-		$hintTokens = self::significantTokens($hint);
-		$nameTokens = self::significantTokens($entityName);
+		return self::tokenOverlapTokens(self::significantTokens($hint), self::significantTokens($entityName));
+	}
+
+	/**
+	 * Overlap score from already-tokenized inputs (avoids re-running regex per comparison).
+	 *
+	 * @param list<string> $hintTokens
+	 * @param list<string> $nameTokens
+	 */
+	public static function tokenOverlapTokens(array $hintTokens, array $nameTokens): float
+	{
 		if ($hintTokens === [] || $nameTokens === []) {
 			return 0.0;
 		}
