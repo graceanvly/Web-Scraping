@@ -906,11 +906,18 @@
 				</div>
 				<p class="scrape-panel-desc">Processes each configured bid source. Optionally assign extracted bids to someone in the Manila directory before starting.</p>
 				<div class="scrape-field-stack">
+					@php
+						$uidsInDirectory = collect($manilaDirectoryUsers ?? [])->map(fn ($u) => (string) $u['id'])->all();
+						$userSelectedInDirectory = ($filterUserIdRaw ?? '') === '' || in_array((string) ($filterUserIdRaw ?? ''), $uidsInDirectory, true);
+					@endphp
 					<label class="field-label" for="scrapeAssignUserId">Assign new bids to (optional)</label>
 					<select id="scrapeAssignUserId" name="assign_user_id">
-						<option value="">— None —</option>
+						<option value="" {{ ($filterUserIdRaw ?? '') === '' ? 'selected' : '' }}>— None —</option>
+						@if (!$userSelectedInDirectory && (($filterUserIdRaw ?? '') !== '') && ctype_digit((string) $filterUserIdRaw))
+							<option value="{{ $filterUserIdRaw }}" selected>{{ $filterUserIdRaw }}</option>
+						@endif
 						@foreach ($manilaDirectoryUsers ?? [] as $dirUser)
-							<option value="{{ $dirUser['id'] }}">{{ $dirUser['label'] }}</option>
+							<option value="{{ $dirUser['id'] }}" {{ (string) ($filterUserIdRaw ?? '') === (string) $dirUser['id'] ? 'selected' : '' }}>{{ $dirUser['label'] }}</option>
 						@endforeach
 					</select>
 				</div>
