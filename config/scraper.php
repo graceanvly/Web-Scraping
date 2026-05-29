@@ -141,6 +141,8 @@
 	 * the remaining per-URL budget.
 	 */
 	'ai_bulk_extract_max_seconds' => max(30, min(600, (int) env('SCRAPER_AI_BULK_EXTRACT_MAX_SECONDS', 150))),
+	/** Reserve (seconds) kept free for saving bids after title rewrite; rewrite batches stop once remaining budget drops below this. */
+	'scrape_save_reserve_seconds' => max(10, min(120, (int) env('SCRAPER_SAVE_RESERVE_SECONDS', 25))),
 
 	/*
 	|--------------------------------------------------------------------------

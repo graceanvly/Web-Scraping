@@ -1818,14 +1818,25 @@ class BidController extends Controller
 		$titlesFlat = array_values($rawTitles);
 		$n = count($titlesFlat);
 		$chunkSz = max(1, min($n, $this->scrapeTitleRewriteChunkTitles()));
+		$saveReserve = max(10, (int) config('scraper.scrape_save_reserve_seconds', 25));
+		$minBatchSeconds = 8;
+
 		if ($n <= $chunkSz) {
 			if ($progress !== null) {
 				$progress('start', ['count' => $n, 'chunks' => 1]);
 			}
 
 			$this->guardUrlBudget($urlStartedAt, $maxSec, $url);
+			$batchCap = $maxSec - (microtime(true) - $urlStartedAt) - $saveReserve;
+			if ($batchCap < $minBatchSeconds) {
+				if ($progress !== null) {
+					$progress('skip_time', ['budget_sec' => $maxSec]);
+				}
 
-			return $ai->rewriteTitles($titlesFlat);
+				return $rawTitles;
+			}
+
+			return $ai->rewriteTitles($titlesFlat, $batchCap);
 		}
 
 		$batches = array_chunk($titlesFlat, $chunkSz);
@@ -1837,10 +1848,29 @@ class BidController extends Controller
 		$merged = [];
 		foreach ($batches as $i => $batch) {
 			$this->guardUrlBudget($urlStartedAt, $maxSec, $url);
+			// Stop rewriting once the remaining budget can't fit another batch plus the save reserve;
+			// keep the original titles for the rest so the URL still finishes within its time limit.
+			$batchCap = $maxSec - (microtime(true) - $urlStartedAt) - $saveReserve;
+			if ($batchCap < $minBatchSeconds) {
+				Log::warning('Title rewrite stopped mid-batch — remaining per-URL budget too low', [
+					'url' => $url,
+					'completed_batches' => $i,
+					'total_batches' => $batchesTotal,
+					'budget_sec' => $maxSec,
+				]);
+				if ($progress !== null) {
+					$progress('skip_time', ['budget_sec' => $maxSec]);
+				}
+				for ($j = $i; $j < $batchesTotal; $j++) {
+					$merged = array_merge($merged, $batches[$j]);
+				}
+
+				return $merged;
+			}
 			if ($i > 0 && $progress !== null) {
 				$progress('chunk', ['chunk' => $i + 1, 'total_chunks' => $batchesTotal]);
 			}
-			$merged = array_merge($merged, $ai->rewriteTitles($batch));
+			$merged = array_merge($merged, $ai->rewriteTitles($batch, $batchCap));
 		}
 
 		return $merged;

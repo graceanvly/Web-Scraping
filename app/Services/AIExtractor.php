@@ -388,7 +388,7 @@ SYS;
 	 * Use AI to rewrite raw scraped titles into clean, standardized format.
 	 * Sends one Chat Completions request per invocation; bulk scrapes chunk large lists upstream.
 	 */
-	public function rewriteTitles(array $titles): array
+	public function rewriteTitles(array $titles, ?float $maxSeconds = null): array
 	{
 		if (empty($titles)) {
 			return $titles;
@@ -438,6 +438,11 @@ SYS;
 				max(30.0, (float) config('services.openai.http_timeout_rewrite', 120))
 			),
 		];
+		// Cap the request to the remaining per-URL budget so title rewrite can never push a URL past its time limit.
+		if ($maxSeconds !== null) {
+			$rewriteRequest['timeout'] = max(5.0, min((float) $rewriteRequest['timeout'], $maxSeconds));
+			$rewriteRequest['connect_timeout'] = max(3.0, min((float) ($rewriteRequest['connect_timeout'] ?? 30.0), $maxSeconds));
+		}
 
 		try {
 			$response = $this->executeOpenAiRewritePostWithCurlFallback($rewriteRequest);
