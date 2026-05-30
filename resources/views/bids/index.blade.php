@@ -957,9 +957,20 @@
 
 		<!-- Scrape Progress Panel -->
 		<div id="scrapeProgress" style="display:none; margin-top:1rem; padding:1rem; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
-			<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+			<div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; margin-bottom:0.5rem;">
 				<strong id="progressTitle" style="font-size:0.95rem;">Starting scrape...</strong>
-				<span id="progressCounter" style="font-size:0.85rem; color:#6b7280;"></span>
+				<div style="display:flex; align-items:center; gap:0.75rem; white-space:nowrap;">
+					<label style="display:flex; align-items:center; gap:0.3rem; font-size:0.78rem; color:#374151;"
+						title="If a run stalls (no progress past the per-URL limit) or the connection drops before finishing, automatically restart Scrape All. The latest run always supersedes any stuck one.">
+						<input type="checkbox" id="bulkAutoRecover" checked />
+						Auto-recover if stuck
+					</label>
+					<button type="button" id="bulkStopBtn" onclick="stopScrapeAll()"
+						style="display:none; font-size:0.78rem; padding:0.2rem 0.6rem; border:1px solid #dc2626; color:#dc2626; background:#fff; border-radius:5px; cursor:pointer;">
+						Stop
+					</button>
+					<span id="progressCounter" style="font-size:0.85rem; color:#6b7280;"></span>
+				</div>
 			</div>
 			<div style="width:100%; background:#e5e7eb; border-radius:4px; height:6px; margin-bottom:0.75rem;">
 				<div id="progressBar" style="width:0%; height:100%; background:#2563eb; border-radius:4px; transition:width 0.3s;"></div>
@@ -2040,7 +2051,50 @@
 			}
 		});
 
-		function startScrapeAll() {
+		// --- Scrape All watchdog / auto-recover state (persists across auto-restarts) ---
+		let bulkUserStopped = false;     // user clicked Stop — suppress auto-restart
+		let bulkRunCompleted = false;    // last run reached the 'complete' event
+		let bulkRunning = false;         // a run is currently streaming
+		let bulkStalled = false;         // watchdog tripped on the current run
+		let bulkRestartCount = 0;        // consecutive auto-restarts (capped)
+		let bulkWatchdogTimer = null;    // interval checking for stalls
+		let bulkLastProgressAt = 0;      // ms timestamp of the last SSE event
+		let bulkStallMs = 6 * 60 * 1000; // silence (no events) before a run is "stuck"
+		let bulkActiveReader = null;     // current stream reader (so we can cancel it)
+		const BULK_MAX_AUTO_RESTARTS = 15;
+
+		function clearBulkWatchdog() {
+			if (bulkWatchdogTimer) {
+				clearInterval(bulkWatchdogTimer);
+				bulkWatchdogTimer = null;
+			}
+		}
+
+		function stopScrapeAll() {
+			bulkUserStopped = true;
+			bulkRunning = false;
+			clearBulkWatchdog();
+			const reader = bulkActiveReader;
+			bulkActiveReader = null;
+			if (reader) {
+				try { reader.cancel(); } catch (e) {}
+			}
+			const stopBtn = document.getElementById('bulkStopBtn');
+			if (stopBtn) stopBtn.style.display = 'none';
+			const btn = document.getElementById('scrapeAllBtn');
+			if (btn) { btn.disabled = false; btn.textContent = 'Scrape All'; }
+			const title = document.getElementById('progressTitle');
+			if (title) title.textContent = 'Stopped by user.';
+		}
+
+		function startScrapeAll(isAutoRestart = false) {
+			// A manual click is a fresh start: clear the stop flag and restart counter.
+			if (!isAutoRestart) {
+				bulkUserStopped = false;
+				bulkRestartCount = 0;
+			}
+			if (bulkUserStopped) return;
+
 			const btn = document.getElementById('scrapeAllBtn');
 			const panel = document.getElementById('scrapeProgress');
 			const progressTitle = document.getElementById('progressTitle');
@@ -2049,6 +2103,7 @@
 			const progressUrl = document.getElementById('progressUrl');
 			const progressElapsed = document.getElementById('progressStepElapsed');
 			const progressLog = document.getElementById('progressLog');
+			const stopBtn = document.getElementById('bulkStopBtn');
 
 			let bulkStepElapsedTimer = null;
 
@@ -2080,12 +2135,35 @@
 			btn.disabled = true;
 			btn.textContent = 'Scraping...';
 			panel.style.display = 'block';
-			progressTitle.textContent = 'Initializing...';
+			progressTitle.textContent = isAutoRestart ? 'Auto-restarting…' : 'Initializing...';
 			progressCounter.textContent = '';
 			progressBar.style.width = '0%';
+			progressBar.style.background = '#2563eb';
 			progressUrl.textContent = '';
 			stopBulkStepElapsed();
-			progressLog.innerHTML = '';
+			if (!isAutoRestart) progressLog.innerHTML = '';
+			if (stopBtn) stopBtn.style.display = 'inline-block';
+
+			// Run/watchdog state for this attempt.
+			bulkRunning = true;
+			bulkRunCompleted = false;
+			bulkStalled = false;
+			bulkLastProgressAt = Date.now();
+			clearBulkWatchdog();
+			bulkWatchdogTimer = setInterval(() => {
+				if (!bulkRunning) return;
+				if (Date.now() - bulkLastProgressAt <= bulkStallMs) return;
+				// No SSE events for longer than the per-URL budget + buffer → treat as stuck.
+				bulkStalled = true;
+				addLogLine('No progress for ' + Math.round(bulkStallMs / 1000) + 's — treating run as stuck.', '#d97706');
+				const reader = bulkActiveReader;
+				bulkActiveReader = null;
+				if (reader) { try { reader.cancel(); } catch (e) {} }
+			}, 15000);
+
+			if (isAutoRestart) {
+				addLogLine('Auto-restart #' + bulkRestartCount + ' — resuming Scrape All (a previous run stalled or dropped).', '#d97706');
+			}
 
 			let total = 0;
 			let bulkCurrentUrl = '';
@@ -2106,20 +2184,56 @@
 				streamUrl += (streamUrl.indexOf('?') === -1 ? '?' : '&') + 'single_url_max=1';
 			}
 
+			// Decide what to do when the stream ends: a clean 'complete' finishes;
+			// anything else (stall, dropped connection, server crash) auto-restarts unless the user stopped it.
+			function finishOrRestart(endReason) {
+				stopBulkStepElapsed();
+				clearBulkWatchdog();
+				bulkRunning = false;
+				bulkActiveReader = null;
+				if (stopBtn) stopBtn.style.display = 'none';
+				btn.disabled = false;
+				btn.textContent = 'Scrape All';
+
+				if (bulkRunCompleted || bulkUserStopped) {
+					return;
+				}
+
+				const autoRecover = document.getElementById('bulkAutoRecover')?.checked;
+				if (!autoRecover) {
+					return;
+				}
+
+				if (bulkRestartCount >= BULK_MAX_AUTO_RESTARTS) {
+					progressTitle.textContent = 'Stopped after ' + BULK_MAX_AUTO_RESTARTS + ' auto-restarts. Click Scrape All to resume.';
+					addLogLine('Reached the auto-restart limit (' + BULK_MAX_AUTO_RESTARTS + '). Not restarting again.', '#dc2626');
+					return;
+				}
+
+				bulkRestartCount++;
+				const why = bulkStalled ? 'stuck' : (endReason || 'connection ended');
+				progressTitle.textContent = 'Run ' + why + ' — auto-restarting in 3s… (click Stop to cancel)';
+				btn.disabled = true;
+				if (stopBtn) stopBtn.style.display = 'inline-block'; // allow cancelling the pending restart
+				setTimeout(() => {
+					if (bulkUserStopped) return;
+					startScrapeAll(true);
+				}, 3000);
+			}
+
 			fetch(streamUrl, {
 				method: 'GET',
 				headers: { 'Accept': 'text/event-stream' },
 			}).then(response => {
 				const reader = response.body.getReader();
+				bulkActiveReader = reader;
 				const decoder = new TextDecoder();
 				let buffer = '';
 
 				function read() {
 					reader.read().then(({ done, value }) => {
 						if (done) {
-							stopBulkStepElapsed();
-							btn.disabled = false;
-							btn.textContent = 'Scrape All';
+							finishOrRestart('stream ended');
 							return;
 						}
 						buffer += decoder.decode(value, { stream: true });
@@ -2134,23 +2248,30 @@
 							} catch (e) {}
 						});
 						read();
+					}).catch(() => {
+						finishOrRestart('connection dropped');
 					});
 				}
 				read();
 			}).catch(err => {
-				stopBulkStepElapsed();
-				progressTitle.textContent = 'Error: ' + err.message;
-				progressBar.style.background = '#dc2626';
-				btn.disabled = false;
-				btn.textContent = 'Scrape All';
+				if (!bulkUserStopped) {
+					progressBar.style.background = '#dc2626';
+				}
+				finishOrRestart('request failed (' + (err && err.message ? err.message : 'error') + ')');
 			});
 
 			function handleScrapeEvent(ev) {
+				// Any event = forward progress; reset the stall watchdog.
+				bulkLastProgressAt = Date.now();
 				switch (ev.type) {
 					case 'start':
 						stopBulkStepElapsed();
 						bulkCurrentUrl = '';
 						total = ev.total;
+						// Stall = no events for the per-URL budget + 150s buffer (covers gaps between URLs / heavy fetches).
+						if (ev.url_max_budget_sec) {
+							bulkStallMs = (Number(ev.url_max_budget_sec) + 150) * 1000;
+						}
 						progressTitle.textContent = 'Scraping ' + total + ' URL(s)...' + (ev.single_per_url_cap ? ' · 5 min max per URL' : '');
 						break;
 
@@ -2188,9 +2309,14 @@
 
 					case 'complete':
 						stopBulkStepElapsed();
+						clearBulkWatchdog();
+						bulkRunCompleted = true;
+						bulkRunning = false;
+						bulkRestartCount = 0;
 						bulkCurrentUrl = '';
 						progressBar.style.width = '100%';
 						progressBar.style.background = '#16a34a';
+						if (stopBtn) stopBtn.style.display = 'none';
 						let msg = ev.total_saved + ' new bid(s) saved.';
 						if (ev.total_duplicates > 0) msg += ' ' + ev.total_duplicates + ' duplicate(s).';
 						if (ev.total_skipped > 0) msg += ' ' + ev.total_skipped + ' already scraped today.';
