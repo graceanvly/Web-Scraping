@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\BidController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BidUrlController;
+use App\Http\Controllers\PendingBidController;
 
 // Auth
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
@@ -33,6 +34,14 @@ Route::middleware('auth')->group(function () {
     Route::post('/bidurl/scrape-all', [BidController::class, 'scrapeAll'])->name('bidurl.scrapeAll');
     Route::get('/scrape-stream', [BidController::class, 'scrapeStream'])->name('bidurl.scrapeStream');
     Route::get('/scrape-url-stream', [BidController::class, 'scrapeUrlStream'])->name('bids.scrapeUrlStream');
+    // Pending approval queue (scraped bids land in bids_temp until approved)
+    Route::get('/pending', [PendingBidController::class, 'index'])->name('pending.index');
+    Route::post('/pending/approve-all', [PendingBidController::class, 'approveAll'])->name('pending.approveAll');
+    Route::post('/pending/reject-all', [PendingBidController::class, 'rejectAll'])->name('pending.rejectAll');
+    Route::put('/pending/{pendingBid}', [PendingBidController::class, 'update'])->name('pending.update');
+    Route::post('/pending/{pendingBid}/approve', [PendingBidController::class, 'approve'])->name('pending.approve');
+    Route::delete('/pending/{pendingBid}', [PendingBidController::class, 'reject'])->name('pending.reject');
+
     Route::get('/issues', [BidController::class, 'issues'])->name('scrape.issues');
     Route::delete('/issues', [BidController::class, 'clearIssues'])->name('scrape.clearIssues');
     Route::delete('/issues/{scrapeLog}', [BidController::class, 'destroyIssue'])->name('scrape.destroyIssue');

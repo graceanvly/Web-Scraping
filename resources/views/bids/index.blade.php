@@ -850,6 +850,12 @@
 	<nav>
 		<h1>Bid Scraper</h1>
 		<div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+			<a href="{{ route('pending.index') }}" role="button" class="secondary outline" style="position:relative;">
+				Pending Approval
+				@if (($pendingCount ?? 0) > 0)
+					<span style="display:inline-block; margin-left:0.35rem; background:#dc2626; color:#fff; border-radius:999px; padding:0 0.45rem; font-size:0.72rem; font-weight:700; line-height:1.5;">{{ $pendingCount }}</span>
+				@endif
+			</a>
 			<form method="POST" action="{{ route('logout') }}">
 				@csrf
 				<button type="submit" class="secondary">Logout</button>

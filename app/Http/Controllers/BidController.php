@@ -6,6 +6,8 @@ use App\Models\Bid;
 use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
 use App\Models\ScrapeLog;
+use App\Models\TempBid;
+use Illuminate\Database\Eloquent\Model;
 use App\Services\AIExtractor;
 use App\Services\BidReferenceLookupService;
 use App\Services\ScraperService;
@@ -113,6 +115,13 @@ class BidController extends Controller
 			Log::warning('Manila directory users not loaded', ['error' => $e->getMessage()]);
 		}
 
+		$pendingCount = 0;
+		try {
+			$pendingCount = TempBid::count();
+		} catch (\Throwable $e) {
+			Log::warning('Pending bid count not loaded', ['error' => $e->getMessage()]);
+		}
+
 		return view('bids.index', compact(
 			'bids',
 			'noEntityBids',
@@ -126,6 +135,7 @@ class BidController extends Controller
 			'manilaDirectoryUsers',
 			'bidListingRecentDays',
 			'includeHistorical',
+			'pendingCount',
 		));
 	}
 
@@ -261,7 +271,7 @@ class BidController extends Controller
 					continue;
 				}
 
-				$bid = new Bid();
+				$bid = new TempBid();
 				$bid->URL = $savedUrl;
 				$bid->TITLE = $title;
 				$bid->ENDDATE = $endDate;
@@ -275,6 +285,7 @@ class BidController extends Controller
 				$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
 				$bid->CREATED = now();
 				$bid->LAST_MODIFIED = now();
+				$bid->source_listing_url = $validated['URL'];
 				$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description, $validated['URL']);
 				$this->applyScrapeCreatedBidDefaults($bid);
 				$bid->save();
@@ -297,7 +308,7 @@ class BidController extends Controller
 
 			$msg = '';
 			if ($saved) {
-				$msg .= count($saved) . ' bid(s) saved. ';
+				$msg .= count($saved) . ' bid(s) queued for approval. Review them under Pending Approval. ';
 			}
 			if ($duplicates) {
 				$msg .= count($duplicates) . ' duplicate bid(s) skipped.';
@@ -469,7 +480,7 @@ class BidController extends Controller
 
 					if (!$this->looksLikeBid($title, $description, $url, $endDate)) continue;
 
-					$bid = new Bid();
+					$bid = new TempBid();
 					$bid->URL = $savedUrl;
 					$bid->TITLE = $title;
 					$bid->ENDDATE = $endDate;
@@ -478,6 +489,7 @@ class BidController extends Controller
 					$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
+					$bid->source_listing_url = $url;
 					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description, $url);
 					$this->applyScrapeAssignUserId($bid, $assignUserId);
 					$this->applyScrapeCreatedBidDefaults($bid);
@@ -658,7 +670,7 @@ class BidController extends Controller
 						continue;
 					}
 
-					$bid = new Bid();
+					$bid = new TempBid();
 					$bid->URL = $savedUrl;
 					$bid->TITLE = $title;
 					$bid->ENDDATE = $endDate;
@@ -673,6 +685,8 @@ class BidController extends Controller
 					$bid->CREATED = now();
 					$bid->LAST_MODIFIED = now();
 					$bid->BID_URL_ID = $bidUrl->id;
+					$bid->source_listing_url = $url;
+					$bid->bid_url_name = $bidUrl->name ?? null;
 					$this->applyBidReferenceFieldsFromScrape(
 						$bid,
 						$bidData,
@@ -1019,7 +1033,7 @@ class BidController extends Controller
 							continue;
 						}
 
-						$bid = new Bid();
+						$bid = new TempBid();
 						$bid->URL = $savedUrl;
 						$bid->TITLE = $title;
 						$bid->ENDDATE = $endDate;
@@ -1029,6 +1043,8 @@ class BidController extends Controller
 						$bid->CREATED = now();
 						$bid->LAST_MODIFIED = now();
 						$bid->BID_URL_ID = $bidUrl->id;
+						$bid->source_listing_url = $url;
+						$bid->bid_url_name = $bidUrl->name ?? null;
 						$this->applyBidReferenceFieldsFromScrape(
 							$bid,
 							$bidData,
@@ -1376,7 +1392,7 @@ class BidController extends Controller
 	}
 
 	private function applyBidReferenceFieldsFromScrape(
-		Bid $bid,
+		Model $bid,
 		array $bidData,
 		string $title,
 		string $description,
@@ -1435,7 +1451,7 @@ class BidController extends Controller
 		return $intVal;
 	}
 
-	private function applyScrapeAssignUserId(Bid $bid, ?int $assignUserId): void
+	private function applyScrapeAssignUserId(Model $bid, ?int $assignUserId): void
 	{
 		if ($assignUserId !== null) {
 			$bid->USERID = $assignUserId;
@@ -1446,7 +1462,7 @@ class BidController extends Controller
 	 * Defaults for scraped bids before save (not used for manual UI creates).
 	 * SUBSCRIPTIONTYPEID / SETASIDECODEID match production expectations for auto-imported rows.
 	 */
-	private function applyScrapeCreatedBidDefaults(Bid $bid): void
+	private function applyScrapeCreatedBidDefaults(Model $bid): void
 	{
 		$bid->SUBSCRIPTIONTYPEID = 10;
 		$bid->SETASIDECODEID = 1;
@@ -1907,22 +1923,36 @@ class BidController extends Controller
 
 	private function scrapeBidAlreadyExists(string $title, string $savedUrl, ?string $endDate): bool
 	{
-		return Bid::where('TITLE', $title)
-			->where(function ($q) use ($savedUrl, $endDate) {
-				if ($savedUrl === '') {
-					$q->where(function ($q2) {
-						$q2->whereNull('URL')->orWhere('URL', '');
-					});
-				} else {
-					$q->where('URL', $savedUrl);
-				}
-				if ($endDate) {
-					$q->orWhere(function ($q2) use ($endDate) {
-						$q2->where('ENDDATE', $endDate);
-					});
-				}
-			})
-			->exists();
+		// Same title + (matching URL or end date) already live OR already queued for approval.
+		$matches = function ($q) use ($savedUrl, $endDate) {
+			$q->where('TITLE', $title)
+				->where(function ($q1) use ($savedUrl, $endDate) {
+					if ($savedUrl === '') {
+						$q1->where(function ($q2) {
+							$q2->whereNull('URL')->orWhere('URL', '');
+						});
+					} else {
+						$q1->where('URL', $savedUrl);
+					}
+					if ($endDate) {
+						$q1->orWhere(function ($q2) use ($endDate) {
+							$q2->where('ENDDATE', $endDate);
+						});
+					}
+				});
+		};
+
+		if (Bid::where($matches)->exists()) {
+			return true;
+		}
+
+		try {
+			return TempBid::where($matches)->exists();
+		} catch (\Throwable $e) {
+			Log::warning('Pending-bid duplicate check failed', ['error' => $e->getMessage()]);
+
+			return false;
+		}
 	}
 
 	private function looksLikeBid(?string $title, ?string $description, ?string $url, ?string $endDate): bool
