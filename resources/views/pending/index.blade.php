@@ -232,23 +232,29 @@
 	</dialog>
 
 	<script>
+		@php
+			$entitySearchUrl = route('bids.reference.entities');
+			$updateUrlTpl = route('pending.update', ['pendingBid' => '__ID__']);
+			$approveUrlTpl = route('pending.approve', ['pendingBid' => '__ID__']);
+			$pendingRows = $pending->getCollection()->map(function ($r) {
+				return [
+					'id' => $r->id,
+					'TITLE' => $r->TITLE,
+					'DESCRIPTION' => $r->DESCRIPTION,
+					'EMAIL' => $r->EMAIL,
+					'URL' => $r->URL,
+					'ENDDATE' => $r->ENDDATE ? \Illuminate\Support\Carbon::parse($r->ENDDATE)->format('Y-m-d') : '',
+					'NAICSCODE' => $r->NAICSCODE,
+					'ENTITYID' => $r->ENTITYID,
+					'USERID' => $r->USERID,
+				];
+			})->values();
+		@endphp
 		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
-		const entitySearchUrl = @json(route('bids.reference.entities'));
-		const updateUrlTpl = @json(route('pending.update', ['pendingBid' => '__ID__']));
-		const approveUrlTpl = @json(route('pending.approve', ['pendingBid' => '__ID__']));
-		const pendingData = @json($pending->getCollection()->map(function ($r) {
-			return [
-				'id' => $r->id,
-				'TITLE' => $r->TITLE,
-				'DESCRIPTION' => $r->DESCRIPTION,
-				'EMAIL' => $r->EMAIL,
-				'URL' => $r->URL,
-				'ENDDATE' => $r->ENDDATE ? \Illuminate\Support\Carbon::parse($r->ENDDATE)->format('Y-m-d') : '',
-				'NAICSCODE' => $r->NAICSCODE,
-				'ENTITYID' => $r->ENTITYID,
-				'USERID' => $r->USERID,
-			];
-		})->values());
+		const entitySearchUrl = @json($entitySearchUrl);
+		const updateUrlTpl = @json($updateUrlTpl);
+		const approveUrlTpl = @json($approveUrlTpl);
+		const pendingData = @json($pendingRows);
 
 		let entityReq = 0;
 		let entitySelectedLabel = '';
