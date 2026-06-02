@@ -596,29 +596,24 @@
 	<dialog id="setLastScrapedModal">
 		<article>
 			<h3>Set Last Scraped</h3>
-			<form id="setLastScrapedForm" method="POST" action="{{ route('bidurl.setLastScraped') }}">
+			<p style="margin:0 0 1rem; color:#6b7280; font-size:0.9rem;">
+				Applies to <strong>all</strong> configured Bid URLs. Use this to reset scrape eligibility (e.g. clear so Scrape All retries every URL).
+			</p>
+			<form id="setLastScrapedForm" method="POST" action="{{ route('bidurl.setLastScraped') }}"
+				onsubmit="return confirm('Apply this last scraped date to ALL Bid URLs?')">
 				@csrf
-				<label for="set_last_scraped_bid_url_id">Bid URL</label>
-				<select id="set_last_scraped_bid_url_id" name="bid_url_id" required>
-					<option value="" disabled selected>Select a Bid URL</option>
-					@foreach ($bidUrlOptions as $option)
-						<option value="{{ $option->id }}">
-							{{ $option->name ?: $option->url }}@if ($option->name) ({{ \Illuminate\Support\Str::limit($option->url, 60) }})@endif
-						</option>
-					@endforeach
-				</select>
 
 				<label for="set_last_scraped_at">Last Scraped</label>
 				<input type="datetime-local" id="set_last_scraped_at" name="last_scraped_at">
 
 				<label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.75rem;">
 					<input type="checkbox" id="clear_last_scraped" name="clear_last_scraped" value="1">
-					Clear last scraped (set to Never)
+					Clear last scraped on all URLs (set to Never)
 				</label>
 
 				<footer style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
 					<button class="secondary" type="button" onclick="setLastScrapedModal.close()">Cancel</button>
-					<button class="contrast" type="submit">Save</button>
+					<button class="contrast" type="submit">Apply to all</button>
 				</footer>
 			</form>
 		</article>
@@ -679,25 +674,11 @@
 			return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 		}
 
-		function openSetLastScraped(bidUrl) {
-			const select = document.getElementById('set_last_scraped_bid_url_id');
-			if (bidUrl && bidUrl.id) {
-				select.value = String(bidUrl.id);
-			} else {
-				select.selectedIndex = 0;
-			}
-
+		function openSetLastScraped() {
 			clearLastScrapedInput.checked = false;
 			setLastScrapedAtInput.disabled = false;
 			setLastScrapedAtInput.required = true;
-
-			if (bidUrl && bidUrl.last_scraped_at) {
-				const parsed = new Date(bidUrl.last_scraped_at);
-				setLastScrapedAtInput.value = Number.isNaN(parsed.getTime()) ? formatDateTimeLocal(new Date()) : formatDateTimeLocal(parsed);
-			} else {
-				setLastScrapedAtInput.value = formatDateTimeLocal(new Date());
-			}
-
+			setLastScrapedAtInput.value = formatDateTimeLocal(new Date());
 			setLastScrapedModal.showModal();
 		}
 

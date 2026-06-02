@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 class BidUrlController extends Controller
 {
@@ -93,14 +92,10 @@ class BidUrlController extends Controller
 
         $bidUrls = $query->paginate($perPage, ['*'], 'page')->withQueryString();
         $failedBidUrls = $failedQuery->paginate($perPage, ['*'], 'failed_page')->withQueryString();
-        $bidUrlOptions = BidUrl::query()
-            ->orderByRaw('COALESCE(NULLIF(name, \'\'), url)')
-            ->get(['id', 'name', 'url']);
 
         return view('bidurl.index', [
             'bidUrls' => $bidUrls,
             'failedBidUrls' => $failedBidUrls,
-            'bidUrlOptions' => $bidUrlOptions,
             'search' => $search,
             'failedCount' => $failedBidUrls->total(),
         ]);
@@ -175,28 +170,25 @@ class BidUrlController extends Controller
     }
 
     /**
-     * Set last_scraped_at for a BidUrl (or clear it).
+     * Set last_scraped_at for all BidUrls (or clear it on all).
      */
     public function setLastScraped(Request $request)
     {
         $data = $request->validate([
-            'bid_url_id' => ['required', 'integer', Rule::exists('bid_url', 'id')],
             'last_scraped_at' => ['nullable', 'date', 'required_unless:clear_last_scraped,1'],
             'clear_last_scraped' => ['sometimes', 'boolean'],
         ], [
             'last_scraped_at.required_unless' => 'Choose a date or select Clear last scraped.',
         ]);
 
-        $bidUrl = BidUrl::findOrFail($data['bid_url_id']);
         $clear = $request->boolean('clear_last_scraped');
+        $updated = BidUrl::query()->update([
+            'last_scraped_at' => $clear ? null : $data['last_scraped_at'],
+        ]);
 
-        $bidUrl->last_scraped_at = $clear ? null : $data['last_scraped_at'];
-        $bidUrl->save();
-
-        $label = $bidUrl->name ?: $bidUrl->url;
         $message = $clear
-            ? "Last scraped cleared for \"{$label}\"."
-            : 'Last scraped updated for "' . $label . '".';
+            ? "Last scraped cleared for {$updated} Bid URL(s)."
+            : "Last scraped updated for {$updated} Bid URL(s).";
 
         return redirect()->route('bidurl.index')->with('success', $message);
     }
