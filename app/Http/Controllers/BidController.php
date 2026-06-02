@@ -705,8 +705,12 @@ class BidController extends Controller
 				$totalSaved += $savedThisUrl;
 				$totalDuplicates += $duplicatesThisUrl;
 
-				$bidUrl->last_scraped_at = now();
-				$bidUrl->save();
+				// Only mark "scraped today" when the URL actually produced bids (new or duplicate),
+				// so URLs that yielded nothing are retried on a later run instead of being skipped.
+				if ($savedThisUrl > 0 || $duplicatesThisUrl > 0) {
+					$bidUrl->last_scraped_at = now();
+					$bidUrl->save();
+				}
 
 				Log::info('Scrape summary for ' . $url, [
 					'saved' => $savedThisUrl,
@@ -1061,8 +1065,14 @@ class BidController extends Controller
 
 					$totalSaved += $savedThisUrl;
 					$totalDuplicates += $duplicatesThisUrl;
-					$bidUrl->last_scraped_at = now();
-					$bidUrl->save();
+
+					// Only mark "scraped today" (skipped on later runs today) when the URL actually
+					// produced bids — new or duplicate. URLs that yielded nothing stay unmarked so a
+					// later run retries them instead of skipping them as already done.
+					if ($savedThisUrl > 0 || $duplicatesThisUrl > 0) {
+						$bidUrl->last_scraped_at = now();
+						$bidUrl->save();
+					}
 
 					if ($savedThisUrl === 0 && $duplicatesThisUrl === 0 && $nonBidsThisUrl === 0) {
 						$this->logIssue($bidUrl->id, $url, 'warning', 'No bids found.');
