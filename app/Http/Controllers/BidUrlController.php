@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 
 class BidUrlController extends Controller
 {
@@ -182,9 +183,23 @@ class BidUrlController extends Controller
         ]);
 
         $clear = $request->boolean('clear_last_scraped');
-        $updated = BidUrl::query()->update([
-            'last_scraped_at' => $clear ? null : $data['last_scraped_at'],
-        ]);
+
+        if ($clear) {
+            $updated = BidUrl::query()->update(['last_scraped_at' => null]);
+        } else {
+            // Query-builder update bypasses Eloquent casts; Oracle rejects ISO strings like
+            // 2026-06-01T13:57 (ORA-01858). Save per row so last_scraped_at is written
+            // the same way scrapeStream does (now() on individual models).
+            $at = Carbon::parse($data['last_scraped_at']);
+            $updated = 0;
+            BidUrl::query()->orderBy('id')->chunkById(200, function ($rows) use ($at, &$updated) {
+                foreach ($rows as $bidUrl) {
+                    $bidUrl->last_scraped_at = $at;
+                    $bidUrl->save();
+                    $updated++;
+                }
+            });
+        }
 
         $message = $clear
             ? "Last scraped cleared for {$updated} Bid URL(s)."
