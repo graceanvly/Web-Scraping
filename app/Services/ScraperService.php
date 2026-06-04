@@ -218,14 +218,38 @@ class ScraperService
 			$needsHeadless = false;
 		}
 
-		$minBatchSkipHeadlessChars = max(500, (int) config('scraper.batch_skip_headless_min_listing_chars', 800));
-		if ($needsHeadless && $batchMode && !$httpFailed && !$isBrowserCheck && strlen($bestText) >= $minBatchSkipHeadlessChars) {
-			Log::info('BATCH SKIPPING HEADLESS — listing HTTP text is sufficient', [
+		if (!$needsHeadless && $batchMode && !$httpFailed && !$isBrowserCheck
+			&& $this->isJsRenderedProcurementListingHost($url)
+			&& !$this->listingHasOpenBidSignals($bestText)) {
+			Log::info('BATCH FORCING HEADLESS — JS procurement portal without open-bid signals in HTTP text', [
 				'url' => $url,
 				'text_length' => strlen($bestText),
-				'trigger' => $httpFailed ? 'http_failed' : ($isBrowserCheck ? 'browser_check' : ($isSpa ? 'spa' : 'thin')),
 			]);
-			$needsHeadless = false;
+			$needsHeadless = true;
+			$listingThinOnlyHeadlessTrigger = true;
+		}
+
+		$minBatchSkipHeadlessChars = max(500, (int) config('scraper.batch_skip_headless_min_listing_chars', 800));
+		if ($needsHeadless && $batchMode && !$httpFailed && !$isBrowserCheck && strlen($bestText) >= $minBatchSkipHeadlessChars) {
+			if ($this->listingHasOpenBidSignals($bestText)) {
+				Log::info('BATCH SKIPPING HEADLESS — open-bid signals present in HTTP text', [
+					'url' => $url,
+					'text_length' => strlen($bestText),
+				]);
+				$needsHeadless = false;
+			} elseif ($this->isJsRenderedProcurementListingHost($url)) {
+				Log::info('BATCH KEEPING HEADLESS — JS portal HTTP text lacks open-bid signals', [
+					'url' => $url,
+					'text_length' => strlen($bestText),
+				]);
+			} else {
+				Log::info('BATCH SKIPPING HEADLESS — listing HTTP text is sufficient', [
+					'url' => $url,
+					'text_length' => strlen($bestText),
+					'trigger' => $httpFailed ? 'http_failed' : ($isBrowserCheck ? 'browser_check' : ($isSpa ? 'spa' : 'thin')),
+				]);
+				$needsHeadless = false;
+			}
 		}
 
 		$thinListingPuppeteerMaxSec = ($batchMode && $listingThinOnlyHeadlessTrigger && $needsHeadless)
@@ -434,7 +458,7 @@ class ScraperService
 			return false;
 		}
 
-		$suffixes = ['bonfirehub.com'];
+		$suffixes = ['bonfirehub.com', 'bidnetdirect.com'];
 		foreach (array_filter(array_map('trim', explode(',', (string) env('SCRAPER_HEAVY_PORTAL_HOST_SUFFIXES', '')))) as $s) {
 			if ($s !== '') {
 				$suffixes[] = strtolower($s);
@@ -467,7 +491,7 @@ class ScraperService
 			return false;
 		}
 
-		$suffixes = ['bonfirehub.com'];
+		$suffixes = ['bonfirehub.com', 'bidnetdirect.com'];
 		foreach (array_filter(array_map('trim', explode(',', (string) env('SCRAPER_DETAIL_HEADLESS_HOST_SUFFIXES', '')))) as $s) {
 			if ($s !== '') {
 				$suffixes[] = strtolower($s);
@@ -1559,6 +1583,28 @@ class ScraperService
 			$process->start();
 			$lastPulse = $puppetStart;
 			while ($process->isRunning()) {
+				$subElapsedSec = microtime(true) - $puppetStart;
+				if ($subElapsedSec > $processTimeoutSec + 1.5) {
+					try {
+						$process->stop(10, defined('SIGKILL') ? SIGKILL : 9);
+					} catch (\Throwable) {
+					}
+					Log::warning('Puppeteer subprocess exceeded wall-clock cap (forced stop)', [
+						'url' => $url,
+						'subprocess_timeout_sec' => $processTimeoutSec,
+						'elapsed_sec' => round($subElapsedSec, 2),
+					]);
+					Log::info('PUPPETEER END', [
+						'url' => $url,
+						'detail_page' => $detailPagePass,
+						'successful' => false,
+						'timed_out' => true,
+						'forced_wall_clock' => true,
+						'elapsed_sec' => round($subElapsedSec, 2),
+					]);
+
+					return null;
+				}
 				$process->checkTimeout();
 				if ($this->fetchWallClockExceeded($startedAt)) {
 					$this->stopSubprocessForFetchBudget($process, $startedAt, $url, 'headless chrome');
@@ -1875,9 +1921,84 @@ class ScraperService
 		return false;
 	}
 
+	/**
+	 * Hosts whose bid tables are often missing from Guzzle HTML (React/Angular + marketing boilerplate).
+	 */
+	private function isJsRenderedProcurementListingHost(string $url): bool
+	{
+		$host = strtolower((string) parse_url($url, PHP_URL_HOST));
+		if ($host === '') {
+			return false;
+		}
+
+		$suffixes = [
+			'bidnetdirect.com',
+			'vendorregistry.com',
+			'demandstar.com',
+			'publicpurchase.com',
+		];
+		foreach (array_filter(array_map('trim', explode(',', (string) env('SCRAPER_JS_LISTING_HOST_SUFFIXES', '')))) as $s) {
+			if ($s !== '') {
+				$suffixes[] = strtolower($s);
+			}
+		}
+
+		foreach (array_unique($suffixes) as $suffix) {
+			if ($host === $suffix || str_ends_with($host, '.' . $suffix)) {
+				return true;
+			}
+		}
+
+		return $this->isHeavyJsProcurementPortal($url);
+	}
+
+	/**
+	 * True when listing text/HTML likely contains at least one open solicitation row (not footer copy alone).
+	 */
+	private function listingHasOpenBidSignals(string $text): bool
+	{
+		$haystack = strtolower($text);
+		if ($haystack === '') {
+			return false;
+		}
+
+		if (preg_match('/(\d+)\s+open\s+solicitation/i', $haystack, $m) && (int) ($m[1] ?? 0) > 0) {
+			return true;
+		}
+
+		$signals = [
+			'/solicitations/open-bids/',
+			'open solicitations tab',
+			'solicitation number',
+			'published date',
+			'closing date',
+			'bid opportunity',
+			'bid opportunities',
+		];
+		foreach ($signals as $signal) {
+			if (str_contains($haystack, $signal)) {
+				return true;
+			}
+		}
+
+		return (bool) preg_match(
+			'/\b(ifb|rfp|rfq|itb|rfb|ifq|ib|ipwb)[- ][a-z0-9]{2,}/i',
+			$haystack
+		);
+	}
+
 	private function detectNoOpenBids(string $html, string $text): bool
 	{
 		$haystack = strtolower($text . ' ' . strip_tags($html));
+
+		if ($this->listingHasOpenBidSignals($haystack)) {
+			return false;
+		}
+
+		if (preg_match('/(\d+)\s+open\s+solicitation/i', $haystack, $m) && (int) ($m[1] ?? 0) > 0) {
+			return false;
+		}
+
 		$patterns = [
 			'no open bid',
 			'no open bids',
