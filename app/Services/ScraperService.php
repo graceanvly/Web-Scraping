@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\ScrapeAbortedException;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException;
@@ -28,6 +29,8 @@ class ScraperService
 	private ?int $fetchBudgetSeconds = null;
 	/** @var int|null Set when scrape-stream passes url_max_seconds (e.g. 300 for “Single per-URL max”). */
 	private ?int $strictUrlMaxSeconds = null;
+	/** @var (callable(): bool)|null When true, fetch() aborts cooperatively (superseded run / disconnected client). */
+	private $fetchAbortCheck = null;
 	private int $requestTimeout = 60; // General HTTP request timeout.
 	private int $maxHtmlBytes = 3145728; // Max raw HTML stored per response (3 MB).
 	private int $htmlToTextMaxChars = 400000; // Cap DOM parsing to avoid multi-minute hangs on huge pages.
@@ -88,6 +91,7 @@ class ScraperService
 	{
 		$startedAt = microtime(true);
 		$onProgress = $options['on_progress'] ?? null;
+		$this->fetchAbortCheck = $options['should_abort'] ?? null;
 		$batchMode = !empty($options['batch']);
 		$strictBudget = isset($options['url_max_seconds'])
 			? max(60, min(7200, (int) $options['url_max_seconds']))
@@ -130,6 +134,7 @@ class ScraperService
 		}
 
 		try {
+		$this->guardFetchAbort();
 		// 2. Fetch HTML content
 		$bestHtml = '';
 		$bestText = '';
@@ -290,6 +295,8 @@ class ScraperService
 						Log::info('HEADLESS CHROME SUCCESS', ['url' => $url, 'text_length' => strlen($bestText)]);
 					}
 				}
+			} catch (ScrapeAbortedException $e) {
+				throw $e;
 			} catch (\Throwable $e) {
 				Log::warning('HEADLESS CHROME FAILED', ['url' => $url, 'error' => $e->getMessage()]);
 			}
@@ -444,6 +451,7 @@ class ScraperService
 		} finally {
 			$this->fetchBudgetSeconds = null;
 			$this->strictUrlMaxSeconds = null;
+			$this->fetchAbortCheck = null;
 		}
 	}
 
@@ -782,8 +790,16 @@ class ScraperService
 		return round($val, 1) . ' ' . $units[$i];
 	}
 
+	private function guardFetchAbort(): void
+	{
+		if ($this->fetchAbortCheck !== null && ($this->fetchAbortCheck)()) {
+			throw new ScrapeAbortedException('Scrape aborted (superseded or disconnected)');
+		}
+	}
+
 	private function ensureWithinBudget(float $startedAt, string $context): void
 	{
+		$this->guardFetchAbort();
 		if ($this->fetchWallClockExceeded($startedAt)) {
 			throw new \RuntimeException("Scrape timed out while processing {$context}. Please retry later or reduce the amount of content to download.");
 		}
@@ -1578,11 +1594,15 @@ class ScraperService
 		);
 		$puppetStart = microtime(true);
 		$pulseEvery = max(8.0, min(90.0, (float) config('scraper.puppeteer_sse_pulse_sec', 15)));
+		if ($this->strictUrlMaxSeconds !== null) {
+			$pulseEvery = min($pulseEvery, 10.0);
+		}
 
 		try {
 			$process->start();
 			$lastPulse = $puppetStart;
 			while ($process->isRunning()) {
+				$this->guardFetchAbort();
 				$subElapsedSec = microtime(true) - $puppetStart;
 				if ($subElapsedSec > $processTimeoutSec + 1.5) {
 					try {

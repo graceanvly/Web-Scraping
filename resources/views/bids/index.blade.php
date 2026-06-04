@@ -2067,7 +2067,10 @@
 		let bulkLastProgressAt = 0;      // ms timestamp of the last SSE event
 		let bulkStallMs = 6 * 60 * 1000; // silence (no events) before a run is "stuck"
 		let bulkActiveReader = null;     // current stream reader (so we can cancel it)
+		let bulkRunGeneration = 0;       // ignore stale stream callbacks after a newer run starts
+		let bulkRestartTimer = null;     // pending auto-restart timeout (cleared on new run)
 		const BULK_MAX_AUTO_RESTARTS = 15;
+		const BULK_AUTO_RESTART_DELAY_MS = 12000;
 
 		function clearBulkWatchdog() {
 			if (bulkWatchdogTimer) {
@@ -2079,6 +2082,11 @@
 		function stopScrapeAll() {
 			bulkUserStopped = true;
 			bulkRunning = false;
+			bulkRunGeneration++;
+			if (bulkRestartTimer) {
+				clearTimeout(bulkRestartTimer);
+				bulkRestartTimer = null;
+			}
 			clearBulkWatchdog();
 			const reader = bulkActiveReader;
 			bulkActiveReader = null;
@@ -2094,6 +2102,11 @@
 		}
 
 		function startScrapeAll(isAutoRestart = false) {
+			if (bulkRestartTimer) {
+				clearTimeout(bulkRestartTimer);
+				bulkRestartTimer = null;
+			}
+			const myGeneration = ++bulkRunGeneration;
 			// A manual click is a fresh start: clear the stop flag and restart counter.
 			if (!isAutoRestart) {
 				bulkUserStopped = false;
@@ -2193,6 +2206,9 @@
 			// Decide what to do when the stream ends: a clean 'complete' finishes;
 			// anything else (stall, dropped connection, server crash) auto-restarts unless the user stopped it.
 			function finishOrRestart(endReason) {
+				if (myGeneration !== bulkRunGeneration) {
+					return;
+				}
 				stopBulkStepElapsed();
 				clearBulkWatchdog();
 				bulkRunning = false;
@@ -2218,13 +2234,15 @@
 
 				bulkRestartCount++;
 				const why = bulkStalled ? 'stuck' : (endReason || 'connection ended');
-				progressTitle.textContent = 'Run ' + why + ' — auto-restarting in 3s… (click Stop to cancel)';
+				const delaySec = Math.round(BULK_AUTO_RESTART_DELAY_MS / 1000);
+				progressTitle.textContent = 'Run ' + why + ' — auto-restarting in ' + delaySec + 's… (click Stop to cancel)';
 				btn.disabled = true;
 				if (stopBtn) stopBtn.style.display = 'inline-block'; // allow cancelling the pending restart
-				setTimeout(() => {
-					if (bulkUserStopped) return;
+				bulkRestartTimer = setTimeout(() => {
+					bulkRestartTimer = null;
+					if (bulkUserStopped || myGeneration !== bulkRunGeneration) return;
 					startScrapeAll(true);
-				}, 3000);
+				}, BULK_AUTO_RESTART_DELAY_MS);
 			}
 
 			fetch(streamUrl, {
@@ -2267,6 +2285,9 @@
 			});
 
 			function handleScrapeEvent(ev) {
+				if (myGeneration !== bulkRunGeneration) {
+					return;
+				}
 				// Any event = forward progress; reset the stall watchdog.
 				bulkLastProgressAt = Date.now();
 				switch (ev.type) {
@@ -2311,6 +2332,21 @@
 						stopBulkStepElapsed();
 						bulkCurrentUrl = '';
 						addLogLine('Error: ' + ev.url + ' — ' + ev.message, '#dc2626');
+						break;
+
+					case 'stopped':
+						stopBulkStepElapsed();
+						clearBulkWatchdog();
+						bulkRunCompleted = true;
+						bulkRunning = false;
+						bulkRestartCount = 0;
+						bulkCurrentUrl = '';
+						progressTitle.textContent = ev.reason === 'superseded'
+							? 'Run replaced by a newer Scrape All — not auto-restarting.'
+							: 'Run stopped.';
+						btn.disabled = false;
+						btn.textContent = 'Scrape All';
+						if (stopBtn) stopBtn.style.display = 'none';
 						break;
 
 					case 'complete':

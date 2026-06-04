@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\ScrapeAbortedException;
 use App\Models\Bid;
 use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
@@ -832,6 +833,7 @@ class BidController extends Controller
 						'stopped_before_index' => $idx + 1,
 						'total' => $total,
 					]);
+					$send(['type' => 'stopped', 'reason' => 'superseded']);
 
 					return;
 				}
@@ -869,7 +871,11 @@ class BidController extends Controller
 					$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null, [
 						'batch' => true,
 						'url_max_seconds' => $urlMaxBudget,
-						'on_progress' => function (string $message) use ($send, $idx) {
+						'should_abort' => $shouldStop,
+						'on_progress' => function (string $message) use ($send, $idx, $shouldStop) {
+							if ($shouldStop()) {
+								throw new ScrapeAbortedException('Scrape aborted (superseded or disconnected)');
+							}
 							$send(['type' => 'status', 'index' => $idx + 1, 'step' => $message]);
 						},
 					]);
@@ -1112,6 +1118,11 @@ class BidController extends Controller
 						'message' => $doneMessage,
 					]);
 
+				} catch (ScrapeAbortedException $e) {
+					Log::info('Bulk scrape-stream fetch aborted', ['url' => $url, 'run_id' => $runId]);
+					$send(['type' => 'stopped', 'reason' => 'superseded']);
+
+					return;
 				} catch (\Throwable $e) {
 					if ($this->isUrlBudgetTimeout($e)) {
 						$msg = $this->friendlyExceptionMessage($e);
