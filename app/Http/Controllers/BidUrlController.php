@@ -229,7 +229,82 @@ class BidUrlController extends Controller
     public function restoreFailed(FailedBidUrl $failedBidUrl)
     {
         $this->ensureUrlAndNameAreAvailable($failedBidUrl->url, $failedBidUrl->name, null, $failedBidUrl->id);
+        $this->persistRestoredBidUrl($failedBidUrl);
 
+        return redirect()->route('bidurl.index')->with('success', 'Failed URL restored to Bid URLs.');
+    }
+
+    /**
+     * Move every failed URL back to the active bid_url list (all pages, not just the current table page).
+     */
+    public function restoreAllFailed(Request $request)
+    {
+        $restored = 0;
+        $alreadyActive = 0;
+        $skipped = 0;
+
+        FailedBidUrl::query()->orderBy('id')->chunkById(100, function ($rows) use (&$restored, &$alreadyActive, &$skipped) {
+            foreach ($rows as $failedBidUrl) {
+                $outcome = $this->restoreFailedRow($failedBidUrl);
+                if ($outcome === 'restored') {
+                    $restored++;
+                } elseif ($outcome === 'already_active') {
+                    $alreadyActive++;
+                } else {
+                    $skipped++;
+                }
+            }
+        });
+
+        if ($restored === 0 && $alreadyActive === 0 && $skipped === 0) {
+            return redirect()->route('bidurl.index')->with('success', 'No failed URLs to restore.');
+        }
+
+        $parts = [];
+        if ($restored > 0) {
+            $parts[] = "{$restored} restored to Bid URLs";
+        }
+        if ($alreadyActive > 0) {
+            $parts[] = "{$alreadyActive} already on the active list (removed from failed)";
+        }
+        if ($skipped > 0) {
+            $parts[] = "{$skipped} skipped (duplicate name or other conflict)";
+        }
+
+        return redirect()->route('bidurl.index')->with('success', implode('; ', $parts) . '.');
+    }
+
+    public function destroyFailed(FailedBidUrl $failedBidUrl)
+    {
+        $failedBidUrl->delete();
+
+        return redirect()->route('bidurl.index')->with('success', 'Failed URL deleted.');
+    }
+
+    /**
+     * @return 'restored'|'already_active'|'skipped'
+     */
+    private function restoreFailedRow(FailedBidUrl $failedBidUrl): string
+    {
+        if ($this->urlExists($failedBidUrl->url, null, $failedBidUrl->id)) {
+            $failedBidUrl->delete();
+
+            return 'already_active';
+        }
+
+        try {
+            $this->ensureUrlAndNameAreAvailable($failedBidUrl->url, $failedBidUrl->name, null, $failedBidUrl->id);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return 'skipped';
+        }
+
+        $this->persistRestoredBidUrl($failedBidUrl);
+
+        return 'restored';
+    }
+
+    private function persistRestoredBidUrl(FailedBidUrl $failedBidUrl): void
+    {
         BidUrl::create([
             'url' => $failedBidUrl->url,
             'name' => $failedBidUrl->name,
@@ -248,15 +323,6 @@ class BidUrlController extends Controller
         ]);
 
         $failedBidUrl->delete();
-
-        return redirect()->route('bidurl.index')->with('success', 'Failed URL restored to Bid URLs.');
-    }
-
-    public function destroyFailed(FailedBidUrl $failedBidUrl)
-    {
-        $failedBidUrl->delete();
-
-        return redirect()->route('bidurl.index')->with('success', 'Failed URL deleted.');
     }
 
     private function ensureUrlAndNameAreAvailable(string $url, ?string $name = null, ?int $ignoreBidUrlId = null, ?int $ignoreFailedBidUrlId = null): void

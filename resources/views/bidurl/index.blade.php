@@ -498,6 +498,16 @@
 					<h2 style="margin:0;">Scrape Failed URLs</h2>
 					<span class="badge">{{ $failedCount }} total</span>
 				</div>
+				@if ($failedCount > 0)
+					<div class="header-actions">
+						<form method="POST" action="{{ route('failed-bidurl.restoreAll') }}"
+							onsubmit="return confirm('Restore ALL failed URLs to the Bid URL list? URLs that are already on the active list will be removed from failed only.')"
+							style="margin:0;">
+							@csrf
+							<button class="btn btn-secondary" type="submit">Restore All</button>
+						</form>
+					</div>
+				@endif
 			</div>
 			<div class="table-wrapper">
 				<table>
