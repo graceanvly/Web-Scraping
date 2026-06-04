@@ -229,7 +229,7 @@ class BidController extends Controller
 
 			$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
 			$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $validated['URL'], null);
-			$titleMap = array_combine($rawTitles, $rewrittenTitles);
+			$titleMap = $this->buildScrapeTitleMap($rawTitles, $rewrittenTitles, $validated['URL']);
 
 			$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $validated['URL']);
 
@@ -451,7 +451,7 @@ class BidController extends Controller
 						$send(['type' => 'status', 'step' => "Using extracted titles (rewrite skipped — {$n} opportunities)."]);
 					}
 				});
-				$titleMap = array_combine($rawTitles, $rewrittenTitles);
+				$titleMap = $this->buildScrapeTitleMap($rawTitles, $rewrittenTitles, $url);
 
 				$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
 
@@ -630,7 +630,7 @@ class BidController extends Controller
 
 				$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
 				$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $url, null);
-				$titleMap = array_combine($rawTitles, $rewrittenTitles);
+				$titleMap = $this->buildScrapeTitleMap($rawTitles, $rewrittenTitles, $url);
 
 				$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
 
@@ -888,8 +888,6 @@ class BidController extends Controller
 						$this->logIssue($bidUrl->id, $url, 'warning', 'No open bids listed.');
 						$totalIssues++;
 						$send(['type' => 'done_url', 'index' => $idx + 1, 'url' => $url, 'saved' => 0, 'duplicates' => 0, 'message' => 'No open bids']);
-						$bidUrl->last_scraped_at = now();
-						$bidUrl->save();
 						continue;
 					}
 					if (empty($result['html']) && empty($result['pdf_bids']) && empty($result['bid_pages'])) {
@@ -949,11 +947,12 @@ class BidController extends Controller
 							},
 						]
 					);
+					$aiBidCount = count($extracted['bids'] ?? []);
 					Log::info('AI bid extract finished', [
 						'url' => $url,
 						'index' => $idx + 1,
 						'elapsed_sec' => round(microtime(true) - $aiExtractStarted, 2),
-						'bids_returned' => count($extracted['bids'] ?? []),
+						'bids_returned' => $aiBidCount,
 					]);
 
 					$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
@@ -1000,7 +999,7 @@ class BidController extends Controller
 							$send(['type' => 'status', 'index' => $idx + 1, 'step' => "Using extracted titles (rewrite skipped — {$n} opportunities)."]);
 						}
 					}, $urlMaxBudget);
-					$titleMap = array_combine($rawTitles, $rewrittenTitles);
+					$titleMap = $this->buildScrapeTitleMap($rawTitles, $rewrittenTitles, $url);
 
 					$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
 					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Saving bids...']);
@@ -1074,6 +1073,17 @@ class BidController extends Controller
 						$bidUrl->save();
 					}
 
+					$expiredFiltered = max(0, $aiBidCount - $filteredBids->count());
+					Log::info('Scrape URL summary', [
+						'url' => $url,
+						'ai_returned' => $aiBidCount,
+						'after_date_filter' => $filteredBids->count(),
+						'expired_filtered' => $expiredFiltered,
+						'saved' => $savedThisUrl,
+						'duplicates' => $duplicatesThisUrl,
+						'rejected_non_bid' => $nonBidsThisUrl,
+					]);
+
 					if ($savedThisUrl === 0 && $duplicatesThisUrl === 0 && $nonBidsThisUrl === 0) {
 						$this->logIssue($bidUrl->id, $url, 'warning', 'No bids found.');
 						$totalIssues++;
@@ -1082,7 +1092,25 @@ class BidController extends Controller
 						$totalIssues++;
 					}
 
-					$send(['type' => 'done_url', 'index' => $idx + 1, 'url' => $url, 'saved' => $savedThisUrl, 'duplicates' => $duplicatesThisUrl]);
+					$doneMessage = null;
+					if ($savedThisUrl === 0 && $duplicatesThisUrl > 0) {
+						$doneMessage = $duplicatesThisUrl . ' already pending or live — check Pending Approval';
+					} elseif ($savedThisUrl === 0 && $nonBidsThisUrl > 0) {
+						$doneMessage = $nonBidsThisUrl . ' rejected (missing end date or weak bid signals)';
+					} elseif ($savedThisUrl === 0 && $aiBidCount === 0) {
+						$doneMessage = 'AI returned no bids';
+					} elseif ($savedThisUrl === 0 && $expiredFiltered > 0 && $filteredBids->count() === 0) {
+						$doneMessage = $expiredFiltered . ' expired (filtered out)';
+					}
+
+					$send([
+						'type' => 'done_url',
+						'index' => $idx + 1,
+						'url' => $url,
+						'saved' => $savedThisUrl,
+						'duplicates' => $duplicatesThisUrl,
+						'message' => $doneMessage,
+					]);
 
 				} catch (\Throwable $e) {
 					if ($this->isUrlBudgetTimeout($e)) {
@@ -1931,10 +1959,39 @@ class BidController extends Controller
 		return $m > 0 ? "{$m}m {$s}s" : "{$s}s";
 	}
 
+	/**
+	 * Map raw scraped titles to rewritten titles; fall back safely on count mismatch.
+	 *
+	 * @param list<string> $rawTitles
+	 * @param list<string> $rewrittenTitles
+	 * @return array<string, string>
+	 */
+	private function buildScrapeTitleMap(array $rawTitles, array $rewrittenTitles, string $contextUrl = ''): array
+	{
+		if ($rawTitles === []) {
+			return [];
+		}
+
+		$raw = array_values($rawTitles);
+		$rewritten = array_values($rewrittenTitles);
+		if (count($rewritten) !== count($raw)) {
+			Log::warning('Title rewrite count mismatch; using original titles', [
+				'url' => $contextUrl,
+				'raw' => count($raw),
+				'rewritten' => count($rewritten),
+			]);
+			$rewritten = $raw;
+		}
+
+		$map = array_combine($raw, $rewritten);
+
+		return is_array($map) ? $map : [];
+	}
+
 	private function scrapeBidAlreadyExists(string $title, string $savedUrl, ?string $endDate): bool
 	{
 		// Same title + (matching URL or end date) already live OR already queued for approval.
-		$matches = function ($q) use ($savedUrl, $endDate) {
+		$matches = function ($q) use ($title, $savedUrl, $endDate) {
 			$q->where('TITLE', $title)
 				->where(function ($q1) use ($savedUrl, $endDate) {
 					if ($savedUrl === '') {
