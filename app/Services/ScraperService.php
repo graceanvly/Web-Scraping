@@ -234,14 +234,30 @@ class ScraperService
 			$listingThinOnlyHeadlessTrigger = true;
 		}
 
+		if (!$needsHeadless && !$httpFailed && !$isBrowserCheck
+			&& $this->listingNeedsHeadlessForBidDetailLinks($url, $bestHtml, $bestText)) {
+			Log::info('FORCING HEADLESS — listing has bids but no detail links in HTTP HTML', [
+				'url' => $url,
+				'text_length' => strlen($bestText),
+			]);
+			$needsHeadless = true;
+		}
+
 		$minBatchSkipHeadlessChars = max(500, (int) config('scraper.batch_skip_headless_min_listing_chars', 800));
 		if ($needsHeadless && $batchMode && !$httpFailed && !$isBrowserCheck && strlen($bestText) >= $minBatchSkipHeadlessChars) {
 			if ($this->listingHasOpenBidSignals($bestText)) {
-				Log::info('BATCH SKIPPING HEADLESS — open-bid signals present in HTTP text', [
-					'url' => $url,
-					'text_length' => strlen($bestText),
-				]);
-				$needsHeadless = false;
+				if ($this->listingNeedsHeadlessForBidDetailLinks($url, $bestHtml, $bestText)) {
+					Log::info('BATCH KEEPING HEADLESS — open bids present but detail links missing from HTTP HTML', [
+						'url' => $url,
+						'text_length' => strlen($bestText),
+					]);
+				} else {
+					Log::info('BATCH SKIPPING HEADLESS — open-bid signals present in HTTP text', [
+						'url' => $url,
+						'text_length' => strlen($bestText),
+					]);
+					$needsHeadless = false;
+				}
 			} elseif ($this->isJsRenderedProcurementListingHost($url)) {
 				Log::info('BATCH KEEPING HEADLESS — JS portal HTTP text lacks open-bid signals', [
 					'url' => $url,
@@ -278,6 +294,12 @@ class ScraperService
 					$puppetDelay = max($puppetDelay, (int) env('SCRAPER_HEAVY_PORTAL_SETTLE_MS', 22000));
 					if ($this->strictUrlMaxSeconds !== null) {
 						$puppetDelay = min($puppetDelay, max(1000, (int) config('scraper.strict_budget_heavy_settle_ms', 8000)));
+					}
+				}
+				if ($this->isGranicusPoweredPage($bestHtml) || $this->listingNeedsHeadlessForBidDetailLinks($url, $bestHtml, $bestText)) {
+					$puppetDelay = max($puppetDelay, (int) config('scraper.granicus_settle_ms', 12000));
+					if ($this->strictUrlMaxSeconds !== null) {
+						$puppetDelay = min($puppetDelay, max(1000, (int) config('scraper.strict_budget_granicus_settle_ms', 8000)));
 					}
 				}
 				$heavyPortalPulse = $this->isHeavyJsProcurementPortal($url);
@@ -366,7 +388,13 @@ class ScraperService
 
 		// 3b. Follow clickable bid titles (detail pages) to pull richer data and PDFs
 		$detailLinks = ($noOpenBids || $maxDetailLinks === 0) ? [] : $this->findBidDetailLinks($bestHtml, $url);
-		$detailLinks = array_slice($detailLinks, 0, $maxDetailLinks);
+		$effectiveMaxDetailLinks = $maxDetailLinks;
+		if (!$noOpenBids && $maxDetailLinks > 0 && ($this->isGranicusPoweredPage($bestHtml) || $this->htmlHasBidDetailPathLinks($bestHtml))) {
+			$granicusCap = max(0, min(12, (int) config('scraper.granicus_max_detail_pages', 8)));
+			$effectiveMaxDetailLinks = max($maxDetailLinks, $granicusCap);
+		}
+		$detailLinks = $this->prioritizeOpenBidDetailLinks($detailLinks, $bestText);
+		$detailLinks = array_slice($detailLinks, 0, $effectiveMaxDetailLinks);
 		$detailTotal = count($detailLinks);
 		$detailIdx = 0;
 		foreach ($detailLinks as $detail) {
@@ -1032,8 +1060,6 @@ class ScraperService
 			$text = trim($anchor->textContent ?? '');
 			$href = $anchor->getAttribute('href');
 
-			if (strlen($text) < 5)
-				continue;
 			if (preg_match('/\.pdf($|\?)/i', $href))
 				continue;
 			if (stripos($href, 'javascript:') === 0)
@@ -1059,9 +1085,19 @@ class ScraperService
 				continue;
 			}
 
-			$lower = strtolower($text . ' ' . $resolved);
-			if (!preg_match('/bid|rfp|rfq|tender|solicitation|proposal|opportunit/i', $lower)) {
+			$isGranicusBidDetail = $this->isGranicusBidDetailUrl($resolved);
+			if (strlen($text) < 5 && $isGranicusBidDetail) {
+				$text = $this->titleFromGranicusBidUrl($resolved) ?? '';
+			}
+			if (strlen($text) < 5) {
 				continue;
+			}
+
+			if (!$isGranicusBidDetail) {
+				$lower = strtolower($text . ' ' . $resolved);
+				if (!preg_match('/bid|rfp|rfq|tender|solicitation|proposal|opportunit/i', $lower)) {
+					continue;
+				}
 			}
 
 			$links[] = [
@@ -1070,17 +1106,99 @@ class ScraperService
 			];
 		}
 
-		// Deduplicate by URL
+		foreach ($this->extractBidDetailLinksFromRawHtml($html, $baseUrl) as $link) {
+			$links[] = $link;
+		}
+
+		return $this->dedupeBidDetailLinks($links);
+	}
+
+	private function dedupeBidDetailLinks(array $links): array
+	{
 		$unique = [];
 		$deduped = [];
 		foreach ($links as $link) {
-			if (isset($unique[$link['URL']]))
+			if (isset($unique[$link['URL']])) {
 				continue;
+			}
 			$unique[$link['URL']] = true;
 			$deduped[] = $link;
 		}
 
 		return $deduped;
+	}
+
+	/** Granicus municipal sites (e.g. wpb.org) use /Bids/{slug} detail pages. */
+	private function isGranicusBidDetailUrl(string $url): bool
+	{
+		$path = parse_url($url, PHP_URL_PATH);
+
+		return is_string($path) && $path !== '' && (bool) preg_match('#/Bids/[^/?\#]+#i', $path);
+	}
+
+	private function titleFromGranicusBidUrl(string $url): ?string
+	{
+		$path = parse_url($url, PHP_URL_PATH);
+		if (!is_string($path) || !preg_match('#/Bids/(.+)$#i', $path, $m)) {
+			return null;
+		}
+
+		$slug = $m[1];
+		if (preg_match('#^(?:ITB|RFP|RFQ|IFB|RFB|ITN|RFP)-[\d\.\-]+(?:-[A-Z]{1,4})?-(.*)$#i', $slug, $parts)) {
+			$slug = $parts[1];
+		}
+
+		$title = trim(str_replace('-', ' ', $slug));
+
+		return $title !== '' ? $title : null;
+	}
+
+	private function extractBidDetailLinksFromRawHtml(string $html, string $baseUrl): array
+	{
+		if (!preg_match_all('#\bhref=(["\'])(/Bids/[^"\']+)\1#i', $html, $matches, PREG_SET_ORDER)) {
+			return [];
+		}
+
+		$links = [];
+		foreach ($matches as $match) {
+			$resolved = $this->resolveUrl($match[2], $baseUrl);
+			if ($this->urlsSameDocumentIgnoringFragment($resolved, $baseUrl)) {
+				continue;
+			}
+
+			$title = $this->titleFromGranicusBidUrl($resolved) ?? '';
+			if (strlen($title) < 5) {
+				continue;
+			}
+
+			$links[] = [
+				'TITLE' => $title,
+				'URL' => $resolved,
+			];
+		}
+
+		return $links;
+	}
+
+	/** Prefer detail pages for bids marked Open on the listing (Granicus cards). */
+	private function prioritizeOpenBidDetailLinks(array $links, string $listingText): array
+	{
+		if ($listingText === '' || $links === []) {
+			return $links;
+		}
+
+		$open = [];
+		$other = [];
+		foreach ($links as $link) {
+			$title = trim((string) ($link['TITLE'] ?? ''));
+			if ($title !== '' && preg_match('/' . preg_quote($title, '/') . '[\s\S]{0,400}Status:\s*Open/i', $listingText)) {
+				$open[] = $link;
+			} else {
+				$other[] = $link;
+			}
+		}
+
+		return array_merge($open, $other);
 	}
 
 	/** Broward-style Bonfire hubs use /opportunities/{id} for bid detail; /portal tabs and #hash nav are not separate documents. */
@@ -1939,6 +2057,51 @@ class ScraperService
 		}
 
 		return false;
+	}
+
+	private function isGranicusPoweredPage(string $html): bool
+	{
+		$lower = strtolower($html);
+		$markers = [
+			'granicus',
+			'powered by granicus',
+			'opengov_open_search',
+			'og-bid-listing',
+		];
+
+		foreach ($markers as $marker) {
+			if (str_contains($lower, $marker)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private function htmlHasBidDetailPathLinks(string $html): bool
+	{
+		return (bool) preg_match('#\bhref=(["\'])([^"\']*/Bids/[^"\']+)\1#i', $html);
+	}
+
+	/**
+	 * Granicus-style listings often expose bid card text in HTTP HTML but render /Bids/ detail links only after headless Chrome.
+	 */
+	private function listingNeedsHeadlessForBidDetailLinks(string $url, string $html, string $text): bool
+	{
+		if (!$this->listingHasOpenBidSignals($text)) {
+			return false;
+		}
+		if ($this->htmlHasBidDetailPathLinks($html)) {
+			return false;
+		}
+
+		if ($this->isGranicusPoweredPage($html)) {
+			return true;
+		}
+
+		$path = strtolower((string) parse_url($url, PHP_URL_PATH));
+
+		return $path !== '' && (bool) preg_match('#/(procurement|solicitation)#i', $path);
 	}
 
 	/**

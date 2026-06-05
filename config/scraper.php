@@ -107,6 +107,11 @@
 	'batch_skip_thin_headless' => filter_var(env('SCRAPER_BATCH_SKIP_THIN_HEADLESS', false), FILTER_VALIDATE_BOOL),
 	/** In batch mode, skip Puppeteer when HTTP listing text is at least this long (SPA/heavy portals often still return usable HTML). */
 	'batch_skip_headless_min_listing_chars' => max(500, min(50000, (int) env('SCRAPER_BATCH_SKIP_HEADLESS_MIN_LISTING_CHARS', 800))),
+	/** Granicus municipal listings (e.g. wpb.org): extra Puppeteer settle time so /Bids/ detail links render. */
+	'granicus_settle_ms' => max(2000, min(45000, (int) env('SCRAPER_GRANICUS_SETTLE_MS', 12000))),
+	'strict_budget_granicus_settle_ms' => max(1000, min(30000, (int) env('SCRAPER_STRICT_BUDGET_GRANICUS_SETTLE_MS', 8000))),
+	/** Max detail pages to follow on Granicus /Bids/ listings (batch cap is raised to this when higher). */
+	'granicus_max_detail_pages' => max(1, min(20, (int) env('SCRAPER_GRANICUS_MAX_DETAIL_PAGES', 8))),
 	/** When scrape-stream uses strict url_max_seconds (5 min checkbox), reserve this for AI + title rewrite after fetch. */
 	'strict_budget_ai_reserve_seconds' => max(60, min(600, (int) env('SCRAPER_STRICT_BUDGET_AI_RESERVE_SECONDS', 120))),
 	/** Max Puppeteer subprocess seconds for Bonfire/heavy portals under strict per-URL budget. */
