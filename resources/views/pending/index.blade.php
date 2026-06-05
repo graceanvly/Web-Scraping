@@ -28,13 +28,32 @@
 		.entity-pill { display:inline-block; padding:0.1rem 0.5rem; border-radius:999px; font-size:0.72rem; font-weight:600; }
 		.entity-pill.has { background:#ecfdf3; color:#166534; border:1px solid #bbf7d0; }
 		.entity-pill.none { background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; }
-		.row-actions { display:flex; gap:0.35rem; flex-wrap:nowrap; }
-		.row-actions button { padding:0.2rem 0.55rem; font-size:0.78rem; margin:0; min-width:auto; }
-		.btn-approve { background:#16a34a; border-color:#16a34a; }
-		.btn-edit { background:#fff; color:#2563eb; border:1px solid #bfdbfe; }
-		.btn-reject { background:#fff; color:#b91c1c; border:1px solid #fecaca; }
-		.title-cell { max-width: 380px; overflow-wrap:anywhere; }
-		.title-cell a { color:#2563eb; }
+		.row-actions { display:flex; gap:0.4rem; flex-wrap:nowrap; align-items:center; justify-content:flex-end; }
+		.icon-action {
+			display:inline-flex; align-items:center; justify-content:center;
+			width:2rem; height:2rem; padding:0; margin:0; min-width:auto;
+			border-radius:6px; border:1px solid transparent; cursor:pointer;
+			background:transparent;
+		}
+		.icon-action svg { width:1.1rem; height:1.1rem; }
+		.icon-action--approve { color:#16a34a; border-color:#bbf7d0; background:#f0fdf4; }
+		.icon-action--approve:hover { background:#dcfce7; }
+		.icon-action--reject { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }
+		.icon-action--reject:hover { background:#fee2e2; }
+		.title-cell { max-width: 420px; overflow-wrap:anywhere; }
+		.title-cell-inner { display:flex; align-items:flex-start; gap:0.35rem; }
+		.title-edit-trigger {
+			background:none; border:none; padding:0; margin:0; min-width:0;
+			color:#2563eb; cursor:pointer; text-align:left; font:inherit; font-weight:500;
+			text-decoration:underline; text-underline-offset:2px;
+		}
+		.title-edit-trigger:hover { color:#1d4ed8; }
+		a.title-external-link {
+			display:inline-flex; flex-shrink:0; color:#64748b; margin-top:0.1rem;
+		}
+		a.title-external-link:hover { color:#2563eb; }
+		a.title-external-link svg { width:0.95rem; height:0.95rem; }
+		.naics-cell { white-space:nowrap; font-variant-numeric:tabular-nums; }
 		.toolbar { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; }
 		dialog { max-width: 640px; width: 92%; border:none; border-radius:12px; padding:0; box-shadow:0 8px 30px rgba(0,0,0,0.15); }
 		dialog article { margin:0; padding:1.75rem; }
@@ -98,7 +117,8 @@
 				</p>
 			@else
 				<p class="muted" style="font-size:0.85rem; margin-bottom:0.75rem;">
-					Showing {{ $pending->firstItem() }}-{{ $pending->lastItem() }} of {{ $pending->total() }} pending bid(s)
+					Showing {{ $pending->firstItem() }}-{{ $pending->lastItem() }} of {{ $pending->total() }} pending bid(s).
+					Click a title to edit.
 				</p>
 				<div style="overflow-x:auto;">
 					<table>
@@ -106,10 +126,9 @@
 							<tr>
 								<th>Title</th>
 								<th>Entity</th>
-								<th>End Date</th>
-								<th>Source</th>
+								<th>NAICS Code</th>
 								<th>Scraped</th>
-								<th></th>
+								<th style="width:5.5rem;" aria-label="Actions"></th>
 							</tr>
 						</thead>
 						<tbody>
@@ -117,11 +136,14 @@
 								@php $eid = (int) ($row->ENTITYID ?? 0); @endphp
 								<tr>
 									<td class="title-cell">
-										@if ($row->URL)
-											<a href="{{ $row->URL }}" target="_blank" rel="noopener">{{ $row->TITLE ?: 'Untitled bid' }}</a>
-										@else
-											{{ $row->TITLE ?: 'Untitled bid' }}
-										@endif
+										<div class="title-cell-inner">
+											<button type="button" class="title-edit-trigger" onclick="openEdit({{ $idx }})" title="Click to edit">{{ $row->TITLE ?: 'Untitled bid' }}</button>
+											@if ($row->URL)
+												<a href="{{ $row->URL }}" class="title-external-link" target="_blank" rel="noopener" title="Open listing URL" onclick="event.stopPropagation();">
+													<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+												</a>
+											@endif
+										</div>
 									</td>
 									<td>
 										@if ($eid > 0)
@@ -130,24 +152,26 @@
 											<span class="entity-pill none">No entity</span>
 										@endif
 									</td>
-									<td style="white-space:nowrap;">{{ $row->ENDDATE ? \Illuminate\Support\Carbon::parse($row->ENDDATE)->format('M d, Y') : '—' }}</td>
-									<td class="muted" style="max-width:200px; overflow-wrap:anywhere;">{{ $row->bid_url_name ?: ($row->source_listing_url ? parse_url($row->source_listing_url, PHP_URL_HOST) : '—') }}</td>
-									<td class="muted" style="white-space:nowrap;">{{ $row->created_at ? $row->created_at->format('M d, Y h:i A') : '—' }}</td>
+									<td class="naics-cell muted">{{ $row->NAICSCODE ?: '—' }}</td>
+									<td class="muted" style="white-space:nowrap;">{{ $row->created_at ? $row->created_at->format('n/j') : '—' }}</td>
 									<td>
 										<div class="row-actions">
-											<button type="button" class="btn-edit" onclick="openEdit({{ $idx }})" title="Edit before approving">Edit</button>
 											<form method="POST" action="{{ route('pending.approve', $row) }}" style="margin:0;">
 												@csrf
 												<input type="hidden" name="search" value="{{ $search }}">
 												<input type="hidden" name="page" value="{{ $pending->currentPage() }}">
-												<button type="submit" class="btn-approve" title="Publish to live table">Approve</button>
+												<button type="submit" class="icon-action icon-action--approve" title="Approve — publish to live table" aria-label="Approve">
+													<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+												</button>
 											</form>
 											<form method="POST" action="{{ route('pending.reject', $row) }}" style="margin:0;" onsubmit="return confirm('Reject (delete) this pending bid?')">
 												@csrf
 												@method('DELETE')
 												<input type="hidden" name="search" value="{{ $search }}">
 												<input type="hidden" name="page" value="{{ $pending->currentPage() }}">
-												<button type="submit" class="btn-reject" title="Discard this bid">Reject</button>
+												<button type="submit" class="icon-action icon-action--reject" title="Reject — discard this bid" aria-label="Reject">
+													<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+												</button>
 											</form>
 										</div>
 									</td>
