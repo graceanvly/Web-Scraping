@@ -55,13 +55,36 @@
 		a.title-external-link svg { width:0.95rem; height:0.95rem; }
 		.naics-cell { white-space:nowrap; font-variant-numeric:tabular-nums; }
 		.toolbar { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; }
-		dialog#editModal { max-width: 980px; width: 96%; border:none; border-radius:12px; padding:0; box-shadow:0 8px 30px rgba(0,0,0,0.15); }
-		dialog#editModal article { margin:0; padding:1.75rem; }
-		.edit-modal-layout { display:grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); gap:1.25rem; align-items:start; }
-		.edit-modal-main { min-width:0; }
+		dialog#editModal {
+			width: calc(100vw - 1.5rem);
+			max-width: none;
+			height: calc(100dvh - 1.5rem);
+			max-height: none;
+			margin: auto;
+			border: none;
+			border-radius: 10px;
+			padding: 0;
+			box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+		}
+		dialog#editModal::backdrop { background: rgba(15, 23, 42, 0.45); }
+		dialog#editModal article {
+			margin: 0;
+			padding: 2rem 2.25rem;
+			max-height: calc(100dvh - 1.5rem);
+			overflow-y: auto;
+			box-sizing: border-box;
+		}
+		.edit-modal-layout {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+			gap: 2rem;
+			align-items: start;
+		}
+		.edit-modal-main { min-width: 0; }
 		.similar-panel {
 			background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;
-			padding:0.85rem 0.9rem; position:sticky; top:0; max-height:min(72vh, 640px);
+			padding:1rem 1.1rem; position:sticky; top:0;
+			max-height: calc(100dvh - 8rem);
 			overflow-y:auto;
 		}
 		.similar-panel h4 { margin:0 0 0.35rem; font-size:0.88rem; font-weight:600; color:#1e293b; }
@@ -85,11 +108,14 @@
 		.similar-badge.pending { background:#fff7ed; color:#c2410c; }
 		.similar-empty { font-size:0.78rem; color:#94a3b8; margin:0; }
 		.similar-loading { font-size:0.78rem; color:#64748b; margin:0; }
-		@media (max-width: 860px) {
+		@media (max-width: 1024px) {
 			.edit-modal-layout { grid-template-columns: 1fr; }
-			.similar-panel { position:static; max-height:none; }
+			.similar-panel { position: static; max-height: none; }
 		}
-		.edit-grid { display:grid; grid-template-columns: 1fr 1fr; gap:0.9rem; }
+		.edit-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:1.1rem 1.25rem; }
+		@media (max-width: 1200px) {
+			.edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		}
 		.edit-grid .full { grid-column: 1 / -1; }
 		.edit-grid label { font-size:0.82rem; font-weight:600; color:#374151; margin-bottom:0.2rem; display:block; }
 		.ref-picker { position:relative; }
