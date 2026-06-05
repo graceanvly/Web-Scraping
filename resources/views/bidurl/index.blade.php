@@ -119,6 +119,87 @@
 			margin: 0;
 		}
 
+		.row-actions {
+			display: flex;
+			gap: 0.35rem;
+			flex-wrap: nowrap;
+			align-items: center;
+			justify-content: flex-end;
+		}
+
+		.icon-action {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 2rem;
+			height: 2rem;
+			padding: 0;
+			margin: 0;
+			min-width: auto;
+			border-radius: 6px;
+			border: 1px solid transparent;
+			cursor: pointer;
+			background: transparent;
+		}
+
+		.icon-action svg {
+			width: 1.1rem;
+			height: 1.1rem;
+		}
+
+		.icon-action--view {
+			color: #2563eb;
+			border-color: #bfdbfe;
+			background: #eff6ff;
+		}
+
+		.icon-action--view:hover {
+			background: #dbeafe;
+		}
+
+		.icon-action--edit {
+			color: #475569;
+			border-color: #e2e8f0;
+			background: #f8fafc;
+		}
+
+		.icon-action--edit:hover {
+			background: #e2e8f0;
+		}
+
+		.icon-action--restore {
+			color: #16a34a;
+			border-color: #bbf7d0;
+			background: #f0fdf4;
+		}
+
+		.icon-action--restore:hover {
+			background: #dcfce7;
+		}
+
+		.icon-action--delete {
+			color: #b91c1c;
+			border-color: #fecaca;
+			background: #fef2f2;
+		}
+
+		.icon-action--delete:hover {
+			background: #fee2e2;
+		}
+
+		.col-date {
+			white-space: nowrap;
+			width: 4.25rem;
+			font-size: 0.88rem;
+			font-variant-numeric: tabular-nums;
+		}
+
+		.col-actions {
+			width: 6.5rem;
+			text-align: right;
+			white-space: nowrap;
+		}
+
 		.table-wrapper {
 			overflow-x: auto;
 		}
@@ -327,7 +408,7 @@
 
 		th:nth-child(3),
 		td:nth-child(3) {
-			width: 220px;
+			width: auto;
 		}
 
 		@media (max-width: 768px) {
@@ -447,8 +528,8 @@
 						<tr>
 							<th>URL</th>
 							<th>Name</th>
-							<th>Last Scraped</th>
-							<th>Actions</th>
+							<th class="col-date">Last Scraped</th>
+							<th class="col-actions">Actions</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -456,23 +537,30 @@
 							<tr>
 								<td><a href="{{ $bidUrl->url }}" target="_blank" rel="noreferrer">{{ $bidUrl->url }}</a></td>
 								<td>{{ $bidUrl->name ?? '-' }}</td>
-								<td>
+								<td class="col-date">
 									@if ($bidUrl->last_scraped_at)
-										<span style="color: {{ $bidUrl->last_scraped_at->isToday() ? '#16a34a' : '#6b7280' }}; font-size:0.9rem;">
-											{{ $bidUrl->last_scraped_at->format('M d, Y g:i A') }}
+										<span style="color: {{ $bidUrl->last_scraped_at->isToday() ? '#16a34a' : '#6b7280' }};"
+											title="{{ $bidUrl->last_scraped_at->format('M j, Y g:i A') }}">
+											{{ $bidUrl->last_scraped_at->format('n/j') }}
 										</span>
 									@else
-										<span style="color:#9ca3af; font-size:0.9rem;">Never</span>
+										<span style="color:#9ca3af;">Never</span>
 									@endif
 								</td>
-								<td>
-									<div class="actions">
-										<button class="btn btn-secondary" type="button" onclick='openDetails(@json($bidUrl))'>View</button>
-										<button class="btn btn-secondary" type="button" onclick='openEdit(@json($bidUrl))'>Edit</button>
-										<form method="POST" action="{{ route('bidurl.destroy', $bidUrl) }}" onsubmit="return confirm('Delete this Bid URL?')" style="display:inline-flex;">
+								<td class="col-actions">
+									<div class="row-actions">
+										<button class="icon-action icon-action--view" type="button" onclick='openDetails(@json($bidUrl))' title="View details" aria-label="View details">
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+										</button>
+										<button class="icon-action icon-action--edit" type="button" onclick='openEdit(@json($bidUrl))' title="Edit" aria-label="Edit">
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+										</button>
+										<form method="POST" action="{{ route('bidurl.destroy', $bidUrl) }}" onsubmit="return confirm('Delete this Bid URL?')">
 											@csrf
 											@method('DELETE')
-											<button class="btn btn-primary" type="submit">Delete</button>
+											<button class="icon-action icon-action--delete" type="submit" title="Delete" aria-label="Delete">
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+											</button>
 										</form>
 									</div>
 								</td>
@@ -516,8 +604,8 @@
 							<th>URL</th>
 							<th>Name</th>
 							<th>Last Error</th>
-							<th>Failed At</th>
-							<th>Actions</th>
+							<th class="col-date">Failed At</th>
+							<th class="col-actions">Actions</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -526,26 +614,33 @@
 								<td><a href="{{ $bidUrl->url }}" target="_blank" rel="noreferrer">{{ $bidUrl->url }}</a></td>
 								<td>{{ $bidUrl->name ?? '-' }}</td>
 								<td>{{ $bidUrl->failure_message ?? '-' }}</td>
-								<td>
+								<td class="col-date">
 									@if ($bidUrl->failed_at)
-										<span style="color:#b91c1c; font-size:0.9rem;">
-											{{ $bidUrl->failed_at->format('M d, Y g:i A') }}
+										<span style="color:#b91c1c;"
+											title="{{ $bidUrl->failed_at->format('M j, Y g:i A') }}">
+											{{ $bidUrl->failed_at->format('n/j') }}
 										</span>
 									@else
-										<span style="color:#9ca3af; font-size:0.9rem;">-</span>
+										<span style="color:#9ca3af;">-</span>
 									@endif
 								</td>
-								<td>
-									<div class="actions">
-										<button class="btn btn-secondary" type="button" onclick='openDetails(@json($bidUrl))'>View</button>
-										<form method="POST" action="{{ route('failed-bidurl.restore', $bidUrl) }}" onsubmit="return confirm('Restore this failed URL to the Bid URL list?')" style="display:inline-flex;">
+								<td class="col-actions">
+									<div class="row-actions">
+										<button class="icon-action icon-action--view" type="button" onclick='openDetails(@json($bidUrl))' title="View details" aria-label="View details">
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+										</button>
+										<form method="POST" action="{{ route('failed-bidurl.restore', $bidUrl) }}" onsubmit="return confirm('Restore this failed URL to the Bid URL list?')">
 											@csrf
-											<button class="btn btn-secondary" type="submit">Restore</button>
+											<button class="icon-action icon-action--restore" type="submit" title="Restore to Bid URLs" aria-label="Restore to Bid URLs">
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>
+											</button>
 										</form>
-										<form method="POST" action="{{ route('failed-bidurl.destroy', $bidUrl) }}" onsubmit="return confirm('Delete this failed URL?')" style="display:inline-flex;">
+										<form method="POST" action="{{ route('failed-bidurl.destroy', $bidUrl) }}" onsubmit="return confirm('Delete this failed URL?')">
 											@csrf
 											@method('DELETE')
-											<button class="btn btn-primary" type="submit">Delete</button>
+											<button class="icon-action icon-action--delete" type="submit" title="Delete" aria-label="Delete">
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+											</button>
 										</form>
 									</div>
 								</td>
