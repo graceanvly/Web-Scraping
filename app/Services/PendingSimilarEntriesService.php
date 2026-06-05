@@ -167,7 +167,6 @@ class PendingSimilarEntriesService
 			'email' => trim((string) ($bid->EMAIL ?? '')),
 			'scraped' => $this->formatShortDate($bid->CREATED ?? null),
 			'sort_ts' => $created,
-			'view_url' => $id ? route('bids.show', ['bid' => $id]) : null,
 		];
 	}
 

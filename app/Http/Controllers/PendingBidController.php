@@ -6,6 +6,7 @@ use App\Models\Bid;
 use App\Models\TempBid;
 use App\Services\BidReferenceLookupService;
 use App\Services\PendingSimilarEntriesService;
+use App\Support\BidDetailPayload;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -80,6 +81,12 @@ class PendingBidController extends Controller
 			$request->query('url'),
 			(int) $request->query('exclude_temp_id', 0),
 		));
+	}
+
+	/** JSON for detail modals (similar pending bids). */
+	public function showJson(TempBid $pendingBid, BidReferenceLookupService $lookup)
+	{
+		return response()->json(BidDetailPayload::fromPending($pendingBid, $lookup));
 	}
 
 	public function update(Request $request, TempBid $pendingBid)

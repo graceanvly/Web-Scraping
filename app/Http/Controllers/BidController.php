@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use App\Services\AIExtractor;
 use App\Services\BidReferenceLookupService;
 use App\Services\ScraperService;
+use App\Support\BidDetailPayload;
 use App\Support\ThirdPartyProcurementPortalUrl;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
@@ -518,6 +519,12 @@ class BidController extends Controller
 	public function show(Bid $bid)
 	{
 		return view('bids.show', compact('bid'));
+	}
+
+	/** JSON for detail modals (e.g. similar bids on Pending page). */
+	public function showJson(Bid $bid, BidReferenceLookupService $lookup)
+	{
+		return response()->json(BidDetailPayload::fromLive($bid, $lookup));
 	}
 
 	public function scrapeAll(Request $request, ScraperService $scraper, AIExtractor $ai)

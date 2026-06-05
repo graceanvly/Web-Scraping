@@ -27,6 +27,7 @@ Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 Route::middleware('auth')->group(function () {
     Route::get('/', [BidController::class, 'index'])->name('bids.index');
     Route::post('/bids', [BidController::class, 'store'])->name('bids.store');
+    Route::get('/bids/{bid}/json', [BidController::class, 'showJson'])->name('bids.json');
     Route::get('/bids/{bid}', [BidController::class, 'show'])->name('bids.show');
     Route::put('/bids/{bid}', [BidController::class, 'update'])->name('bids.update');
     Route::delete('/bids/{bid}', [BidController::class, 'destroy'])->name('bids.destroy');
@@ -38,6 +39,7 @@ Route::middleware('auth')->group(function () {
     // Pending approval queue (scraped bids land in bids_temp until approved)
     Route::get('/pending', [PendingBidController::class, 'index'])->name('pending.index');
     Route::get('/pending/similar', [PendingBidController::class, 'similar'])->name('pending.similar');
+    Route::get('/pending/{pendingBid}/json', [PendingBidController::class, 'showJson'])->name('pending.json');
     Route::post('/pending/approve-all', [PendingBidController::class, 'approveAll'])->name('pending.approveAll');
     Route::post('/pending/reject-all', [PendingBidController::class, 'rejectAll'])->name('pending.rejectAll');
     Route::put('/pending/{pendingBid}', [PendingBidController::class, 'update'])->name('pending.update');

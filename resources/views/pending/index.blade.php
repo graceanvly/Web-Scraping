@@ -121,8 +121,48 @@
 			padding:0.55rem 0.6rem; font-size:0.78rem; line-height:1.35;
 		}
 		.similar-item-title { font-weight:600; color:#1e293b; margin:0 0 0.2rem; overflow-wrap:anywhere; }
-		.similar-item-title a { color:#2563eb; text-decoration:none; }
-		.similar-item-title a:hover { text-decoration:underline; }
+		.similar-detail-link {
+			background:none; border:none; padding:0; margin:0; min-width:0;
+			color:#2563eb; font:inherit; font-weight:600; cursor:pointer;
+			text-align:left; text-decoration:underline; text-underline-offset:2px;
+		}
+		.similar-detail-link:hover { color:#1d4ed8; }
+		dialog#similarDetailModal {
+			max-width: 820px; width: min(92vw, 820px); border: none; border-radius: 12px;
+			padding: 0; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+		}
+		dialog#similarDetailModal[open] {
+			display: flex !important;
+			flex-direction: column;
+			align-items: stretch !important;
+		}
+		dialog#similarDetailModal .similar-detail-shell {
+			width: 100% !important;
+			max-width: none !important;
+			margin: 0 !important;
+			padding: 2rem;
+			max-height: 90dvh;
+			overflow-y: auto;
+			box-sizing: border-box;
+			background: var(--pico-background-color, #fff);
+		}
+		.similar-detail-meta {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+			gap: 1rem;
+			margin-bottom: 1.25rem;
+		}
+		.similar-detail-meta .meta-card {
+			background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.85rem;
+		}
+		.similar-detail-meta .meta-card strong {
+			display: block; color: #374151; font-size: 0.85rem; margin-bottom: 0.25rem;
+		}
+		.similar-detail-meta .meta-card span { color: #111827; word-break: break-word; }
+		#similar_detail_description {
+			background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;
+			padding: 1rem; max-height: 400px; overflow-y: auto; font-size: 0.9rem; line-height: 1.6;
+		}
 		.similar-item-dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:0.1rem 0.45rem; color:#64748b; }
 		.similar-item-dl dt { font-weight:600; }
 		.similar-item-dl dd { margin:0; overflow-wrap:anywhere; }
@@ -377,11 +417,63 @@
 		</div>
 	</dialog>
 
+	<!-- Similar bid detail (opens over edit modal) -->
+	<dialog id="similarDetailModal">
+		<div class="similar-detail-shell">
+			<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:1rem;">
+				<div>
+					<span id="similar_detail_badge" class="similar-badge live" style="margin-bottom:0.35rem;">Live</span>
+					<h3 id="similar_detail_title" style="margin:0; font-size:1.25rem; font-weight:600; color:#1f2937;"></h3>
+				</div>
+				<button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280; padding:0; line-height:1;" onclick="document.getElementById('similarDetailModal').close()">&times;</button>
+			</div>
+
+			<div class="similar-detail-meta">
+				<div class="meta-card">
+					<strong>End date</strong>
+					<span id="similar_detail_enddate"></span>
+				</div>
+				<div class="meta-card">
+					<strong>NAICS code</strong>
+					<span id="similar_detail_naics"></span>
+				</div>
+				<div class="meta-card">
+					<strong>Scraped</strong>
+					<span id="similar_detail_created"></span>
+				</div>
+				<div class="meta-card">
+					<strong>Entity</strong>
+					<span id="similar_detail_entity"></span>
+				</div>
+				<div class="meta-card">
+					<strong>Contact email</strong>
+					<span id="similar_detail_email"></span>
+				</div>
+			</div>
+
+			<div class="meta-card" style="margin-bottom:1.25rem;">
+				<strong>URL</strong>
+				<a id="similar_detail_url" href="#" target="_blank" rel="noopener noreferrer" style="word-break:break-all;"></a>
+			</div>
+
+			<div>
+				<strong style="display:block; color:#374151; font-size:0.95rem; margin-bottom:0.5rem;">Details</strong>
+				<div id="similar_detail_description"></div>
+			</div>
+
+			<footer style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.5rem;">
+				<button type="button" class="secondary" onclick="document.getElementById('similarDetailModal').close()">Close</button>
+			</footer>
+		</div>
+	</dialog>
+
 	<script>
 		@php
 			$entitySearchUrl = route('bids.reference.entities');
 			$stateSearchUrl = route('bids.reference.states');
 			$similarUrl = route('pending.similar');
+			$liveDetailUrlTpl = route('bids.json', ['bid' => '__ID__']);
+			$pendingDetailUrlTpl = route('pending.json', ['pendingBid' => '__ID__']);
 			$updateUrlTpl = route('pending.update', ['pendingBid' => '__ID__']);
 			$approveUrlTpl = route('pending.approve', ['pendingBid' => '__ID__']);
 			$pendingRows = $pending->getCollection()->map(function ($r) {
@@ -403,6 +495,8 @@
 		const entitySearchUrl = @json($entitySearchUrl);
 		const stateSearchUrl = @json($stateSearchUrl);
 		const similarUrl = @json($similarUrl);
+		const liveDetailUrlTpl = @json($liveDetailUrlTpl);
+		const pendingDetailUrlTpl = @json($pendingDetailUrlTpl);
 		const updateUrlTpl = @json($updateUrlTpl);
 		const approveUrlTpl = @json($approveUrlTpl);
 		const pendingData = @json($pendingRows);
@@ -687,8 +781,8 @@
 				li.className = 'similar-item';
 				const badge = row.source === 'live' ? 'live' : 'pending';
 				const title = row.title || 'Untitled';
-				const titleHtml = row.view_url
-					? '<a href="' + escHtml(row.view_url) + '" target="_blank" rel="noopener">' + escHtml(title) + '</a>'
+				const titleHtml = row.id
+					? '<button type="button" class="similar-detail-link" data-source="' + escHtml(badge) + '" data-id="' + escHtml(String(row.id)) + '">' + escHtml(title) + '</button>'
 					: escHtml(title);
 				const bits = [];
 				if (row.end_date) bits.push(['Ends', row.end_date]);
@@ -711,6 +805,92 @@
 		entityPickerCfg.onChange = scheduleSimilarRefresh;
 		document.getElementById('edit_email')?.addEventListener('input', scheduleSimilarRefresh);
 		document.getElementById('edit_url')?.addEventListener('input', scheduleSimilarRefresh);
+
+		document.getElementById('similarList')?.addEventListener('click', function (e) {
+			const btn = e.target.closest('.similar-detail-link');
+			if (!btn) return;
+			e.preventDefault();
+			openSimilarBidDetail(btn.dataset.source, btn.dataset.id);
+		});
+
+		function formatDetailDate(dateStr) {
+			if (!dateStr) return 'N/A';
+			try {
+				const d = new Date(dateStr);
+				if (isNaN(d.getTime())) return dateStr;
+				const months = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
+				return months[d.getMonth()] + ' ' + String(d.getDate()).padStart(2, '0') + ', ' + d.getFullYear();
+			} catch (err) {
+				return dateStr;
+			}
+		}
+
+		function renderDetailDescription(desc) {
+			const descBox = document.getElementById('similar_detail_description');
+			if (!descBox) return;
+			const text = (desc || '').trim();
+			if (!text) {
+				descBox.innerHTML = '<p style="margin:0; color:#6b7280;">No details available.</p>';
+				return;
+			}
+			const lines = text.split(/\r?\n+/).filter((l) => l.trim());
+			let html = '';
+			lines.forEach((line, i) => {
+				const bg = i % 2 === 0 ? 'background:#f3f4f6;' : '';
+				const colonIdx = line.indexOf(':');
+				if (colonIdx > 0 && colonIdx < 60) {
+					const label = line.substring(0, colonIdx).trim();
+					const value = line.substring(colonIdx + 1).trim();
+					html += '<div style="display:grid; grid-template-columns:200px 1fr; gap:0.5rem; padding:0.5rem 0.65rem; border-radius:6px; ' + bg + ' align-items:start;">'
+						+ '<span style="font-weight:700; color:#1f2937; font-size:0.9rem;">' + escHtml(label) + '</span>'
+						+ '<span style="color:#0f172a; white-space:pre-wrap;">' + escHtml(value) + '</span></div>';
+				} else {
+					html += '<div style="padding:0.5rem 0.65rem; border-radius:6px; ' + bg + '">'
+						+ '<span style="color:#0f172a; white-space:pre-wrap;">' + escHtml(line) + '</span></div>';
+				}
+			});
+			descBox.innerHTML = html;
+		}
+
+		function openSimilarBidDetailModal(bid) {
+			const modal = document.getElementById('similarDetailModal');
+			if (!modal || !bid) return;
+			const isLive = bid.source === 'live';
+			const badge = document.getElementById('similar_detail_badge');
+			if (badge) {
+				badge.textContent = isLive ? 'Live' : 'Pending';
+				badge.className = 'similar-badge ' + (isLive ? 'live' : 'pending');
+			}
+			document.getElementById('similar_detail_title').textContent = bid.TITLE || 'Untitled bid';
+			document.getElementById('similar_detail_enddate').textContent = bid.ENDDATE ? formatDetailDate(bid.ENDDATE) : 'N/A';
+			document.getElementById('similar_detail_naics').textContent = bid.NAICSCODE || 'N/A';
+			document.getElementById('similar_detail_created').textContent = bid.CREATED ? formatDetailDate(bid.CREATED) : 'N/A';
+			document.getElementById('similar_detail_entity').textContent = bid.entity_label || (bid.ENTITYID ? ('#' + bid.ENTITYID) : 'N/A');
+			document.getElementById('similar_detail_email').textContent = bid.EMAIL || 'N/A';
+			const urlEl = document.getElementById('similar_detail_url');
+			const url = bid.URL || '';
+			urlEl.href = url || '#';
+			urlEl.textContent = url || 'N/A';
+			renderDetailDescription(bid.DESCRIPTION);
+			modal.showModal();
+		}
+
+		async function openSimilarBidDetail(source, id) {
+			if (!source || !id) return;
+			const url = source === 'live'
+				? liveDetailUrlTpl.replace('__ID__', encodeURIComponent(id))
+				: pendingDetailUrlTpl.replace('__ID__', encodeURIComponent(id));
+			try {
+				const r = await fetch(url, {
+					headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
+				});
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				const bid = await r.json();
+				openSimilarBidDetailModal(bid);
+			} catch (err) {
+				window.alert('Could not load bid details. Please try again.');
+			}
+		}
 
 		function prepareSubmit(target) {
 			const form = document.getElementById('editForm');
