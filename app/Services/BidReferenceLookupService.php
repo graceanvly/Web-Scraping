@@ -565,6 +565,106 @@ class BidReferenceLookupService
 	}
 
 	/**
+	 * One row formatted for state autocomplete (resolve display label by id).
+	 *
+	 * @return array{id: int|string, label: string}|null
+	 */
+	public function getStateOptionById(int $stateId): ?array
+	{
+		if ($stateId < 1) {
+			return null;
+		}
+
+		$idCol = (string) $this->cfg('state_id_column', 'id');
+		foreach ($this->cachedStates() as $row) {
+			$idRaw = $this->rowAttr($row, $idCol);
+			if ($idRaw === null || $idRaw === '' || (int) $idRaw !== $stateId) {
+				continue;
+			}
+
+			return $this->stateRowToSelectOption($row);
+		}
+
+		return null;
+	}
+
+	/**
+	 * Typeahead rows for STATEID on bid / pending edit forms.
+	 *
+	 * @return array<int, array{id: int|string, label: string}>
+	 */
+	public function searchStatesForSelect(string $query, int $limit = 50): array
+	{
+		$limit = max(5, min(100, $limit));
+		$needle = mb_strtolower(preg_replace('/[%_\\\\]/', '', mb_substr(trim($query), 0, 80)));
+		$rows = $this->cachedStates();
+		if ($rows->isEmpty()) {
+			return [];
+		}
+
+		$idCol = (string) $this->cfg('state_id_column', 'id');
+		$nameCol = (string) $this->cfg('state_name_column', 'name');
+		$abbrCol = (string) $this->cfg('state_abbr_column', 'abbreviation');
+
+		$out = [];
+		foreach ($rows as $row) {
+			$opt = $this->stateRowToSelectOption($row);
+			if ($opt === null) {
+				continue;
+			}
+			if ($needle === '') {
+				$out[] = $opt;
+
+				continue;
+			}
+			$name = mb_strtolower(trim((string) ($this->rowAttr($row, $nameCol) ?? '')));
+			$abbr = mb_strtolower(trim((string) ($this->rowAttr($row, $abbrCol) ?? '')));
+			$idStr = (string) ($this->rowAttr($row, $idCol) ?? '');
+			if (
+				($name !== '' && str_contains($name, $needle))
+				|| ($abbr !== '' && str_contains($abbr, $needle))
+				|| ($idStr !== '' && $idStr === trim($query))
+			) {
+				$out[] = $opt;
+			}
+		}
+
+		usort($out, static fn (array $a, array $b): int => strcasecmp($a['label'], $b['label']));
+
+		return array_slice($out, 0, $limit);
+	}
+
+	/**
+	 * @return array{id: int|string, label: string}|null
+	 */
+	private function stateRowToSelectOption(object $row): ?array
+	{
+		$idCol = (string) $this->cfg('state_id_column', 'id');
+		$nameCol = (string) $this->cfg('state_name_column', 'name');
+		$abbrCol = (string) $this->cfg('state_abbr_column', 'abbreviation');
+
+		$idRaw = $this->rowAttr($row, $idCol);
+		if ($idRaw === null || $idRaw === '') {
+			return null;
+		}
+
+		$name = trim((string) ($this->rowAttr($row, $nameCol) ?? ''));
+		$abbr = strtoupper(trim((string) ($this->rowAttr($row, $abbrCol) ?? '')));
+		if ($name === '' && $abbr === '') {
+			return null;
+		}
+
+		$label = $abbr !== '' && $name !== ''
+			? $abbr . ' — ' . $name
+			: ($name !== '' ? $name : $abbr);
+
+		return [
+			'id' => is_numeric($idRaw) ? (int) $idRaw : (string) $idRaw,
+			'label' => $label,
+		];
+	}
+
+	/**
 	 * @param array<int, string> $nameCols
 	 * @param array<int, string> $emailCols
 	 * @return array{id: int|string, label: string}|null

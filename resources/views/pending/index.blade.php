@@ -60,14 +60,20 @@
 		.edit-grid { display:grid; grid-template-columns: 1fr 1fr; gap:0.9rem; }
 		.edit-grid .full { grid-column: 1 / -1; }
 		.edit-grid label { font-size:0.82rem; font-weight:600; color:#374151; margin-bottom:0.2rem; display:block; }
-		.entity-box { position:relative; }
-		#editEntityResults {
+		.ref-picker { position:relative; }
+		.ref-picker-inner input[type="search"] { margin-bottom:0.15rem; }
+		.ref-picker-results {
 			position:absolute; left:0; right:0; top:100%; z-index:30; margin:0.2rem 0 0; padding:0; list-style:none;
 			background:#fff; border:1px solid #e5e7eb; border-radius:8px; max-height:240px; overflow-y:auto;
 			box-shadow:0 6px 18px rgba(0,0,0,0.12);
 		}
-		#editEntityResults li { padding:0.5rem 0.7rem; cursor:pointer; font-size:0.85rem; }
-		#editEntityResults li.entity-res-active, #editEntityResults li:hover { background:#eff6ff; }
+		.ref-picker-results li { padding:0.5rem 0.7rem; cursor:pointer; font-size:0.85rem; }
+		.ref-picker-results li.ref-res-active, .ref-picker-results li:hover { background:#eff6ff; }
+		.ref-picker-clear {
+			margin:0; padding:0; border:none; background:none; cursor:pointer;
+			color:#2563eb; text-decoration:underline; font-size:0.82rem;
+		}
+		.ref-picker-meta { margin-top:0.25rem; display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; font-size:0.78rem; color:#6b7280; }
 		.pagination-bar { display:flex; justify-content:space-between; align-items:center; margin-top:1rem; flex-wrap:wrap; gap:0.5rem; }
 		@media (max-width: 768px) {
 			.edit-grid { grid-template-columns: 1fr; }
@@ -207,11 +213,33 @@
 						<label for="edit_title">Title</label>
 						<input type="text" id="edit_title" name="TITLE" required maxlength="255">
 					</div>
-					<div class="full entity-box">
-						<label for="editEntitySearch">Entity <span id="editEntityHint" class="muted" style="font-weight:400;"></span></label>
-						<input type="text" id="editEntitySearch" autocomplete="off" placeholder="Search entities by name or email…" aria-expanded="false">
+					<div class="full ref-picker" id="entityPicker">
+						<label for="edit_entity_search">Entity <span id="editEntityHint" class="muted" style="font-weight:400;"></span></label>
 						<input type="hidden" id="edit_entity_id" name="ENTITYID">
-						<ul id="editEntityResults" role="listbox" hidden></ul>
+						<div class="ref-picker-inner">
+							<input type="search" id="edit_entity_search" autocomplete="off" autocorrect="off" spellcheck="false"
+								placeholder="Search entity master list by name, email, or ID…"
+								aria-autocomplete="list" aria-expanded="false" aria-controls="edit_entity_results">
+							<ul id="edit_entity_results" class="ref-picker-results" role="listbox" hidden></ul>
+						</div>
+						<div class="ref-picker-meta">
+							<button type="button" class="ref-picker-clear" id="edit_entity_clear">Clear entity</button>
+							<span>Pick a row to set ENTITYID.</span>
+						</div>
+					</div>
+					<div class="full ref-picker" id="statePicker">
+						<label for="edit_state_search">State <span id="editStateHint" class="muted" style="font-weight:400;"></span></label>
+						<input type="hidden" id="edit_state_id" name="STATEID">
+						<div class="ref-picker-inner">
+							<input type="search" id="edit_state_search" autocomplete="off" autocorrect="off" spellcheck="false"
+								placeholder="Search states by name or abbreviation (e.g. CO)…"
+								aria-autocomplete="list" aria-expanded="false" aria-controls="edit_state_results">
+							<ul id="edit_state_results" class="ref-picker-results" role="listbox" hidden></ul>
+						</div>
+						<div class="ref-picker-meta">
+							<button type="button" class="ref-picker-clear" id="edit_state_clear">Clear state</button>
+							<span>Pick a row to set STATEID.</span>
+						</div>
 					</div>
 					<div>
 						<label for="edit_enddate">End date</label>
@@ -258,6 +286,7 @@
 	<script>
 		@php
 			$entitySearchUrl = route('bids.reference.entities');
+			$stateSearchUrl = route('bids.reference.states');
 			$updateUrlTpl = route('pending.update', ['pendingBid' => '__ID__']);
 			$approveUrlTpl = route('pending.approve', ['pendingBid' => '__ID__']);
 			$pendingRows = $pending->getCollection()->map(function ($r) {
@@ -270,24 +299,218 @@
 					'ENDDATE' => $r->ENDDATE ? \Illuminate\Support\Carbon::parse($r->ENDDATE)->format('Y-m-d') : '',
 					'NAICSCODE' => $r->NAICSCODE,
 					'ENTITYID' => $r->ENTITYID,
+					'STATEID' => $r->STATEID,
 					'USERID' => $r->USERID,
 				];
 			})->values();
 		@endphp
 		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 		const entitySearchUrl = @json($entitySearchUrl);
+		const stateSearchUrl = @json($stateSearchUrl);
 		const updateUrlTpl = @json($updateUrlTpl);
 		const approveUrlTpl = @json($approveUrlTpl);
 		const pendingData = @json($pendingRows);
 
-		let entityReq = 0;
-		let entitySelectedLabel = '';
 		let currentUpdateUrl = '';
 		let currentApproveUrl = '';
 
-		function escHtml(str) { const d = document.createElement('div'); d.textContent = str == null ? '' : str; return d.innerHTML; }
+		const entityPicker = initRefPicker({
+			hidden: document.getElementById('edit_entity_id'),
+			search: document.getElementById('edit_entity_search'),
+			results: document.getElementById('edit_entity_results'),
+			clearBtn: document.getElementById('edit_entity_clear'),
+			hint: document.getElementById('editEntityHint'),
+			searchUrl: entitySearchUrl,
+			fallbackPrefix: 'Entity #',
+			searchLimit: 40,
+			minChars: 0,
+		});
 
-		// Toggle action + method so the two submit buttons hit the right route.
+		const statePicker = initRefPicker({
+			hidden: document.getElementById('edit_state_id'),
+			search: document.getElementById('edit_state_search'),
+			results: document.getElementById('edit_state_results'),
+			clearBtn: document.getElementById('edit_state_clear'),
+			hint: document.getElementById('editStateHint'),
+			searchUrl: stateSearchUrl,
+			fallbackPrefix: 'State #',
+			searchLimit: 60,
+			minChars: 0,
+		});
+
+		function initRefPicker(cfg) {
+			let reqSeq = 0;
+			let selectedLabel = '';
+			let highlightIdx = -1;
+
+			function refreshHint() {
+				if (!cfg.hint) return;
+				const id = (cfg.hidden?.value || '').trim();
+				cfg.hint.textContent = (id !== '' && id !== '0') ? '· #' + id : '· none';
+			}
+
+			function hideResults() {
+				if (!cfg.results || !cfg.search) return;
+				cfg.results.hidden = true;
+				cfg.results.innerHTML = '';
+				cfg.search.setAttribute('aria-expanded', 'false');
+				highlightIdx = -1;
+			}
+
+			function highlightRows(rows, activeIdx) {
+				rows.forEach((li, i) => {
+					const on = activeIdx >= 0 && i === activeIdx;
+					li.classList.toggle('ref-res-active', on);
+					li.setAttribute('aria-selected', on ? 'true' : 'false');
+				});
+			}
+
+			function applyChoice(id, label) {
+				if (!cfg.hidden || !cfg.search) return;
+				cfg.hidden.value = String(id);
+				cfg.search.value = label;
+				selectedLabel = label;
+				refreshHint();
+				hideResults();
+			}
+
+			async function setFromId(raw) {
+				if (!cfg.hidden || !cfg.search) return;
+				selectedLabel = '';
+				hideResults();
+				const idStr = raw != null && String(raw) !== '' && String(raw) !== '0' ? String(raw) : '';
+				cfg.hidden.value = idStr;
+				if (!idStr) {
+					cfg.search.value = '';
+					refreshHint();
+					return;
+				}
+				refreshHint();
+				try {
+					const r = await fetch(cfg.searchUrl + '?id=' + encodeURIComponent(idStr), {
+						headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
+					});
+					const data = await r.json();
+					cfg.search.value = (data.resolved && data.resolved.label) ? data.resolved.label : (cfg.fallbackPrefix + idStr);
+				} catch (e) {
+					cfg.search.value = cfg.fallbackPrefix + idStr;
+				}
+				selectedLabel = cfg.search.value;
+			}
+
+			async function runSearch(query) {
+				if (!cfg.results || !cfg.search) return;
+				reqSeq += 1;
+				const seq = reqSeq;
+				let data;
+				try {
+					const r = await fetch(cfg.searchUrl + '?q=' + encodeURIComponent(query) + '&limit=' + cfg.searchLimit, {
+						headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
+					});
+					data = await r.json();
+				} catch (e) {
+					return;
+				}
+				if (seq !== reqSeq || cfg.search.value.trim() !== query) return;
+
+				cfg.results.innerHTML = '';
+				const items = Array.isArray(data.results) ? data.results : [];
+				if (!items.length) {
+					const li = document.createElement('li');
+					li.className = 'muted';
+					li.textContent = 'No matches.';
+					cfg.results.appendChild(li);
+				} else {
+					items.forEach(function (row) {
+						const li = document.createElement('li');
+						li.setAttribute('role', 'option');
+						li.dataset.refId = String(row.id);
+						const lab = row.label || (cfg.fallbackPrefix + row.id);
+						li.dataset.refLabel = lab;
+						li.textContent = lab;
+						cfg.results.appendChild(li);
+					});
+				}
+				cfg.results.hidden = false;
+				cfg.search.setAttribute('aria-expanded', 'true');
+				highlightRows([...cfg.results.children].filter((li) => li.dataset.refId), -1);
+			}
+
+			function pickableRows() {
+				return [...(cfg.results?.children || [])].filter((li) => li.dataset.refId);
+			}
+
+			if (cfg.search && cfg.results) {
+				let timer = null;
+
+				cfg.search.addEventListener('input', function () {
+					highlightIdx = -1;
+					if (selectedLabel !== '' && cfg.search.value !== selectedLabel) {
+						cfg.hidden.value = '';
+						refreshHint();
+					}
+					clearTimeout(timer);
+					const q = cfg.search.value.trim();
+					if (q.length < cfg.minChars) {
+						hideResults();
+						return;
+					}
+					timer = setTimeout(() => runSearch(q), 220);
+				});
+
+				cfg.search.addEventListener('focus', function () {
+					const q = cfg.search.value.trim();
+					if (q.length >= cfg.minChars && cfg.results.hidden) {
+						runSearch(q);
+					}
+				});
+
+				cfg.search.addEventListener('keydown', function (e) {
+					const picks = pickableRows();
+					if (!picks.length || cfg.results.hidden) return;
+					if (e.key === 'ArrowDown') {
+						e.preventDefault();
+						highlightIdx = highlightIdx < 0 || highlightIdx >= picks.length - 1 ? 0 : highlightIdx + 1;
+						highlightRows(picks, highlightIdx);
+					} else if (e.key === 'ArrowUp') {
+						e.preventDefault();
+						highlightIdx = highlightIdx <= 0 ? picks.length - 1 : highlightIdx - 1;
+						highlightRows(picks, highlightIdx);
+					} else if (e.key === 'Enter' && highlightIdx >= 0 && picks[highlightIdx]) {
+						e.preventDefault();
+						const li = picks[highlightIdx];
+						applyChoice(li.dataset.refId, li.dataset.refLabel || '');
+					} else if (e.key === 'Escape') {
+						hideResults();
+					}
+				});
+
+				cfg.search.addEventListener('blur', function () {
+					setTimeout(hideResults, 220);
+				});
+
+				cfg.results.addEventListener('mousedown', function (ev) {
+					if (ev.target.closest('li[data-ref-id]')) ev.preventDefault();
+				});
+
+				cfg.results.addEventListener('click', function (ev) {
+					const li = ev.target.closest('li[data-ref-id]');
+					if (!li) return;
+					applyChoice(li.dataset.refId, li.dataset.refLabel || '');
+				});
+			}
+
+			cfg.clearBtn?.addEventListener('click', function () {
+				if (cfg.hidden) cfg.hidden.value = '';
+				if (cfg.search) cfg.search.value = '';
+				selectedLabel = '';
+				refreshHint();
+				hideResults();
+			});
+
+			return { setFromId, hideResults };
+		}
+
 		function prepareSubmit(target) {
 			const form = document.getElementById('editForm');
 			if (target === 'approve') {
@@ -317,104 +540,10 @@
 			const userSel = document.getElementById('edit_userid');
 			userSel.value = bid.USERID != null && String(bid.USERID) !== '0' ? String(bid.USERID) : '';
 
-			setEntityFromId(bid.ENTITYID);
+			entityPicker.setFromId(bid.ENTITYID);
+			statePicker.setFromId(bid.STATEID);
 			document.getElementById('editModal').showModal();
 		}
-
-		function refreshEntityHint() {
-			const hint = document.getElementById('editEntityHint');
-			const id = document.getElementById('edit_entity_id').value.trim();
-			hint.textContent = (id !== '' && id !== '0') ? '· #' + id : '· none';
-		}
-
-		function hideEntityResults() {
-			const ul = document.getElementById('editEntityResults');
-			ul.hidden = true; ul.innerHTML = '';
-			document.getElementById('editEntitySearch').setAttribute('aria-expanded', 'false');
-		}
-
-		async function setEntityFromId(raw) {
-			const hidden = document.getElementById('edit_entity_id');
-			const search = document.getElementById('editEntitySearch');
-			entitySelectedLabel = '';
-			hideEntityResults();
-			const idStr = raw != null && String(raw) !== '' && String(raw) !== '0' ? String(raw) : '';
-			hidden.value = idStr;
-			if (!idStr) { search.value = ''; refreshEntityHint(); return; }
-			refreshEntityHint();
-			try {
-				const r = await fetch(entitySearchUrl + '?id=' + encodeURIComponent(idStr), {
-					headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
-				});
-				const data = await r.json();
-				search.value = (data.resolved && data.resolved.label) ? data.resolved.label : ('Entity #' + idStr);
-			} catch (e) { search.value = 'Entity #' + idStr; }
-			entitySelectedLabel = search.value;
-		}
-
-		async function runEntitySearch(query) {
-			const ul = document.getElementById('editEntityResults');
-			const search = document.getElementById('editEntitySearch');
-			entityReq += 1;
-			const seq = entityReq;
-			let data;
-			try {
-				const r = await fetch(entitySearchUrl + '?q=' + encodeURIComponent(query) + '&limit=40', {
-					headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
-				});
-				data = await r.json();
-			} catch (e) { return; }
-			if (seq !== entityReq || search.value.trim() !== query) return;
-			ul.innerHTML = '';
-			const items = Array.isArray(data.results) ? data.results : [];
-			if (!items.length) {
-				const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'No matches.'; ul.appendChild(li);
-			} else {
-				items.forEach(function (row) {
-					const li = document.createElement('li');
-					li.setAttribute('role', 'option');
-					li.dataset.entityId = String(row.id);
-					const lab = row.label || ('#' + row.id);
-					li.dataset.entityLabel = lab;
-					li.textContent = lab;
-					ul.appendChild(li);
-				});
-			}
-			ul.hidden = false;
-			search.setAttribute('aria-expanded', 'true');
-		}
-
-		(function bindEntityPicker() {
-			const hidden = document.getElementById('edit_entity_id');
-			const search = document.getElementById('editEntitySearch');
-			const ul = document.getElementById('editEntityResults');
-			let timer = null;
-
-			search.addEventListener('input', function () {
-				if (entitySelectedLabel !== '' && search.value !== entitySelectedLabel) {
-					hidden.value = '';
-					refreshEntityHint();
-				}
-				const q = search.value.trim();
-				clearTimeout(timer);
-				if (q.length < 2) { hideEntityResults(); return; }
-				timer = setTimeout(() => runEntitySearch(q), 200);
-			});
-
-			ul.addEventListener('click', function (e) {
-				const li = e.target.closest('li[data-entity-id]');
-				if (!li) return;
-				hidden.value = li.dataset.entityId;
-				search.value = li.dataset.entityLabel;
-				entitySelectedLabel = li.dataset.entityLabel;
-				hideEntityResults();
-				refreshEntityHint();
-			});
-
-			document.addEventListener('click', function (e) {
-				if (!e.target.closest('.entity-box')) hideEntityResults();
-			});
-		})();
 	</script>
 </body>
 
