@@ -32,20 +32,22 @@ class ThirdPartyProcurementPortalUrlTest extends TestCase
 	{
 		$this->assertSame(
 			'',
-			ThirdPartyProcurementPortalUrl::savedBidUrl(
+			ThirdPartyProcurementPortalUrl::resolveSavedBidUrl(
 				'https://www.demandstar.com/app/agency/bids',
 				'https://www.example.gov/bid/123'
 			)
 		);
 	}
 
-	public function test_saved_bid_url_is_empty_when_detail_is_restricted(): void
+	public function test_saved_bid_url_falls_back_to_agency_listing_when_ai_detail_is_portal(): void
 	{
+		$listing = 'https://www.wpb.org/Departments/Procurement/Solicitations';
+
 		$this->assertSame(
-			'',
-			ThirdPartyProcurementPortalUrl::savedBidUrl(
-				'https://www.example.gov/bids',
-				'https://www.bidnetdirect.com/public/solicitation/abc'
+			$listing,
+			ThirdPartyProcurementPortalUrl::resolveSavedBidUrl(
+				$listing,
+				'https://network.demandstar.com/for-business'
 			)
 		);
 	}
@@ -56,7 +58,27 @@ class ThirdPartyProcurementPortalUrlTest extends TestCase
 
 		$this->assertSame(
 			$detail,
-			ThirdPartyProcurementPortalUrl::savedBidUrl('https://www.example.gov/bids', $detail)
+			ThirdPartyProcurementPortalUrl::resolveSavedBidUrl('https://www.example.gov/bids', $detail)
+		);
+	}
+
+	public function test_saved_bid_url_uses_matched_scraped_detail_page(): void
+	{
+		$listing = 'https://www.wpb.org/Departments/Procurement/Solicitations';
+		$detail = 'https://www.wpb.org/Bids/ITB-25.26.115-SS-Belmonte-Rd-Pershing-Way-Utility-Improvements';
+		$bidPages = [[
+			'title' => 'Belmonte Rd & Pershing Way Utility Improvements, WM, San SW, LS #9',
+			'url' => $detail,
+		]];
+
+		$this->assertSame(
+			$detail,
+			ThirdPartyProcurementPortalUrl::resolveSavedBidUrl(
+				$listing,
+				'https://network.demandstar.com/for-business',
+				$bidPages,
+				'Belmonte Rd & Pershing Way Utility Improvements, WM, San SW, LS #9'
+			)
 		);
 	}
 }

@@ -15,6 +15,31 @@
 		}
 		nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.75rem; }
 		h1 { margin: 0; font-size: 1.8rem; font-weight: 600; }
+		nav .nav-actions {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			flex-wrap: wrap;
+		}
+		nav .nav-actions form {
+			margin: 0;
+			display: flex;
+			align-items: center;
+		}
+		nav .nav-actions a[role="button"],
+		nav .nav-actions button {
+			margin: 0;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 0.35rem;
+			min-height: 2.5rem;
+			padding: 0.5rem 1rem;
+			font-size: 0.9rem;
+			line-height: 1.2;
+			box-sizing: border-box;
+			white-space: nowrap;
+		}
 		.card { background: #fff; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 2rem; }
 		table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
 		th, td { padding: 0.7rem 0.9rem; text-align: left; vertical-align: top; font-size: 0.88rem; }
@@ -54,7 +79,6 @@
 		a.title-external-link:hover { color:#2563eb; }
 		a.title-external-link svg { width:0.95rem; height:0.95rem; }
 		.naics-cell { white-space:nowrap; font-variant-numeric:tabular-nums; }
-		.toolbar { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; }
 		/* Pico constrains dialog > article width and centers it — override for full-viewport modal */
 		dialog#editModal {
 			width: calc(100vw - 1.5rem) !important;
@@ -210,16 +234,16 @@
 	<main class="container">
 		<nav>
 			<h1>Pending Approval <span class="muted" style="font-size:1rem;">({{ $pendingTotal }})</span></h1>
-			<div class="toolbar">
-				<a href="{{ route('bids.index') }}" role="button" class="secondary" style="padding:0.5rem 1rem; font-size:0.9rem;">Back to Bids</a>
+			<div class="nav-actions">
+				<a href="{{ route('bids.index') }}" role="button" class="secondary">Back to Bids</a>
 				@if ($pendingTotal > 0)
-					<form method="POST" action="{{ route('pending.approveAll') }}" onsubmit="return confirm('Approve ALL pending bids and publish them to the live table?')" style="margin:0;">
+					<form method="POST" action="{{ route('pending.approveAll') }}" onsubmit="return confirm('Approve ALL pending bids and publish them to the live table?')">
 						@csrf
-						<button type="submit" style="padding:0.5rem 1rem; font-size:0.9rem; background:#16a34a; border-color:#16a34a;">Approve all</button>
+						<button type="submit" style="background:#16a34a; border-color:#16a34a;">Approve all</button>
 					</form>
-					<form method="POST" action="{{ route('pending.rejectAll') }}" onsubmit="return confirm('Reject (delete) ALL pending bids? This cannot be undone.')" style="margin:0;">
+					<form method="POST" action="{{ route('pending.rejectAll') }}" onsubmit="return confirm('Reject (delete) ALL pending bids? This cannot be undone.')">
 						@csrf
-						<button type="submit" class="outline contrast" style="padding:0.5rem 1rem; font-size:0.9rem;">Reject all</button>
+						<button type="submit" class="outline contrast">Reject all</button>
 					</form>
 				@endif
 			</div>

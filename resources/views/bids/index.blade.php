@@ -23,6 +23,50 @@
 			align-items: center;
 			margin-bottom: 2rem;
 			flex-wrap: wrap;
+			gap: 0.75rem;
+		}
+
+		nav .nav-actions {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			flex-wrap: wrap;
+		}
+
+		nav .nav-actions form {
+			margin: 0;
+			display: flex;
+			align-items: center;
+		}
+
+		nav .nav-actions a[role="button"],
+		nav .nav-actions button {
+			margin: 0;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 0.35rem;
+			min-height: 2.5rem;
+			padding: 0.5rem 1rem;
+			font-size: 0.9rem;
+			line-height: 1.2;
+			box-sizing: border-box;
+			white-space: nowrap;
+		}
+
+		nav .nav-badge {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			min-width: 1.35rem;
+			height: 1.35rem;
+			padding: 0 0.4rem;
+			background: #dc2626;
+			color: #fff;
+			border-radius: 999px;
+			font-size: 0.72rem;
+			font-weight: 700;
+			line-height: 1;
 		}
 
 		h1 {
@@ -849,11 +893,11 @@
 		<!-- Navigation -->
 	<nav>
 		<h1>Bid Scraper</h1>
-		<div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-			<a href="{{ route('pending.index') }}" role="button" class="secondary outline" style="position:relative;">
+		<div class="nav-actions">
+			<a href="{{ route('pending.index') }}" role="button" class="secondary outline">
 				Pending Approval
 				@if (($pendingCount ?? 0) > 0)
-					<span style="display:inline-block; margin-left:0.35rem; background:#dc2626; color:#fff; border-radius:999px; padding:0 0.45rem; font-size:0.72rem; font-weight:700; line-height:1.5;">{{ $pendingCount }}</span>
+					<span class="nav-badge">{{ $pendingCount }}</span>
 				@endif
 			</a>
 			<form method="POST" action="{{ route('logout') }}">

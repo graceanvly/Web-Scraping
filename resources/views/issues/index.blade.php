@@ -13,8 +13,33 @@
 			background: linear-gradient(135deg, #f5f7fa 0%, #e4ebf5 100%);
 			font-family: system-ui, sans-serif;
 		}
-		nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; }
+		nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 0.75rem; }
 		h1 { margin: 0; font-size: 1.8rem; font-weight: 600; }
+		nav .nav-actions {
+			display: flex;
+			align-items: center;
+			gap: 0.5rem;
+			flex-wrap: wrap;
+		}
+		nav .nav-actions form {
+			margin: 0;
+			display: flex;
+			align-items: center;
+		}
+		nav .nav-actions a[role="button"],
+		nav .nav-actions button {
+			margin: 0;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 0.35rem;
+			min-height: 2.5rem;
+			padding: 0.5rem 1rem;
+			font-size: 0.9rem;
+			line-height: 1.2;
+			box-sizing: border-box;
+			white-space: nowrap;
+		}
 		.card {
 			background: #fff; padding: 1.5rem; border-radius: 10px;
 			box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 2rem;
@@ -71,13 +96,13 @@
 	<main class="container">
 		<nav>
 			<h1>Scrape Issues</h1>
-			<div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
-				<a href="{{ route('bids.index') }}" role="button" class="secondary" style="padding:0.5rem 1rem; font-size:0.9rem;">Back to Bids</a>
+			<div class="nav-actions">
+				<a href="{{ route('bids.index') }}" role="button" class="secondary">Back to Bids</a>
 				@if ($logs->total() > 0)
 					<form method="POST" action="{{ route('scrape.clearIssues') }}" onsubmit="return confirm('Clear all issues?')">
 						@csrf
 						@method('DELETE')
-						<button type="submit" class="outline contrast" style="padding:0.5rem 1rem; font-size:0.9rem;">Clear All</button>
+						<button type="submit" class="outline contrast">Clear All</button>
 					</form>
 				@endif
 			</div>

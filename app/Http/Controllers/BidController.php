@@ -243,9 +243,7 @@ class BidController extends Controller
 				$title = $titleMap[$rawTitle] ?? $rawTitle;
 				$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
-				$detailUrl = trim((string) ($bidData['URL'] ?? $validated['URL']));
-				$detailUrl = $detailUrl !== '' ? $detailUrl : $validated['URL'];
-				$savedUrl = ThirdPartyProcurementPortalUrl::savedBidUrl($validated['URL'], $detailUrl);
+				$savedUrl = $this->resolveScrapedBidUrl($validated['URL'], $bidData, $result['bid_pages'] ?? [], $rawTitle);
 
 				$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
@@ -467,9 +465,7 @@ class BidController extends Controller
 					$title = $titleMap[$rawTitle] ?? $rawTitle;
 					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
-					$detailUrl = trim((string) ($bidData['URL'] ?? $url));
-					$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
-					$savedUrl = ThirdPartyProcurementPortalUrl::savedBidUrl($url, $detailUrl);
+					$savedUrl = $this->resolveScrapedBidUrl($url, $bidData, $result['bid_pages'] ?? [], $rawTitle);
 					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
 					if ($this->scrapeBidAlreadyExists($title, $savedUrl, $endDate)) { $duplicateCount++; continue; }
@@ -650,9 +646,7 @@ class BidController extends Controller
 					$title = $titleMap[$rawTitle] ?? $rawTitle;
 					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
-					$detailUrl = trim((string) ($bidData['URL'] ?? $url));
-					$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
-					$savedUrl = ThirdPartyProcurementPortalUrl::savedBidUrl($url, $detailUrl);
+					$savedUrl = $this->resolveScrapedBidUrl($url, $bidData, $result['bid_pages'] ?? [], $rawTitle);
 
 					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
@@ -1025,9 +1019,7 @@ class BidController extends Controller
 						$title = $titleMap[$rawTitle] ?? $rawTitle;
 						$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
-						$detailUrl = trim((string) ($bidData['URL'] ?? $url));
-						$detailUrl = $detailUrl !== '' ? $detailUrl : $url;
-						$savedUrl = ThirdPartyProcurementPortalUrl::savedBidUrl($url, $detailUrl);
+						$savedUrl = $this->resolveScrapedBidUrl($url, $bidData, $result['bid_pages'] ?? [], $rawTitle);
 						$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
 						if ($this->scrapeBidAlreadyExists($title, $savedUrl, $endDate)) {
@@ -2026,6 +2018,18 @@ class BidController extends Controller
 		$map = array_combine($raw, $rewritten);
 
 		return is_array($map) ? $map : [];
+	}
+
+	/**
+	 * @param array<int, array{url?: string, title?: string}> $bidPages
+	 */
+	private function resolveScrapedBidUrl(string $listingUrl, array $bidData, array $bidPages, ?string $matchTitle = null): string
+	{
+		$detailUrl = trim((string) ($bidData['URL'] ?? $listingUrl));
+		$detailUrl = $detailUrl !== '' ? $detailUrl : $listingUrl;
+		$title = trim((string) ($matchTitle ?? $bidData['TITLE'] ?? ''));
+
+		return ThirdPartyProcurementPortalUrl::resolveSavedBidUrl($listingUrl, $detailUrl, $bidPages, $title);
 	}
 
 	private function scrapeBidAlreadyExists(string $title, string $savedUrl, ?string $endDate): bool
