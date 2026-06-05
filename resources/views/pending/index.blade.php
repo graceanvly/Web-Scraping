@@ -55,24 +55,50 @@
 		a.title-external-link svg { width:0.95rem; height:0.95rem; }
 		.naics-cell { white-space:nowrap; font-variant-numeric:tabular-nums; }
 		.toolbar { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; }
+		/* Pico constrains dialog > article width and centers it — override for full-viewport modal */
 		dialog#editModal {
-			width: calc(100vw - 1.5rem);
-			max-width: none;
-			height: calc(100dvh - 1.5rem);
-			max-height: none;
+			width: calc(100vw - 1.5rem) !important;
+			max-width: calc(100vw - 1.5rem) !important;
+			height: calc(100dvh - 1.5rem) !important;
+			max-height: calc(100dvh - 1.5rem) !important;
 			margin: auto;
 			border: none;
 			border-radius: 10px;
-			padding: 0;
+			padding: 0 !important;
 			box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+			overflow: hidden;
+		}
+		dialog#editModal[open] {
+			display: flex !important;
+			flex-direction: column;
+			align-items: stretch !important;
+			justify-content: stretch;
 		}
 		dialog#editModal::backdrop { background: rgba(15, 23, 42, 0.45); }
-		dialog#editModal article {
-			margin: 0;
+		dialog#editModal .edit-modal-shell {
+			width: 100% !important;
+			max-width: none !important;
+			margin: 0 !important;
 			padding: 2rem 2.25rem;
+			flex: 1 1 auto;
+			min-height: 0;
 			max-height: calc(100dvh - 1.5rem);
 			overflow-y: auto;
+			overflow-x: hidden;
 			box-sizing: border-box;
+			background: var(--pico-background-color, #fff);
+		}
+		dialog#editModal input[type="text"],
+		dialog#editModal input[type="search"],
+		dialog#editModal input[type="email"],
+		dialog#editModal input[type="date"],
+		dialog#editModal textarea,
+		dialog#editModal select {
+			width: 100%;
+			max-width: none !important;
+		}
+		dialog#editModal footer {
+			margin-top: 1.5rem;
 		}
 		.edit-modal-layout {
 			display: grid;
@@ -255,7 +281,7 @@
 
 	<!-- Edit Modal -->
 	<dialog id="editModal">
-		<article>
+		<div class="edit-modal-shell">
 			<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
 				<h3 style="margin:0;">Edit pending bid</h3>
 				<button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280; padding:0; line-height:1;" onclick="document.getElementById('editModal').close()">&times;</button>
@@ -348,7 +374,7 @@
 					<p class="similar-empty" id="similarEmpty" hidden>No similar bids found.</p>
 				</aside>
 			</div>
-		</article>
+		</div>
 	</dialog>
 
 	<script>
