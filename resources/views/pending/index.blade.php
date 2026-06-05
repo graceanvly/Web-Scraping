@@ -55,8 +55,40 @@
 		a.title-external-link svg { width:0.95rem; height:0.95rem; }
 		.naics-cell { white-space:nowrap; font-variant-numeric:tabular-nums; }
 		.toolbar { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; }
-		dialog { max-width: 640px; width: 92%; border:none; border-radius:12px; padding:0; box-shadow:0 8px 30px rgba(0,0,0,0.15); }
-		dialog article { margin:0; padding:1.75rem; }
+		dialog#editModal { max-width: 980px; width: 96%; border:none; border-radius:12px; padding:0; box-shadow:0 8px 30px rgba(0,0,0,0.15); }
+		dialog#editModal article { margin:0; padding:1.75rem; }
+		.edit-modal-layout { display:grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); gap:1.25rem; align-items:start; }
+		.edit-modal-main { min-width:0; }
+		.similar-panel {
+			background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px;
+			padding:0.85rem 0.9rem; position:sticky; top:0; max-height:min(72vh, 640px);
+			overflow-y:auto;
+		}
+		.similar-panel h4 { margin:0 0 0.35rem; font-size:0.88rem; font-weight:600; color:#1e293b; }
+		.similar-panel .similar-meta { font-size:0.72rem; color:#64748b; margin-bottom:0.65rem; line-height:1.35; }
+		.similar-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:0.55rem; }
+		.similar-item {
+			background:#fff; border:1px solid #e5e7eb; border-radius:8px;
+			padding:0.55rem 0.6rem; font-size:0.78rem; line-height:1.35;
+		}
+		.similar-item-title { font-weight:600; color:#1e293b; margin:0 0 0.2rem; overflow-wrap:anywhere; }
+		.similar-item-title a { color:#2563eb; text-decoration:none; }
+		.similar-item-title a:hover { text-decoration:underline; }
+		.similar-item-dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:0.1rem 0.45rem; color:#64748b; }
+		.similar-item-dl dt { font-weight:600; }
+		.similar-item-dl dd { margin:0; overflow-wrap:anywhere; }
+		.similar-badge {
+			display:inline-block; font-size:0.65rem; font-weight:700; text-transform:uppercase;
+			letter-spacing:0.03em; padding:0.1rem 0.35rem; border-radius:4px; margin-bottom:0.25rem;
+		}
+		.similar-badge.live { background:#eff6ff; color:#1d4ed8; }
+		.similar-badge.pending { background:#fff7ed; color:#c2410c; }
+		.similar-empty { font-size:0.78rem; color:#94a3b8; margin:0; }
+		.similar-loading { font-size:0.78rem; color:#64748b; margin:0; }
+		@media (max-width: 860px) {
+			.edit-modal-layout { grid-template-columns: 1fr; }
+			.similar-panel { position:static; max-height:none; }
+		}
 		.edit-grid { display:grid; grid-template-columns: 1fr 1fr; gap:0.9rem; }
 		.edit-grid .full { grid-column: 1 / -1; }
 		.edit-grid label { font-size:0.82rem; font-weight:600; color:#374151; margin-bottom:0.2rem; display:block; }
@@ -202,7 +234,8 @@
 				<h3 style="margin:0;">Edit pending bid</h3>
 				<button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280; padding:0; line-height:1;" onclick="document.getElementById('editModal').close()">&times;</button>
 			</div>
-			<form id="editForm" method="POST">
+			<div class="edit-modal-layout">
+				<form id="editForm" method="POST" class="edit-modal-main">
 				@csrf
 				<input type="hidden" name="_method" id="edit_method" value="PUT">
 				<input type="hidden" name="search" value="{{ $search }}">
@@ -280,6 +313,15 @@
 					</div>
 				</footer>
 			</form>
+
+				<aside class="similar-panel" aria-labelledby="similarPanelHeading">
+					<h4 id="similarPanelHeading">Similar bids</h4>
+					<p class="similar-meta" id="similarMatchLabel">Last 5 by entity, then email, then URL.</p>
+					<p class="similar-loading" id="similarLoading" hidden>Loading…</p>
+					<ul class="similar-list" id="similarList" hidden></ul>
+					<p class="similar-empty" id="similarEmpty" hidden>No similar bids found.</p>
+				</aside>
+			</div>
 		</article>
 	</dialog>
 
@@ -287,6 +329,7 @@
 		@php
 			$entitySearchUrl = route('bids.reference.entities');
 			$stateSearchUrl = route('bids.reference.states');
+			$similarUrl = route('pending.similar');
 			$updateUrlTpl = route('pending.update', ['pendingBid' => '__ID__']);
 			$approveUrlTpl = route('pending.approve', ['pendingBid' => '__ID__']);
 			$pendingRows = $pending->getCollection()->map(function ($r) {
@@ -307,14 +350,18 @@
 		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 		const entitySearchUrl = @json($entitySearchUrl);
 		const stateSearchUrl = @json($stateSearchUrl);
+		const similarUrl = @json($similarUrl);
 		const updateUrlTpl = @json($updateUrlTpl);
 		const approveUrlTpl = @json($approveUrlTpl);
 		const pendingData = @json($pendingRows);
 
 		let currentUpdateUrl = '';
 		let currentApproveUrl = '';
+		let currentPendingId = 0;
+		let similarReq = 0;
+		let similarTimer = null;
 
-		const entityPicker = initRefPicker({
+		const entityPickerCfg = {
 			hidden: document.getElementById('edit_entity_id'),
 			search: document.getElementById('edit_entity_search'),
 			results: document.getElementById('edit_entity_results'),
@@ -324,7 +371,9 @@
 			fallbackPrefix: 'Entity #',
 			searchLimit: 40,
 			minChars: 0,
-		});
+			onChange: null,
+		};
+		const entityPicker = initRefPicker(entityPickerCfg);
 
 		const statePicker = initRefPicker({
 			hidden: document.getElementById('edit_state_id'),
@@ -372,6 +421,9 @@
 				selectedLabel = label;
 				refreshHint();
 				hideResults();
+				if (typeof cfg.onChange === 'function') {
+					cfg.onChange();
+				}
 			}
 
 			async function setFromId(raw) {
@@ -448,6 +500,9 @@
 					if (selectedLabel !== '' && cfg.search.value !== selectedLabel) {
 						cfg.hidden.value = '';
 						refreshHint();
+						if (typeof cfg.onChange === 'function') {
+							cfg.onChange();
+						}
 					}
 					clearTimeout(timer);
 					const q = cfg.search.value.trim();
@@ -506,10 +561,104 @@
 				selectedLabel = '';
 				refreshHint();
 				hideResults();
+				if (typeof cfg.onChange === 'function') {
+					cfg.onChange();
+				}
 			});
 
 			return { setFromId, hideResults };
 		}
+
+		function escHtml(str) {
+			const d = document.createElement('div');
+			d.textContent = str == null ? '' : String(str);
+			return d.innerHTML;
+		}
+
+		function scheduleSimilarRefresh() {
+			clearTimeout(similarTimer);
+			similarTimer = setTimeout(refreshSimilarPanel, 350);
+		}
+
+		async function refreshSimilarPanel() {
+			const loading = document.getElementById('similarLoading');
+			const list = document.getElementById('similarList');
+			const empty = document.getElementById('similarEmpty');
+			const label = document.getElementById('similarMatchLabel');
+			if (!loading || !list || !empty || !label) return;
+
+			const entityId = parseInt(document.getElementById('edit_entity_id')?.value || '0', 10) || 0;
+			const email = (document.getElementById('edit_email')?.value || '').trim();
+			const url = (document.getElementById('edit_url')?.value || '').trim();
+
+			similarReq += 1;
+			const seq = similarReq;
+			loading.hidden = false;
+			list.hidden = true;
+			empty.hidden = true;
+
+			const params = new URLSearchParams({
+				entity_id: String(entityId),
+				email: email,
+				url: url,
+				exclude_temp_id: String(currentPendingId || 0),
+			});
+
+			let data;
+			try {
+				const r = await fetch(similarUrl + '?' + params.toString(), {
+					headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
+				});
+				data = await r.json();
+			} catch (e) {
+				if (seq !== similarReq) return;
+				loading.hidden = true;
+				label.textContent = 'Could not load similar bids.';
+				empty.hidden = false;
+				return;
+			}
+			if (seq !== similarReq) return;
+
+			loading.hidden = true;
+			const entries = Array.isArray(data.entries) ? data.entries : [];
+			label.textContent = data.match_label || 'No similar bids found';
+
+			if (!entries.length) {
+				list.hidden = true;
+				empty.hidden = false;
+				return;
+			}
+
+			list.innerHTML = '';
+			entries.forEach(function (row) {
+				const li = document.createElement('li');
+				li.className = 'similar-item';
+				const badge = row.source === 'live' ? 'live' : 'pending';
+				const title = row.title || 'Untitled';
+				const titleHtml = row.view_url
+					? '<a href="' + escHtml(row.view_url) + '" target="_blank" rel="noopener">' + escHtml(title) + '</a>'
+					: escHtml(title);
+				const bits = [];
+				if (row.end_date) bits.push(['Ends', row.end_date]);
+				if (row.scraped) bits.push(['Scraped', row.scraped]);
+				if (row.email) bits.push(['Email', row.email]);
+				let dl = '';
+				bits.forEach(function (pair) {
+					dl += '<dt>' + escHtml(pair[0]) + '</dt><dd>' + escHtml(pair[1]) + '</dd>';
+				});
+				li.innerHTML =
+					'<span class="similar-badge ' + badge + '">' + (badge === 'live' ? 'Live' : 'Pending') + '</span>' +
+					'<p class="similar-item-title">' + titleHtml + '</p>' +
+					(dl ? '<dl class="similar-item-dl">' + dl + '</dl>' : '');
+				list.appendChild(li);
+			});
+			list.hidden = false;
+			empty.hidden = true;
+		}
+
+		entityPickerCfg.onChange = scheduleSimilarRefresh;
+		document.getElementById('edit_email')?.addEventListener('input', scheduleSimilarRefresh);
+		document.getElementById('edit_url')?.addEventListener('input', scheduleSimilarRefresh);
 
 		function prepareSubmit(target) {
 			const form = document.getElementById('editForm');
@@ -522,10 +671,11 @@
 			}
 		}
 
-		function openEdit(idx) {
+		async function openEdit(idx) {
 			const bid = pendingData[idx];
 			if (!bid) return;
 			const form = document.getElementById('editForm');
+			currentPendingId = bid.id;
 			currentUpdateUrl = updateUrlTpl.replace('__ID__', bid.id);
 			currentApproveUrl = approveUrlTpl.replace('__ID__', bid.id);
 			form.action = currentUpdateUrl;
@@ -540,9 +690,10 @@
 			const userSel = document.getElementById('edit_userid');
 			userSel.value = bid.USERID != null && String(bid.USERID) !== '0' ? String(bid.USERID) : '';
 
-			entityPicker.setFromId(bid.ENTITYID);
-			statePicker.setFromId(bid.STATEID);
+			await entityPicker.setFromId(bid.ENTITYID);
+			await statePicker.setFromId(bid.STATEID);
 			document.getElementById('editModal').showModal();
+			refreshSimilarPanel();
 		}
 	</script>
 </body>

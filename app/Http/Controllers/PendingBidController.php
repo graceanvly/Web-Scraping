@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Bid;
 use App\Models\TempBid;
 use App\Services\BidReferenceLookupService;
+use App\Services\PendingSimilarEntriesService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -65,6 +66,19 @@ class PendingBidController extends Controller
 			'entityLabels',
 			'manilaDirectoryUsers',
 			'search'
+		));
+	}
+
+	/**
+	 * JSON: last 5 similar live/pending bids (entity → email → URL).
+	 */
+	public function similar(Request $request, PendingSimilarEntriesService $similar)
+	{
+		return response()->json($similar->find(
+			(int) $request->query('entity_id', 0),
+			$request->query('email'),
+			$request->query('url'),
+			(int) $request->query('exclude_temp_id', 0),
 		));
 	}
 

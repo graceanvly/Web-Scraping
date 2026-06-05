@@ -37,6 +37,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/scrape-url-stream', [BidController::class, 'scrapeUrlStream'])->name('bids.scrapeUrlStream');
     // Pending approval queue (scraped bids land in bids_temp until approved)
     Route::get('/pending', [PendingBidController::class, 'index'])->name('pending.index');
+    Route::get('/pending/similar', [PendingBidController::class, 'similar'])->name('pending.similar');
     Route::post('/pending/approve-all', [PendingBidController::class, 'approveAll'])->name('pending.approveAll');
     Route::post('/pending/reject-all', [PendingBidController::class, 'rejectAll'])->name('pending.rejectAll');
     Route::put('/pending/{pendingBid}', [PendingBidController::class, 'update'])->name('pending.update');
