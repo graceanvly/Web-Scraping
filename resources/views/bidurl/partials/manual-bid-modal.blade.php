@@ -187,8 +187,22 @@
 	});
 
 	window.openManualBidFromBtn = async function (btn) {
-		const cfg = JSON.parse(btn.getAttribute('data-manual-add') || '{}');
-		await openManualBid(cfg);
+		const cfg = {
+			startUrl: btn.getAttribute('data-manual-start-url') || '',
+			storeUrl: btn.getAttribute('data-manual-store-url') || '',
+			cancelUrl: btn.getAttribute('data-manual-cancel-url') || '',
+			listingUrl: btn.getAttribute('data-manual-listing-url') || '',
+		};
+		if (!cfg.startUrl || !cfg.storeUrl) {
+			alert('Manual add is not configured for this row.');
+			return;
+		}
+		try {
+			await openManualBid(cfg);
+		} catch (e) {
+			console.error(e);
+			alert(e.message || 'Could not open manual add.');
+		}
 	};
 
 	window.closeManualBidModal = function () {
@@ -219,6 +233,8 @@
 		manualStarted = false;
 
 		try {
+			const fd = new FormData();
+			fd.append('_token', csrfToken);
 			const r = await fetch(cfg.startUrl, {
 				method: 'POST',
 				headers: {
@@ -226,8 +242,16 @@
 					'X-CSRF-TOKEN': csrfToken,
 					'X-Requested-With': 'XMLHttpRequest',
 				},
+				body: fd,
 			});
-			if (!r.ok) throw new Error('Could not start manual entry.');
+			if (!r.ok) {
+				let msg = 'Could not start manual entry.';
+				try {
+					const err = await r.json();
+					if (err.message) msg = err.message;
+				} catch (ignore) {}
+				throw new Error(msg);
+			}
 			const data = await r.json();
 			document.getElementById('manual_started_at').value = data.started_at || '';
 			manualStarted = true;
