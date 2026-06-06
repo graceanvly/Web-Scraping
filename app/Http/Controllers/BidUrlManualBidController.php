@@ -73,6 +73,94 @@ class BidUrlManualBidController extends Controller
 		return response()->json(['ok' => true]);
 	}
 
+	public function searchBidUrls(Request $request, BidUrlManualEntryService $entries)
+	{
+		$userId = (int) $request->query('user_id', BidUrlManualEntryService::DEFAULT_BID_URL_USER_ID);
+		$query = trim((string) $request->query('q', ''));
+		$resolveId = (int) $request->query('id', 0);
+
+		if ($resolveId > 0) {
+			$row = BidUrl::query()
+				->where('id', $resolveId)
+				->where('user_id', $userId)
+				->first();
+
+			if (!$row) {
+				return response()->json(['resolved' => null]);
+			}
+
+			$url = trim((string) ($row->url ?? ''));
+			$name = trim((string) ($row->name ?? ''));
+
+			return response()->json([
+				'resolved' => [
+					'id' => (int) $row->id,
+					'label' => $name !== '' ? ($name . ' — ' . $url) : $url,
+					'url' => $url,
+				],
+			]);
+		}
+
+		return response()->json([
+			'results' => $entries->searchAssignedBidUrls($userId, $query),
+		]);
+	}
+
+	public function startFromBids(Request $request, BidUrlManualEntryService $entries)
+	{
+		$bidUrlId = (int) $request->input('bid_url_id', 0);
+		$listingUrl = trim((string) $request->input('listing_url', ''));
+		$bidUrl = $entries->resolveBidUrlForManualEntry($bidUrlId > 0 ? $bidUrlId : null, $listingUrl);
+
+		if ($listingUrl === '' && !$bidUrl) {
+			abort(422, 'Enter or select a listing URL.');
+		}
+
+		if ($bidUrl) {
+			$this->guardAddEligible($bidUrl->last_scraped_at);
+			$listingUrl = trim((string) ($bidUrl->url ?? $listingUrl));
+		}
+
+		$start = $entries->beginManualEntry($bidUrl);
+
+		return response()->json([
+			'started_at' => $start->toIso8601String(),
+			'bid_url_id' => $bidUrl ? (int) $bidUrl->id : null,
+			'listing_url' => $listingUrl,
+		]);
+	}
+
+	public function storeFromBids(Request $request, BidUrlManualEntryService $entries)
+	{
+		[$fields, $startTime, $approve] = $this->parseManualBidRequest($request);
+		$bidUrlId = (int) $request->input('bid_url_id', 0);
+		$listingUrl = trim((string) $request->input('listing_url', ''));
+		$bidUrl = $entries->resolveBidUrlForManualEntry($bidUrlId > 0 ? $bidUrlId : null, $listingUrl);
+
+		if ($bidUrl) {
+			$this->guardAddEligible($bidUrl->last_scraped_at);
+			$listingUrl = trim((string) ($bidUrl->url ?? $listingUrl));
+		} elseif ($listingUrl === '') {
+			abort(422, 'Listing URL is required.');
+		}
+
+		$result = $entries->saveManualBidEntry($fields, $bidUrl, $startTime, $approve, Auth::id(), $listingUrl);
+
+		return redirect()->route('bids.index', $request->only(['userid', 'per_page', 'search', 'tab']))
+			->with('success', $this->resultMessage($result, $approve));
+	}
+
+	public function cancelFromBids(Request $request, BidUrlManualEntryService $entries)
+	{
+		$startTime = $this->parseStartedAt($request);
+		$bidUrlId = (int) $request->input('bid_url_id', 0);
+		$listingUrl = trim((string) $request->input('listing_url', ''));
+		$bidUrl = $entries->resolveBidUrlForManualEntry($bidUrlId > 0 ? $bidUrlId : null, $listingUrl);
+		$entries->finishManualEntry($bidUrl, $startTime, Auth::id());
+
+		return response()->json(['ok' => true]);
+	}
+
 	private function guardAddEligible($lastScrapedAt): void
 	{
 		$at = $lastScrapedAt ? Carbon::parse($lastScrapedAt) : null;

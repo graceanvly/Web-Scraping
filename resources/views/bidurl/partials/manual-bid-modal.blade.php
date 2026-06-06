@@ -1,11 +1,21 @@
 <dialog id="manualBidModal">
 	<div class="manual-modal-shell">
 		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-			<div>
+			<div style="min-width:0; flex:1;">
 				<h3 style="margin:0;">Add bid manually</h3>
-				<p class="muted" style="margin:0.35rem 0 0; font-size:0.85rem;">
-					<a id="manualBidSourceLabel" href="#" target="_blank" rel="noopener noreferrer" style="word-break:break-all;"></a>
-				</p>
+				@php
+					$manualBidContext = $manualBidContext ?? 'bidurl';
+					$manualBidDefaultUserId = (int) ($manualBidDefaultUserId ?? \App\Services\BidUrlManualEntryService::DEFAULT_BID_URL_USER_ID);
+				@endphp
+				@if ($manualBidContext === 'bids')
+					<p id="manualBidSourceWrap" class="muted" style="margin:0.35rem 0 0; font-size:0.85rem; display:none;">
+						<a id="manualBidSourceLabel" href="#" target="_blank" rel="noopener noreferrer" style="word-break:break-all;"></a>
+					</p>
+				@else
+					<p class="muted" style="margin:0.35rem 0 0; font-size:0.85rem;">
+						<a id="manualBidSourceLabel" href="#" target="_blank" rel="noopener noreferrer" style="word-break:break-all;"></a>
+					</p>
+				@endif
 			</div>
 			<button type="button" class="manual-modal-close" onclick="closeManualBidModal()">&times;</button>
 		</div>
@@ -13,13 +23,36 @@
 			<form id="manualBidForm" method="POST" class="manual-modal-main">
 				@csrf
 				<input type="hidden" name="started_at" id="manual_started_at">
-				<input type="hidden" name="search" value="{{ $search ?? '' }}">
-				<input type="hidden" name="per_page" value="{{ request('per_page', 50) }}">
-				<input type="hidden" name="page" value="{{ request('page', 1) }}">
-				<input type="hidden" name="failed_page" value="{{ request('failed_page', 1) }}">
 				<input type="hidden" name="approve" id="manual_approve" value="0">
+				@if ($manualBidContext === 'bids')
+					<input type="hidden" name="userid" value="{{ $filterUserIdRaw ?? $manualBidDefaultUserId }}">
+					<input type="hidden" name="per_page" value="{{ request('per_page', 50) }}">
+					@if (($search ?? '') !== '')
+						<input type="hidden" name="search" value="{{ $search }}">
+					@endif
+				@else
+					<input type="hidden" name="search" value="{{ $search ?? '' }}">
+					<input type="hidden" name="per_page" value="{{ request('per_page', 50) }}">
+					<input type="hidden" name="page" value="{{ request('page', 1) }}">
+					<input type="hidden" name="failed_page" value="{{ request('failed_page', 1) }}">
+				@endif
 
 				<div class="manual-edit-grid">
+					@if ($manualBidContext === 'bids')
+						<div class="full ref-picker manual-listing-picker" id="manualListingUrlPicker">
+							<label for="manual_listing_search">Listing URL <span class="muted" style="font-weight:400;">· search user #{{ $manualBidDefaultUserId }} or paste a link</span></label>
+							<input type="hidden" id="manual_bid_url_id" name="bid_url_id" value="">
+							<input type="hidden" id="manual_listing_url" name="listing_url" value="">
+							<div class="ref-picker-inner">
+								<input type="search" id="manual_listing_search" autocomplete="off" placeholder="Search assigned URLs or paste a listing link…">
+								<ul id="manual_listing_results" class="ref-picker-results" role="listbox" hidden></ul>
+							</div>
+							<div class="ref-picker-meta" style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+								<button type="button" id="manual_listing_url_apply">Use URL</button>
+								<span id="manualListingUrlHint" class="muted" style="font-size:0.82rem;">Choose a listing URL to begin.</span>
+							</div>
+						</div>
+					@endif
 					<div class="full">
 						<label for="manual_title">Title</label>
 						<input type="text" id="manual_title" name="TITLE" required maxlength="255">
@@ -80,8 +113,8 @@
 				<footer class="manual-modal-footer">
 					<button type="button" class="secondary outline" onclick="closeManualBidModal()">Cancel</button>
 					<div style="display:flex; gap:0.5rem;">
-						<button type="submit" class="secondary" onclick="prepareManualSubmit(false)">Save to pending</button>
-						<button type="submit" style="background:#16a34a; border-color:#16a34a;" onclick="prepareManualSubmit(true)">Save &amp; approve</button>
+						<button type="submit" class="secondary" onclick="return prepareManualSubmit(false)">Save to pending</button>
+						<button type="submit" style="background:#16a34a; border-color:#16a34a;" onclick="return prepareManualSubmit(true)">Save &amp; approve</button>
 					</div>
 				</footer>
 			</form>
@@ -123,16 +156,25 @@
 <script>
 (function () {
 	const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+	const manualBidContext = @json($manualBidContext ?? 'bidurl');
+	const manualBidDefaultUserId = @json($manualBidDefaultUserId ?? 120482);
 	const entitySearchUrl = @json(route('bids.reference.entities'));
 	const stateSearchUrl = @json(route('bids.reference.states'));
 	const similarUrl = @json(route('pending.similar'));
 	const liveDetailUrlTpl = @json(route('bids.json', ['bid' => '__ID__']));
 	const pendingDetailUrlTpl = @json(route('pending.json', ['pendingBid' => '__ID__']));
+	const bidsManualStartUrl = @json(route('bids.manualBid.start'));
+	const bidsManualStoreUrl = @json(route('bids.manualBid.store'));
+	const bidsManualCancelUrl = @json(route('bids.manualBid.cancel'));
+	const bidUrlSearchUrl = @json(route('bids.manualBid.searchBidUrls'));
 
 	const manualModal = document.getElementById('manualBidModal');
 	const manualForm = document.getElementById('manualBidForm');
+	const pickListingUrl = manualBidContext === 'bids';
+	let manualStartUrl = '';
 	let manualCancelUrl = '';
 	let manualStarted = false;
+	let manualSessionReady = !pickListingUrl;
 	let similarReq = 0;
 	let similarTimer = null;
 
@@ -160,6 +202,15 @@
 	document.getElementById('manual_email')?.addEventListener('input', scheduleManualSimilarRefresh);
 	document.getElementById('manual_url')?.addEventListener('input', scheduleManualSimilarRefresh);
 
+	if (pickListingUrl) {
+		initListingUrlPicker();
+		document.getElementById('manual_listing_url_apply')?.addEventListener('click', function () {
+			beginManualListingSession().catch(function (e) {
+				alert(e.message || 'Could not start manual add.');
+			});
+		});
+	}
+
 	document.getElementById('manualSimilarList')?.addEventListener('click', function (e) {
 		const btn = e.target.closest('.similar-detail-link');
 		if (!btn) return;
@@ -174,6 +225,12 @@
 				const fd = new FormData();
 				fd.append('_token', csrfToken);
 				fd.append('started_at', startedAt);
+				if (pickListingUrl) {
+					const bidUrlId = document.getElementById('manual_bid_url_id')?.value || '';
+					const listingUrl = document.getElementById('manual_listing_url')?.value || '';
+					if (bidUrlId) fd.append('bid_url_id', bidUrlId);
+					if (listingUrl) fd.append('listing_url', listingUrl);
+				}
 				fetch(manualCancelUrl, {
 					method: 'POST',
 					headers: {
@@ -185,7 +242,9 @@
 			}
 		}
 		manualStarted = false;
+		manualSessionReady = !pickListingUrl;
 		manualCancelUrl = '';
+		manualStartUrl = '';
 	});
 
 	window.openManualBidFromBtn = async function (btn) {
@@ -207,36 +266,222 @@
 		}
 	};
 
+	window.openManualBidPicker = async function () {
+		try {
+			await openManualBid({
+				startUrl: bidsManualStartUrl,
+				storeUrl: bidsManualStoreUrl,
+				cancelUrl: bidsManualCancelUrl,
+				listingUrl: '',
+				pickUrl: true,
+			});
+		} catch (e) {
+			console.error(e);
+			alert(e.message || 'Could not open manual add.');
+		}
+	};
+
 	window.closeManualBidModal = function () {
 		manualModal?.close();
 	};
 
 	window.prepareManualSubmit = function (approve) {
+		if (pickListingUrl && !manualSessionReady) {
+			alert('Choose a listing URL first.');
+			return false;
+		}
 		document.getElementById('manual_approve').value = approve ? '1' : '0';
 		manualStarted = false;
+		return true;
 	};
+
+	function setManualFormEnabled(enabled) {
+		if (!manualForm) return;
+		manualForm.querySelectorAll('input, select, textarea, button[type="submit"]').forEach(function (el) {
+			if (el.id === 'manual_listing_search') return;
+			el.disabled = !enabled;
+		});
+		const applyBtn = document.getElementById('manual_listing_url_apply');
+		if (applyBtn) applyBtn.disabled = enabled;
+		const picker = document.getElementById('manualListingUrlPicker');
+		if (picker) picker.style.opacity = enabled ? '0.72' : '1';
+	}
+
+	function resetListingUrlPicker() {
+		const bidUrlIdEl = document.getElementById('manual_bid_url_id');
+		const listingUrlEl = document.getElementById('manual_listing_url');
+		const searchEl = document.getElementById('manual_listing_search');
+		const resultsEl = document.getElementById('manual_listing_results');
+		const hintEl = document.getElementById('manualListingUrlHint');
+		if (bidUrlIdEl) bidUrlIdEl.value = '';
+		if (listingUrlEl) listingUrlEl.value = '';
+		if (searchEl) searchEl.value = '';
+		if (resultsEl) {
+			resultsEl.hidden = true;
+			resultsEl.innerHTML = '';
+		}
+		if (hintEl) hintEl.textContent = 'Choose a listing URL to begin.';
+	}
+
+	function updateManualSourceLink(listingUrl) {
+		const sourceLink = document.getElementById('manualBidSourceLabel');
+		const wrap = document.getElementById('manualBidSourceWrap');
+		if (!sourceLink) return;
+		sourceLink.href = listingUrl || '#';
+		sourceLink.textContent = listingUrl;
+		sourceLink.hidden = listingUrl === '';
+		if (wrap) wrap.style.display = listingUrl === '' ? 'none' : '';
+	}
+
+	async function beginManualListingSession() {
+		const bidUrlIdEl = document.getElementById('manual_bid_url_id');
+		const listingUrlEl = document.getElementById('manual_listing_url');
+		const searchEl = document.getElementById('manual_listing_search');
+		const hintEl = document.getElementById('manualListingUrlHint');
+		let bidUrlId = (bidUrlIdEl?.value || '').trim();
+		let listingUrl = (listingUrlEl?.value || searchEl?.value || '').trim();
+
+		if (!listingUrl) {
+			throw new Error('Enter or select a listing URL.');
+		}
+
+		listingUrlEl.value = listingUrl;
+		searchEl.value = listingUrl;
+
+		const fd = new FormData();
+		fd.append('_token', csrfToken);
+		fd.append('listing_url', listingUrl);
+		if (bidUrlId) fd.append('bid_url_id', bidUrlId);
+
+		const r = await fetch(manualStartUrl || bidsManualStartUrl, {
+			method: 'POST',
+			headers: {
+				'Accept': 'application/json',
+				'X-CSRF-TOKEN': csrfToken,
+				'X-Requested-With': 'XMLHttpRequest',
+			},
+			body: fd,
+		});
+
+		if (!r.ok) {
+			let msg = 'Could not start manual entry.';
+			try {
+				const err = await r.json();
+				if (err.message) msg = err.message;
+			} catch (ignore) {}
+			throw new Error(msg);
+		}
+
+		const data = await r.json();
+		listingUrl = data.listing_url || listingUrl;
+		if (data.bid_url_id) {
+			bidUrlIdEl.value = String(data.bid_url_id);
+		} else {
+			bidUrlIdEl.value = '';
+		}
+		listingUrlEl.value = listingUrl;
+		searchEl.value = listingUrl;
+		document.getElementById('manual_started_at').value = data.started_at || '';
+		document.getElementById('manual_url').value = listingUrl;
+		updateManualSourceLink(listingUrl);
+		manualStarted = true;
+		manualSessionReady = true;
+		setManualFormEnabled(true);
+		if (hintEl) hintEl.textContent = 'Listing URL selected.';
+		scheduleManualSimilarRefresh();
+	}
+
+	function initListingUrlPicker() {
+		const hidden = document.getElementById('manual_bid_url_id');
+		const listingHidden = document.getElementById('manual_listing_url');
+		const search = document.getElementById('manual_listing_search');
+		const results = document.getElementById('manual_listing_results');
+		if (!search || !results) return;
+
+		let reqSeq = 0;
+
+		function hideResults() {
+			results.hidden = true;
+			results.innerHTML = '';
+			search.setAttribute('aria-expanded', 'false');
+		}
+
+		function applyChoice(id, label, url) {
+			hidden.value = String(id);
+			listingHidden.value = url || '';
+			search.value = label || url || '';
+			hideResults();
+		}
+
+		async function runSearch(query) {
+			reqSeq += 1;
+			const seq = reqSeq;
+			try {
+				const params = new URLSearchParams({
+					user_id: String(manualBidDefaultUserId),
+					q: query,
+					limit: '40',
+				});
+				const r = await fetch(bidUrlSearchUrl + '?' + params.toString(), {
+					headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+				});
+				const data = await r.json();
+				if (seq !== reqSeq) return;
+				const rows = Array.isArray(data.results) ? data.results : [];
+				results.innerHTML = rows.map(function (row) {
+					return '<li role="option" data-ref-id="' + escHtml(row.id) + '" data-ref-label="' + escHtml(row.label) + '" data-ref-url="' + escHtml(row.url) + '">' + escHtml(row.label) + '</li>';
+				}).join('');
+				results.hidden = rows.length === 0;
+				search.setAttribute('aria-expanded', rows.length ? 'true' : 'false');
+			} catch (e) {
+				hideResults();
+			}
+		}
+
+		let debounce;
+		search.addEventListener('input', function () {
+			hidden.value = '';
+			listingHidden.value = search.value.trim();
+			clearTimeout(debounce);
+			debounce = setTimeout(function () { runSearch(search.value.trim()); }, 250);
+		});
+		search.addEventListener('focus', function () { runSearch(search.value.trim()); });
+		results.addEventListener('click', function (ev) {
+			const li = ev.target.closest('li[data-ref-id]');
+			if (!li) return;
+			applyChoice(li.dataset.refId, li.dataset.refLabel || '', li.dataset.refUrl || '');
+		});
+	}
 
 	async function openManualBid(cfg) {
 		if (!manualForm || !manualModal) return;
 		manualForm.action = cfg.storeUrl || '';
 		manualCancelUrl = cfg.cancelUrl || '';
-		const sourceLink = document.getElementById('manualBidSourceLabel');
+		manualStartUrl = cfg.startUrl || '';
 		const listingUrl = cfg.listingUrl || '';
-		sourceLink.href = listingUrl || '#';
-		sourceLink.textContent = listingUrl;
-		sourceLink.hidden = listingUrl === '';
-		document.getElementById('manual_url').value = cfg.listingUrl || '';
+		updateManualSourceLink(listingUrl);
+		document.getElementById('manual_url').value = listingUrl;
 		document.getElementById('manual_title').value = '';
 		document.getElementById('manual_description').value = '';
 		document.getElementById('manual_email').value = '';
 		document.getElementById('manual_naics').value = '';
 		document.getElementById('manual_enddate').value = '';
-		document.getElementById('manual_userid').value = '120482';
+		document.getElementById('manual_userid').value = String(manualBidDefaultUserId);
 		entityPicker.setFromId('');
 		document.getElementById('manual_state_id').value = '';
 		document.getElementById('manual_state_search').value = '';
 		document.getElementById('manual_started_at').value = '';
 		manualStarted = false;
+		manualSessionReady = !cfg.pickUrl;
+
+		if (cfg.pickUrl) {
+			resetListingUrlPicker();
+			setManualFormEnabled(false);
+			manualModal.showModal();
+			return;
+		}
+
+		setManualFormEnabled(true);
 
 		try {
 			const fd = new FormData();

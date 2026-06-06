@@ -34,6 +34,10 @@ Route::middleware('auth')->group(function () {
     Route::delete('/bids/{bid}', [BidController::class, 'destroy'])->name('bids.destroy');
     Route::get('/reference/entities', [BidController::class, 'referenceEntitiesSearch'])->name('bids.reference.entities');
     Route::get('/reference/states', [BidController::class, 'referenceStatesSearch'])->name('bids.reference.states');
+    Route::get('/bids/manual-bid/bid-urls', [BidUrlManualBidController::class, 'searchBidUrls'])->name('bids.manualBid.searchBidUrls');
+    Route::post('/bids/manual-bid/start', [BidUrlManualBidController::class, 'startFromBids'])->name('bids.manualBid.start');
+    Route::post('/bids/manual-bid', [BidUrlManualBidController::class, 'storeFromBids'])->name('bids.manualBid.store');
+    Route::post('/bids/manual-bid/cancel', [BidUrlManualBidController::class, 'cancelFromBids'])->name('bids.manualBid.cancel');
     Route::post('/bidurl/scrape-all', [BidController::class, 'scrapeAll'])->name('bidurl.scrapeAll');
     Route::get('/scrape-stream', [BidController::class, 'scrapeStream'])->name('bidurl.scrapeStream');
     Route::get('/scrape-url-stream', [BidController::class, 'scrapeUrlStream'])->name('bids.scrapeUrlStream');

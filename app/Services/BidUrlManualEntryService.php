@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\DB;
 
 class BidUrlManualEntryService
 {
+	public const DEFAULT_BID_URL_USER_ID = 120482;
+
 	public static function showAddButton(?Carbon $lastScrapedAt): bool
 	{
 		return $lastScrapedAt === null || !$lastScrapedAt->isToday();
@@ -54,6 +56,68 @@ class BidUrlManualEntryService
 		}
 
 		return BidUrl::where('url', $url)->first();
+	}
+
+	/**
+	 * @return array<int, array{id: int, label: string, url: string}>
+	 */
+	public function searchAssignedBidUrls(int $userId, string $query, int $limit = 40): array
+	{
+		if ($userId <= 0) {
+			return [];
+		}
+
+		$builder = BidUrl::query()->where('user_id', $userId);
+
+		$query = trim($query);
+		if ($query !== '') {
+			$builder->where(function ($sub) use ($query) {
+				$sub->where('url', 'like', '%' . $query . '%')
+					->orWhere('name', 'like', '%' . $query . '%');
+			});
+		}
+
+		$rows = $builder->orderBy('url')->limit($limit)->get();
+		$out = [];
+		foreach ($rows as $row) {
+			$url = trim((string) ($row->url ?? ''));
+			if ($url === '') {
+				continue;
+			}
+			$name = trim((string) ($row->name ?? ''));
+			$out[] = [
+				'id' => (int) $row->id,
+				'label' => $name !== '' ? ($name . ' — ' . $url) : $url,
+				'url' => $url,
+			];
+		}
+
+		return $out;
+	}
+
+	public function resolveBidUrlForManualEntry(?int $bidUrlId, ?string $listingUrl): ?BidUrl
+	{
+		if ($bidUrlId !== null && $bidUrlId > 0) {
+			return BidUrl::find($bidUrlId);
+		}
+
+		return $this->findConfiguredByUrl($listingUrl);
+	}
+
+	public function beginManualEntry(?BidUrl $bidUrl): Carbon
+	{
+		if ($bidUrl) {
+			return $this->beginConfigured($bidUrl);
+		}
+
+		return now();
+	}
+
+	public function finishManualEntry(?BidUrl $bidUrl, Carbon $startTime, ?int $userId): void
+	{
+		if ($bidUrl) {
+			$this->finishConfigured($bidUrl, $startTime, $userId);
+		}
 	}
 
 	public function finishScrapeVisit(int $bidUrlId, Carbon $startTime, ?int $userId, ?BidUrl $bidUrl = null): void
@@ -117,12 +181,31 @@ class BidUrlManualEntryService
 		bool $approve,
 		?int $actorUserId
 	): string {
-		return DB::transaction(function () use ($fields, $bidUrl, $startTime, $approve, $actorUserId) {
+		return $this->saveManualBidEntry($fields, $bidUrl, $startTime, $approve, $actorUserId, null);
+	}
+
+	/**
+	 * @param array<string, mixed> $fields
+	 * @return 'pending'|'approved'|'duplicate'
+	 */
+	public function saveManualBidEntry(
+		array $fields,
+		?BidUrl $bidUrl,
+		Carbon $startTime,
+		bool $approve,
+		?int $actorUserId,
+		?string $listingUrl = null
+	): string {
+		return DB::transaction(function () use ($fields, $bidUrl, $startTime, $approve, $actorUserId, $listingUrl) {
 			$temp = new TempBid();
 			$temp->fill($fields);
-			$temp->BID_URL_ID = $bidUrl->id;
-			$temp->source_listing_url = $bidUrl->url;
-			$temp->bid_url_name = $bidUrl->name;
+			if ($bidUrl) {
+				$temp->BID_URL_ID = $bidUrl->id;
+				$temp->source_listing_url = $bidUrl->url;
+				$temp->bid_url_name = $bidUrl->name;
+			} else {
+				$temp->source_listing_url = trim((string) ($listingUrl ?? $fields['URL'] ?? ''));
+			}
 			$temp->CREATED = now();
 			$temp->LAST_MODIFIED = now();
 			$temp->SUBSCRIPTIONTYPEID = 10;
@@ -135,16 +218,12 @@ class BidUrlManualEntryService
 				$result = $this->promoteTempBid($temp);
 			}
 
-			$this->finishConfigured($bidUrl, $startTime, $actorUserId);
+			$this->finishManualEntry($bidUrl, $startTime, $actorUserId);
 
 			return $result;
 		});
 	}
 
-	/**
-	 * @param array<string, mixed> $fields
-	 * @return 'pending'|'approved'|'duplicate'
-	 */
 	public function saveManualBidForFailed(
 		array $fields,
 		FailedBidUrl $failedBidUrl,
