@@ -43,12 +43,47 @@ class BidUrlManualEntryService
 
 	public function finishConfigured(BidUrl $bidUrl, Carbon $startTime, ?int $userId): void
 	{
-		$end = now();
-		$bidUrl->start_time = $startTime;
-		$bidUrl->end_time = $end;
-		$bidUrl->save();
+		$this->finishScrapeVisit((int) $bidUrl->id, $startTime, $userId, $bidUrl);
+	}
 
-		$this->recordHistory((int) $bidUrl->id, $startTime, $end, $userId);
+	public function findConfiguredByUrl(?string $url): ?BidUrl
+	{
+		$url = trim((string) $url);
+		if ($url === '') {
+			return null;
+		}
+
+		return BidUrl::where('url', $url)->first();
+	}
+
+	public function finishScrapeVisit(int $bidUrlId, Carbon $startTime, ?int $userId, ?BidUrl $bidUrl = null): void
+	{
+		if ($bidUrlId <= 0) {
+			return;
+		}
+
+		$end = now();
+
+		if ($bidUrl !== null && $bidUrl->exists) {
+			$bidUrl->start_time = $startTime;
+			$bidUrl->end_time = $end;
+			$bidUrl->last_scraped_at = $end;
+			$bidUrl->save();
+		} else {
+			BidUrl::where('id', $bidUrlId)->update([
+				'start_time' => $startTime,
+				'end_time' => $end,
+				'last_scraped_at' => $end,
+			]);
+		}
+
+		FailedBidUrl::where('original_bid_url_id', $bidUrlId)->update([
+			'start_time' => $startTime,
+			'end_time' => $end,
+			'last_scraped_at' => $end,
+		]);
+
+		$this->recordHistory($bidUrlId, $startTime, $end, $userId);
 	}
 
 	public function finishFailed(FailedBidUrl $failedBidUrl, Carbon $startTime, ?int $userId): void

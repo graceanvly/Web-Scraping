@@ -11,6 +11,8 @@ use App\Models\TempBid;
 use Illuminate\Database\Eloquent\Model;
 use App\Services\AIExtractor;
 use App\Services\BidReferenceLookupService;
+use App\Services\BidReportsService;
+use App\Services\BidUrlManualEntryService;
 use App\Services\ScraperService;
 use App\Support\BidDetailPayload;
 use App\Support\ThirdPartyProcurementPortalUrl;
@@ -124,6 +126,48 @@ class BidController extends Controller
 			Log::warning('Pending bid count not loaded', ['error' => $e->getMessage()]);
 		}
 
+		$reportsService = app(BidReportsService::class);
+		$defaultReportRange = $reportsService->defaultReportRange();
+		$reportFrom = $defaultReportRange['from'];
+		$reportTo = $defaultReportRange['to'];
+		$reportFromInput = trim((string) $request->query('report_from', ''));
+		$reportToInput = trim((string) $request->query('report_to', ''));
+
+		try {
+			if ($reportFromInput !== '') {
+				$reportFrom = \Carbon\Carbon::parse($reportFromInput, 'Asia/Manila')->startOfDay();
+			}
+			if ($reportToInput !== '') {
+				$reportTo = \Carbon\Carbon::parse($reportToInput, 'Asia/Manila')->endOfDay();
+			}
+			if ($reportFrom->gt($reportTo)) {
+				[$reportFrom, $reportTo] = [$reportTo->copy()->startOfDay(), $reportFrom->copy()->endOfDay()];
+			}
+		} catch (\Throwable $e) {
+			$reportFrom = $defaultReportRange['from'];
+			$reportTo = $defaultReportRange['to'];
+		}
+
+		$userActivityReport = [
+			'rows' => [],
+			'totals' => ['bids_added' => 0, 'urls_visited' => 0, 'bids_today' => 0],
+			'from' => $reportFrom,
+			'to' => $reportTo,
+			'today' => now('Asia/Manila')->startOfDay(),
+		];
+		if ($manilaDirectoryUsers !== []) {
+			try {
+				$userActivityReport = $reportsService->userActivityReport($manilaDirectoryUsers, $reportFrom, $reportTo);
+			} catch (\Throwable $e) {
+				Log::warning('User activity report not loaded', ['error' => $e->getMessage()]);
+			}
+		}
+
+		$activeTab = $request->query('tab', 'bids');
+		if (!in_array($activeTab, ['bids', 'issues', 'noentities', 'reports'], true)) {
+			$activeTab = 'bids';
+		}
+
 		return view('bids.index', compact(
 			'bids',
 			'noEntityBids',
@@ -138,10 +182,14 @@ class BidController extends Controller
 			'bidListingRecentDays',
 			'includeHistorical',
 			'pendingCount',
+			'userActivityReport',
+			'reportFrom',
+			'reportTo',
+			'activeTab',
 		));
 	}
 
-	public function store(Request $request, ScraperService $scraper, AIExtractor $ai)
+	public function store(Request $request, ScraperService $scraper, AIExtractor $ai, BidUrlManualEntryService $visitTracking)
 	{
 		// Allow more time/memory for heavy PDF pages to avoid timeouts during single-URL scrapes.
 		// Allow enough wall-clock for AI + persistence (bulk extract can legitimately exceed 90s HTTP alone).
@@ -157,6 +205,9 @@ class BidController extends Controller
 			'URL.max' => 'The link is too long. Please paste a shorter, direct link to the bids page.',
 			'URL.regex' => 'Only http:// or https:// links are supported.',
 		]);
+
+		$configuredBidUrl = $visitTracking->findConfiguredByUrl($validated['URL']);
+		$visitStart = $this->beginScrapeVisit($configuredBidUrl, $visitTracking);
 
 		try {
 			$urlStartedAt = microtime(true);
@@ -329,10 +380,12 @@ class BidController extends Controller
 			return back()->withErrors([
 				'URL' => $this->friendlyExceptionMessage($e)
 			])->withInput();
+		} finally {
+			$this->finishScrapeVisit($configuredBidUrl, $visitStart, $visitTracking);
 		}
 	}
 
-	public function scrapeUrlStream(Request $request, ScraperService $scraper, AIExtractor $ai)
+	public function scrapeUrlStream(Request $request, ScraperService $scraper, AIExtractor $ai, BidUrlManualEntryService $visitTracking)
 	{
 		@set_time_limit(0);
 		@ini_set('memory_limit', '1G');
@@ -345,7 +398,7 @@ class BidController extends Controller
 			session()->save();
 		}
 
-		return new StreamedResponse(function () use ($url, $scraper, $ai, $assignUserId) {
+		return new StreamedResponse(function () use ($url, $scraper, $ai, $assignUserId, $visitTracking) {
 			$send = function ($data) {
 				echo "data: " . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
 				if (ob_get_level()) ob_flush();
@@ -357,6 +410,9 @@ class BidController extends Controller
 				$send(['type' => 'complete', 'saved' => 0, 'duplicates' => 0]);
 				return;
 			}
+
+			$configuredBidUrl = $visitTracking->findConfiguredByUrl($url);
+			$visitStart = $this->beginScrapeVisit($configuredBidUrl, $visitTracking);
 
 			try {
 				$urlStartedAt = microtime(true);
@@ -503,6 +559,8 @@ class BidController extends Controller
 				$this->logIssue(null, $url, 'error', $this->friendlyExceptionMessage($e));
 				$send(['type' => 'error', 'message' => $this->friendlyExceptionMessage($e)]);
 				$send(['type' => 'complete', 'saved' => 0, 'duplicates' => 0]);
+			} finally {
+				$this->finishScrapeVisit($configuredBidUrl, $visitStart, $visitTracking);
 			}
 		}, 200, [
 			'Content-Type' => 'text/event-stream',
@@ -523,7 +581,7 @@ class BidController extends Controller
 		return response()->json(BidDetailPayload::fromLive($bid, $lookup));
 	}
 
-	public function scrapeAll(Request $request, ScraperService $scraper, AIExtractor $ai)
+	public function scrapeAll(Request $request, ScraperService $scraper, AIExtractor $ai, BidUrlManualEntryService $visitTracking)
 	{
 		@set_time_limit(0);
 		@ini_set('memory_limit', '1G');
@@ -539,6 +597,7 @@ class BidController extends Controller
 		$failedUrls = [];
 
 		foreach ($bidUrls as $bidUrl) {
+			$visitStart = null;
 			try {
 				$url = trim((string) ($bidUrl->URL ?? $bidUrl->url ?? ''));
 				if ($url === '') {
@@ -557,6 +616,7 @@ class BidController extends Controller
 					continue;
 				}
 
+				$visitStart = $this->beginScrapeVisit($bidUrl, $visitTracking);
 				$urlStartedAt = microtime(true);
 
 				// 1) Fetch data for each bid URL (batch: skip interactive scan, tighter PDF/detail caps)
@@ -707,13 +767,6 @@ class BidController extends Controller
 				$totalSaved += $savedThisUrl;
 				$totalDuplicates += $duplicatesThisUrl;
 
-				// Only mark "scraped today" when the URL actually produced bids (new or duplicate),
-				// so URLs that yielded nothing are retried on a later run instead of being skipped.
-				if ($savedThisUrl > 0 || $duplicatesThisUrl > 0) {
-					$bidUrl->last_scraped_at = now();
-					$bidUrl->save();
-				}
-
 				Log::info('Scrape summary for ' . $url, [
 					'saved' => $savedThisUrl,
 					'duplicates' => $duplicatesThisUrl,
@@ -738,6 +791,8 @@ class BidController extends Controller
 				}
 				$failedUrls[] = $url;
 				$scrapeIssues[] = "{$url} - " . $this->friendlyExceptionMessage($e);
+			} finally {
+				$this->finishScrapeVisit($bidUrl, $visitStart, $visitTracking);
 			}
 		}
 
@@ -774,7 +829,7 @@ class BidController extends Controller
 		return $redirect;
 	}
 
-	public function scrapeStream(Request $request, ScraperService $scraper, AIExtractor $ai)
+	public function scrapeStream(Request $request, ScraperService $scraper, AIExtractor $ai, BidUrlManualEntryService $visitTracking)
 	{
 		@set_time_limit(0);
 		@ini_set('memory_limit', '1G');
@@ -787,7 +842,7 @@ class BidController extends Controller
 		$singlePerUrlFiveMin = $request->boolean('single_url_max');
 		$urlMaxBudget = $singlePerUrlFiveMin ? 300 : $this->scrapeUrlMaxSeconds();
 
-		return new StreamedResponse(function () use ($scraper, $ai, $assignUserId, $urlMaxBudget, $singlePerUrlFiveMin) {
+		return new StreamedResponse(function () use ($scraper, $ai, $assignUserId, $urlMaxBudget, $singlePerUrlFiveMin, $visitTracking) {
 			// "Latest run wins": claim ownership so an older run (e.g. user refreshed the page and re-clicked
 			// Scrape All) self-terminates instead of running to completion in the background and overlapping.
 			$runKey = 'scrape:stream:active_run';
@@ -842,7 +897,9 @@ class BidController extends Controller
 				Cache::put($runKey, $runId, now()->addHours(6));
 
 				$url = trim((string) ($bidUrl->URL ?? $bidUrl->url ?? ''));
+				$visitStart = null;
 
+				try {
 				if ($url === '') {
 					$this->logIssue($bidUrl->id, "Record ID {$bidUrl->id}", 'warning', 'Missing URL, skipped.');
 					$totalIssues++;
@@ -865,8 +922,9 @@ class BidController extends Controller
 
 				$send(['type' => 'processing', 'index' => $idx + 1, 'url' => $url]);
 
-				try {
-					$urlStartedAt = microtime(true);
+				$visitStart = $this->beginScrapeVisit($bidUrl, $visitTracking);
+
+				$urlStartedAt = microtime(true);
 
 					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Fetching page...']);
 					$result = $scraper->fetch($url, $bidUrl->username ?? null, $bidUrl->password ?? null, [
@@ -1070,14 +1128,6 @@ class BidController extends Controller
 					$totalSaved += $savedThisUrl;
 					$totalDuplicates += $duplicatesThisUrl;
 
-					// Only mark "scraped today" (skipped on later runs today) when the URL actually
-					// produced bids — new or duplicate. URLs that yielded nothing stay unmarked so a
-					// later run retries them instead of skipping them as already done.
-					if ($savedThisUrl > 0 || $duplicatesThisUrl > 0) {
-						$bidUrl->last_scraped_at = now();
-						$bidUrl->save();
-					}
-
 					$expiredFiltered = max(0, $aiBidCount - $filteredBids->count());
 					Log::info('Scrape URL summary', [
 						'url' => $url,
@@ -1136,6 +1186,8 @@ class BidController extends Controller
 					$this->moveBidUrlToFailed($bidUrl, $this->friendlyExceptionMessage($e));
 					$totalIssues++;
 					$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => $this->friendlyExceptionMessage($e)]);
+				} finally {
+					$this->finishScrapeVisit($bidUrl, $visitStart, $visitTracking);
 				}
 			}
 
@@ -1167,6 +1219,24 @@ class BidController extends Controller
 			'message' => $message,
 			'created_at' => now(),
 		]);
+	}
+
+	private function beginScrapeVisit(?BidUrl $bidUrl, BidUrlManualEntryService $visitTracking): ?\Illuminate\Support\Carbon
+	{
+		if (!$bidUrl) {
+			return null;
+		}
+
+		return $visitTracking->beginConfigured($bidUrl);
+	}
+
+	private function finishScrapeVisit(?BidUrl $bidUrl, ?\Illuminate\Support\Carbon $visitStart, BidUrlManualEntryService $visitTracking): void
+	{
+		if (!$bidUrl || !$visitStart) {
+			return;
+		}
+
+		$visitTracking->finishScrapeVisit((int) $bidUrl->id, $visitStart, auth()->id(), $bidUrl);
 	}
 
 	private function moveBidUrlToFailed(BidUrl $bidUrl, string $message): void

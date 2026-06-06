@@ -1035,25 +1035,28 @@
 
 	<!-- Tabs -->
 	<div style="display:flex; gap:0; margin-bottom:0;">
-		<button id="tabBids" class="tab-btn tab-active" onclick="switchTab('bids')">
+		<button id="tabBids" type="button" class="tab-btn {{ ($activeTab ?? 'bids') === 'bids' ? 'tab-active' : '' }}" onclick="switchTab('bids')">
 			Bids
 		</button>
-		<button id="tabIssues" class="tab-btn" onclick="switchTab('issues')">
+		<button id="tabIssues" type="button" class="tab-btn {{ ($activeTab ?? 'bids') === 'issues' ? 'tab-active' : '' }}" onclick="switchTab('issues')">
 			Issues
 			@if (($issueCount ?? 0) > 0)
 				<span class="tab-badge">{{ $issueCount }}</span>
 			@endif
 		</button>
-		<button id="tabNoEntities" type="button" class="tab-btn" onclick="switchTab('noentities')">
+		<button id="tabNoEntities" type="button" class="tab-btn {{ ($activeTab ?? 'bids') === 'noentities' ? 'tab-active' : '' }}" onclick="switchTab('noentities')">
 			No Entities
 			@if (($noEntityBids->total() ?? 0) > 0)
 				<span class="tab-badge">{{ $noEntityBids->total() }}</span>
 			@endif
 		</button>
+		<button id="tabReports" type="button" class="tab-btn {{ ($activeTab ?? 'bids') === 'reports' ? 'tab-active' : '' }}" onclick="switchTab('reports')">
+			Reports
+		</button>
 	</div>
 
 	<!-- Bids Tab -->
-	<section id="panelBids" class="card" style="border-top-left-radius:0;">
+	<section id="panelBids" class="card" style="border-top-left-radius:0;{{ ($activeTab ?? 'bids') !== 'bids' ? ' display:none;' : '' }}">
 			<!-- Toolbar -->
 			<form id="filtersForm" method="GET" action="{{ route('bids.index') }}" class="table-toolbar">
 				<div class="left-controls">
@@ -1210,7 +1213,7 @@
 		</section>
 
 	<!-- Issues Tab -->
-	<section id="panelIssues" class="card" style="display:none; border-top-left-radius:0;">
+	<section id="panelIssues" class="card" style="border-top-left-radius:0;{{ ($activeTab ?? 'bids') !== 'issues' ? ' display:none;' : '' }}">
 		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
 			<span id="issuesCountLabel" style="color:#6b7280; font-size:0.85rem;">
 				{{ $issueCount ?? 0 }} issue(s) recorded
@@ -1267,7 +1270,7 @@
 	</section>
 
 	<!-- No Entities tab: bids with null or zero ENTITYID (same listing filters as main list) -->
-	<section id="panelNoEntities" class="card" style="display:none; border-top-left-radius:0;">
+	<section id="panelNoEntities" class="card" style="border-top-left-radius:0;{{ ($activeTab ?? 'bids') !== 'noentities' ? ' display:none;' : '' }}">
 		<p style="color:#6b7280; font-size:0.9rem; margin:0 0 1rem;">
 			Assigned bids with no entity (<code>ENTITYID</code> blank or 0) under the current filters. Use the <strong>Bids</strong> tab to change search, date, or assigned user.
 		</p>
@@ -1359,6 +1362,88 @@
 			<div class="pagination">
 				{{ $noEntityBids->links('pagination.bidurl') }}
 			</div>
+		</div>
+	</section>
+
+	<!-- Reports tab: Manila user activity by date range -->
+	<section id="panelReports" class="card" style="border-top-left-radius:0;{{ ($activeTab ?? 'bids') !== 'reports' ? ' display:none;' : '' }}">
+		<p style="color:#6b7280; font-size:0.9rem; margin:0 0 1rem;">
+			Activity for directory users in <strong>Asia/Manila</strong>.
+			<strong>Bids added</strong> counts live and pending bids by assigned user and <code>CREATED</code> date.
+			<strong>URLs visited</strong> counts scrape/manual visits from <code>bid_url_history</code>.
+			<strong>Today's bids</strong> uses {{ ($userActivityReport['today'] ?? now('Asia/Manila'))->format('M j, Y') }} (Manila).
+		</p>
+
+		<form method="GET" action="{{ route('bids.index') }}" class="table-toolbar" style="margin-bottom:1rem;">
+			<input type="hidden" name="tab" value="reports">
+			<input type="hidden" name="userid" value="{{ $filterUserIdRaw }}">
+			@if (($search ?? '') !== '')
+				<input type="hidden" name="search" value="{{ $search }}">
+			@endif
+			@if (($filterDate ?? '') !== '')
+				<input type="hidden" name="date" value="{{ $filterDate }}">
+			@endif
+			@if (!empty($includeHistorical))
+				<input type="hidden" name="historical" value="1">
+			@endif
+			@if (request('per_page'))
+				<input type="hidden" name="per_page" value="{{ request('per_page') }}">
+			@endif
+			<div class="left-controls" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.75rem;">
+				<label style="display:flex; align-items:center; gap:0.35rem; font-size:0.9rem;">
+					From
+					<input type="date" name="report_from" value="{{ ($reportFrom ?? now('Asia/Manila')->startOfMonth())->toDateString() }}">
+				</label>
+				<label style="display:flex; align-items:center; gap:0.35rem; font-size:0.9rem;">
+					To
+					<input type="date" name="report_to" value="{{ ($reportTo ?? now('Asia/Manila')->endOfMonth())->toDateString() }}">
+				</label>
+				<button type="submit">Apply</button>
+				<a href="{{ route('bids.index', ['tab' => 'reports', 'userid' => $filterUserIdRaw, 'per_page' => request('per_page', 50)]) }}" class="secondary">Current month</a>
+			</div>
+			<div class="right-controls" style="font-size:0.85rem; color:#6b7280;">
+				Range:
+				<strong>{{ ($userActivityReport['from'] ?? $reportFrom)->format('M j, Y') }}</strong>
+				&ndash;
+				<strong>{{ ($userActivityReport['to'] ?? $reportTo)->format('M j, Y') }}</strong>
+			</div>
+		</form>
+
+		<div class="bids-table-wrap">
+			<table role="grid" id="reportsTable">
+				<thead>
+					<tr>
+						<th>User</th>
+						<th style="text-align:right;">Bids added</th>
+						<th style="text-align:right;">URLs visited</th>
+						<th style="text-align:right;">Today's bids</th>
+					</tr>
+				</thead>
+				<tbody>
+					@forelse ($userActivityReport['rows'] ?? [] as $reportRow)
+						<tr>
+							<td>{{ $reportRow['label'] }} <span style="color:#9ca3af; font-size:0.82rem;">(#{{ $reportRow['user_id'] }})</span></td>
+							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($reportRow['bids_added']) }}</td>
+							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($reportRow['urls_visited']) }}</td>
+							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($reportRow['bids_today']) }}</td>
+						</tr>
+					@empty
+						<tr>
+							<td colspan="4" style="text-align:center; color:#6b7280;">No Manila directory users available for reporting.</td>
+						</tr>
+					@endforelse
+				</tbody>
+				@if (!empty($userActivityReport['rows']))
+					<tfoot>
+						<tr style="font-weight:600; background:#f8fafc;">
+							<td>Total</td>
+							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($userActivityReport['totals']['bids_added'] ?? 0) }}</td>
+							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($userActivityReport['totals']['urls_visited'] ?? 0) }}</td>
+							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($userActivityReport['totals']['bids_today'] ?? 0) }}</td>
+						</tr>
+					</tfoot>
+				@endif
+			</table>
 		</div>
 	</section>
 
@@ -2028,9 +2113,11 @@
 			document.getElementById('panelBids').style.display = tab === 'bids' ? '' : 'none';
 			document.getElementById('panelIssues').style.display = tab === 'issues' ? '' : 'none';
 			document.getElementById('panelNoEntities').style.display = tab === 'noentities' ? '' : 'none';
+			document.getElementById('panelReports').style.display = tab === 'reports' ? '' : 'none';
 			document.getElementById('tabBids').classList.toggle('tab-active', tab === 'bids');
 			document.getElementById('tabIssues').classList.toggle('tab-active', tab === 'issues');
 			document.getElementById('tabNoEntities').classList.toggle('tab-active', tab === 'noentities');
+			document.getElementById('tabReports').classList.toggle('tab-active', tab === 'reports');
 		}
 
 		function updateIssueUiAfterDelete() {
