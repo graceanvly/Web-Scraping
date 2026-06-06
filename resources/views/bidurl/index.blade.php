@@ -645,6 +645,89 @@
 				flex-wrap: wrap;
 			}
 		}
+
+		/* Tabs */
+		.tab-btn {
+			padding: 0.6rem 1.4rem;
+			font-size: 0.95rem;
+			font-weight: 600;
+			border: 1px solid #e2e8f0;
+			border-bottom: none;
+			background: #f1f5f9;
+			color: #64748b;
+			cursor: pointer;
+			border-radius: 8px 8px 0 0;
+			margin-right: -1px;
+			position: relative;
+			transition: background 0.15s, color 0.15s;
+		}
+
+		.tab-btn:hover { background: #e2e8f0; color: #334155; }
+
+		.tab-btn.tab-active {
+			background: #fff;
+			color: #1d4ed8;
+			border-color: #e2e8f0;
+			z-index: 1;
+		}
+
+		.tab-badge {
+			display: inline-block;
+			background: #dc2626;
+			color: #fff;
+			border-radius: 999px;
+			font-size: 0.65rem;
+			padding: 1px 6px;
+			font-weight: 700;
+			margin-left: 4px;
+			vertical-align: top;
+			min-width: 16px;
+			text-align: center;
+		}
+
+		.tab-badge--muted {
+			background: #eef2ff;
+			color: #4338ca;
+		}
+
+		.main-tabs {
+			margin-bottom: 1.25rem;
+		}
+
+		.tab-bar {
+			display: flex;
+			gap: 0;
+			margin-bottom: 0;
+			flex-wrap: wrap;
+		}
+
+		.tab-bar .tab-btn {
+			margin-bottom: 0;
+		}
+
+		.tab-panels {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.tab-panels > .tab-panel {
+			grid-area: 1 / 1;
+			margin-top: 0;
+			margin-bottom: 0;
+			border-top-left-radius: 0;
+		}
+
+		.tab-panels > .tab-panel.tab-hidden {
+			display: none;
+		}
+
+		.filters-card {
+			margin-bottom: 0;
+			border-bottom-left-radius: 0;
+			border-bottom-right-radius: 0;
+			border-bottom: none;
+			padding-bottom: 1rem;
+		}
 	</style>
 </head>
 
@@ -676,11 +759,52 @@
 			</div>
 		@endif
 
-		<section class="card">
+		@php
+			$activeTab = $activeTab ?? 'configured';
+		@endphp
+
+		<div class="main-tabs">
+			<form id="filtersForm" method="GET" action="{{ route('bidurl.index') }}" class="table-toolbar card filters-card">
+				<input type="hidden" name="tab" id="filterTab" value="{{ $activeTab }}">
+				<div class="controls">
+					<label style="display:flex; align-items:center; gap:0.35rem; margin:0;">
+						Show
+						<select id="showEntries" name="per_page">
+							<option value="5" {{ request('per_page') == 5 ? 'selected' : '' }}>5</option>
+							<option value="10" {{ request('per_page') == 10 ? 'selected' : '' }}>10</option>
+							<option value="25" {{ request('per_page') == 25 ? 'selected' : '' }}>25</option>
+							<option value="50" {{ request('per_page', 50) == 50 ? 'selected' : '' }}>50</option>
+							<option value="100" {{ request('per_page') == 100 ? 'selected' : '' }}>100</option>
+						</select>
+						entries
+					</label>
+				</div>
+				<div class="controls">
+					<input type="search" id="searchInput" name="search" value="{{ $search }}" placeholder="Search URL, name, or error">
+					@if ($search !== '')
+						<a href="{{ route('bidurl.index', ['tab' => $activeTab, 'per_page' => request('per_page', 50)]) }}" class="btn btn-secondary">Clear</a>
+					@endif
+				</div>
+			</form>
+
+			<div class="tab-bar">
+				<button id="tabConfigured" type="button" class="tab-btn {{ $activeTab === 'configured' ? 'tab-active' : '' }}" onclick="switchTab('configured')">
+					Configured URLs
+					<span class="tab-badge tab-badge--muted">{{ $bidUrls->total() }}</span>
+				</button>
+				<button id="tabFailed" type="button" class="tab-btn {{ $activeTab === 'failed' ? 'tab-active' : '' }}" onclick="switchTab('failed')">
+					Scrape Failed URLs
+					@if ($failedCount > 0)
+						<span class="tab-badge">{{ $failedCount }}</span>
+					@endif
+				</button>
+			</div>
+
+			<div class="tab-panels">
+				<section id="panelConfigured" class="card tab-panel{{ $activeTab !== 'configured' ? ' tab-hidden' : '' }}">
 			<div class="section-header">
 				<div class="section-title">
 					<h2 style="margin:0;">Configured URLs</h2>
-					<span class="badge">{{ $bidUrls->total() }} total</span>
 				</div>
 				<div class="header-actions">
 					<button class="btn btn-secondary" type="button" onclick="openSetLastScraped()">Set Last Scraped</button>
@@ -688,28 +812,7 @@
 				</div>
 			</div>
 			<div class="table-wrapper">
-				<form id="filtersForm" method="GET" action="{{ route('bidurl.index') }}" class="table-toolbar">
-					<div class="controls">
-						<label style="display:flex; align-items:center; gap:0.35rem; margin:0;">
-							Show
-							<select id="showEntries" name="per_page">
-								<option value="5" {{ request('per_page') == 5 ? 'selected' : '' }}>5</option>
-								<option value="10" {{ request('per_page') == 10 ? 'selected' : '' }}>10</option>
-								<option value="25" {{ request('per_page') == 25 ? 'selected' : '' }}>25</option>
-								<option value="50" {{ request('per_page', 50) == 50 ? 'selected' : '' }}>50</option>
-								<option value="100" {{ request('per_page') == 100 ? 'selected' : '' }}>100</option>
-							</select>
-							entries
-						</label>
-					</div>
-					<div class="controls">
-						<input type="search" id="searchInput" name="search" value="{{ $search }}" placeholder="Search URL or name">
-						@if ($search !== '')
-							<a href="{{ route('bidurl.index', ['per_page' => request('per_page', 50)]) }}" class="btn btn-secondary">Clear</a>
-						@endif
-					</div>
-				</form>
-				<table>
+				<table id="configuredUrlsTable">
 					<thead>
 						<tr>
 							<th>URL</th>
@@ -772,15 +875,14 @@
 
 			<div class="footer-bar">
 				<div>Showing <span id="showingCount">{{ $bidUrls->count() }}</span> of <span id="totalCount">{{ $bidUrls->total() }}</span> entries</div>
-				{{ $bidUrls->links('pagination.bidurl') }}
+				{{ $bidUrls->appends(['tab' => 'configured'])->links('pagination.bidurl') }}
 			</div>
-		</section>
+				</section>
 
-		<section class="card">
+				<section id="panelFailed" class="card tab-panel{{ $activeTab !== 'failed' ? ' tab-hidden' : '' }}">
 			<div class="section-header">
 				<div class="section-title">
 					<h2 style="margin:0;">Scrape Failed URLs</h2>
-					<span class="badge">{{ $failedCount }} total</span>
 				</div>
 				@if ($failedCount > 0)
 					<div class="header-actions">
@@ -794,7 +896,7 @@
 				@endif
 			</div>
 			<div class="table-wrapper">
-				<table>
+				<table id="failedUrlsTable">
 					<thead>
 						<tr>
 							<th>URL</th>
@@ -863,10 +965,12 @@
 			@if ($failedCount > 0)
 				<div class="footer-bar">
 					<div>Showing {{ $failedBidUrls->count() }} of {{ $failedBidUrls->total() }} failed entries</div>
-					{{ $failedBidUrls->links('pagination.bidurl') }}
+					{{ $failedBidUrls->appends(['tab' => 'failed'])->links('pagination.bidurl') }}
 				</div>
 			@endif
-		</section>
+				</section>
+			</div>
+		</div>
 	</main>
 
 	<dialog id="detailsModal">
@@ -968,11 +1072,28 @@
 		const editModal = document.getElementById('editModal');
 		const editForm = document.getElementById('editForm');
 		const filtersForm = document.getElementById('filtersForm');
-		const table = document.querySelector('table tbody') ? document.querySelector('table') : null;
+		const table = document.getElementById('configuredUrlsTable');
 		const rows = table ? Array.from(table.querySelectorAll('tbody tr')) : [];
 		const searchInput = document.getElementById('searchInput');
 		const showEntries = document.getElementById('showEntries');
 		const showingCount = document.getElementById('showingCount');
+
+		function switchTab(tab) {
+			const params = new URLSearchParams(window.location.search);
+			params.set('tab', tab);
+			if (tab === 'configured') {
+				params.delete('failed_page');
+			} else {
+				params.delete('page');
+			}
+			window.location.search = params.toString();
+		}
+
+		function clearPaginationParams(form) {
+			['page', 'failed_page'].forEach(function (name) {
+				form?.querySelector('input[name="' + name + '"]')?.remove();
+			});
+		}
 
 		function openAdd() {
 			document.getElementById('add_url').value = '';
@@ -1039,8 +1160,8 @@
 			editModal.showModal();
 		}
 
-		if (table) {
-			if (showingCount) {
+		if (filtersForm) {
+			if (showingCount && table) {
 				showingCount.textContent = rows.length;
 			}
 
@@ -1049,16 +1170,14 @@
 			searchInput?.addEventListener('input', () => {
 				clearTimeout(searchSubmitTimer);
 				searchSubmitTimer = setTimeout(() => {
-					filtersForm?.requestSubmit();
+					clearPaginationParams(filtersForm);
+					filtersForm.requestSubmit();
 				}, 300);
 			});
 
 			showEntries?.addEventListener('change', () => {
-				const pageInput = filtersForm?.querySelector('input[name="page"]');
-				if (pageInput) {
-					pageInput.remove();
-				}
-				filtersForm?.requestSubmit();
+				clearPaginationParams(filtersForm);
+				filtersForm.requestSubmit();
 			});
 		}
 	</script>

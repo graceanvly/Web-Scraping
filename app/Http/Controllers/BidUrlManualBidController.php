@@ -42,7 +42,7 @@ class BidUrlManualBidController extends Controller
 
 		$result = $entries->saveManualBid($fields, $bidUrl, $startTime, $approve, Auth::id());
 
-		return redirect()->route('bidurl.index', $request->only(['search', 'per_page', 'page', 'failed_page']))
+		return redirect()->route('bidurl.index', $request->only(['search', 'per_page', 'page', 'failed_page', 'tab']))
 			->with('success', $this->resultMessage($result, $approve));
 	}
 
@@ -53,7 +53,7 @@ class BidUrlManualBidController extends Controller
 
 		$result = $entries->saveManualBidForFailed($fields, $failedBidUrl, $startTime, $approve, Auth::id());
 
-		return redirect()->route('bidurl.index', $request->only(['search', 'per_page', 'page', 'failed_page']))
+		return redirect()->route('bidurl.index', $request->only(['search', 'per_page', 'page', 'failed_page', 'tab']))
 			->with('success', $this->resultMessage($result, $approve));
 	}
 

@@ -35,6 +35,7 @@
 					<input type="hidden" name="per_page" value="{{ request('per_page', 50) }}">
 					<input type="hidden" name="page" value="{{ request('page', 1) }}">
 					<input type="hidden" name="failed_page" value="{{ request('failed_page', 1) }}">
+					<input type="hidden" name="tab" value="{{ request('tab', 'configured') }}">
 				@endif
 
 				<div class="manual-edit-grid">

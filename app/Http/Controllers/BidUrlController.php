@@ -96,6 +96,11 @@ class BidUrlController extends Controller
         $bidUrls = $query->paginate($perPage, ['*'], 'page')->withQueryString();
         $failedBidUrls = $failedQuery->paginate($perPage, ['*'], 'failed_page')->withQueryString();
 
+        $activeTab = $request->query('tab', 'configured');
+        if (!in_array($activeTab, ['configured', 'failed'], true)) {
+            $activeTab = 'configured';
+        }
+
         $manilaDirectoryUsers = [];
         try {
             $manilaDirectoryUsers = $lookup->getManilaAssignableUsersForSelect();
@@ -108,6 +113,7 @@ class BidUrlController extends Controller
             'failedBidUrls' => $failedBidUrls,
             'search' => $search,
             'failedCount' => $failedBidUrls->total(),
+            'activeTab' => $activeTab,
             'manilaDirectoryUsers' => $manilaDirectoryUsers,
         ]);
     }
@@ -241,7 +247,7 @@ class BidUrlController extends Controller
         $this->ensureUrlAndNameAreAvailable($failedBidUrl->url, $failedBidUrl->name, null, $failedBidUrl->id);
         $this->persistRestoredBidUrl($failedBidUrl);
 
-        return redirect()->route('bidurl.index')->with('success', 'Failed URL restored to Bid URLs.');
+        return redirect()->route('bidurl.index', ['tab' => 'failed'])->with('success', 'Failed URL restored to Bid URLs.');
     }
 
     /**
@@ -281,14 +287,14 @@ class BidUrlController extends Controller
             $parts[] = "{$skipped} skipped (duplicate name or other conflict)";
         }
 
-        return redirect()->route('bidurl.index')->with('success', implode('; ', $parts) . '.');
+        return redirect()->route('bidurl.index', ['tab' => 'failed'])->with('success', implode('; ', $parts) . '.');
     }
 
     public function destroyFailed(FailedBidUrl $failedBidUrl)
     {
         $failedBidUrl->delete();
 
-        return redirect()->route('bidurl.index')->with('success', 'Failed URL deleted.');
+        return redirect()->route('bidurl.index', ['tab' => 'failed'])->with('success', 'Failed URL deleted.');
     }
 
     /**
