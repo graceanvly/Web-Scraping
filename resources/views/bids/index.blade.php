@@ -638,6 +638,88 @@
 			min-width: 16px;
 			text-align: center;
 		}
+
+		.main-tabs {
+			margin-bottom: 2rem;
+		}
+
+		.tab-bar {
+			display: flex;
+			gap: 0;
+			margin-bottom: 0;
+		}
+
+		.tab-bar .tab-btn {
+			margin-bottom: 0;
+		}
+
+		.tab-panels {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.tab-panels > .tab-panel {
+			grid-area: 1 / 1;
+			margin-top: 0;
+			margin-bottom: 0;
+			border-top-left-radius: 0;
+		}
+
+		.tab-panels > .tab-panel.tab-hidden {
+			display: none;
+		}
+
+		.reports-toolbar {
+			margin-bottom: 1rem;
+		}
+
+		.reports-toolbar-row {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0.65rem 0.85rem;
+		}
+
+		.reports-toolbar-row label {
+			display: inline-flex;
+			align-items: center;
+			gap: 0.35rem;
+			font-size: 0.9rem;
+			margin: 0;
+			white-space: nowrap;
+		}
+
+		.reports-toolbar-row input[type="date"] {
+			width: auto;
+			margin: 0;
+		}
+
+		.reports-toolbar-row button[type="submit"] {
+			width: auto;
+			margin: 0;
+			padding: 0.45rem 1rem;
+			flex: 0 0 auto;
+		}
+
+		.reports-toolbar-row .secondary {
+			width: auto;
+			margin: 0;
+			flex: 0 0 auto;
+		}
+
+		.reports-range-meta {
+			margin-left: auto;
+			font-size: 0.85rem;
+			color: #6b7280;
+			white-space: nowrap;
+		}
+
+		@media (max-width: 720px) {
+			.reports-range-meta {
+				margin-left: 0;
+				width: 100%;
+			}
+		}
 		.issue-badge {
 			display: inline-block;
 			padding: 0.15rem 0.55rem;
@@ -1034,7 +1116,8 @@
 	</section>
 
 	<!-- Tabs -->
-	<div style="display:flex; gap:0; margin-bottom:0;">
+	<div class="main-tabs">
+	<div class="tab-bar">
 		<button id="tabBids" type="button" class="tab-btn {{ ($activeTab ?? 'bids') === 'bids' ? 'tab-active' : '' }}" onclick="switchTab('bids')">
 			Bids
 		</button>
@@ -1055,8 +1138,10 @@
 		</button>
 	</div>
 
+	<div class="tab-panels">
+
 	<!-- Bids Tab -->
-	<section id="panelBids" class="card" style="border-top-left-radius:0;{{ ($activeTab ?? 'bids') !== 'bids' ? ' display:none;' : '' }}">
+	<section id="panelBids" class="card tab-panel{{ ($activeTab ?? 'bids') !== 'bids' ? ' tab-hidden' : '' }}">
 			<!-- Toolbar -->
 			<form id="filtersForm" method="GET" action="{{ route('bids.index') }}" class="table-toolbar">
 				<div class="left-controls">
@@ -1213,7 +1298,7 @@
 		</section>
 
 	<!-- Issues Tab -->
-	<section id="panelIssues" class="card" style="border-top-left-radius:0;{{ ($activeTab ?? 'bids') !== 'issues' ? ' display:none;' : '' }}">
+	<section id="panelIssues" class="card tab-panel{{ ($activeTab ?? 'bids') !== 'issues' ? ' tab-hidden' : '' }}">
 		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
 			<span id="issuesCountLabel" style="color:#6b7280; font-size:0.85rem;">
 				{{ $issueCount ?? 0 }} issue(s) recorded
@@ -1270,7 +1355,7 @@
 	</section>
 
 	<!-- No Entities tab: bids with null or zero ENTITYID (same listing filters as main list) -->
-	<section id="panelNoEntities" class="card" style="border-top-left-radius:0;{{ ($activeTab ?? 'bids') !== 'noentities' ? ' display:none;' : '' }}">
+	<section id="panelNoEntities" class="card tab-panel{{ ($activeTab ?? 'bids') !== 'noentities' ? ' tab-hidden' : '' }}">
 		<p style="color:#6b7280; font-size:0.9rem; margin:0 0 1rem;">
 			Assigned bids with no entity (<code>ENTITYID</code> blank or 0) under the current filters. Use the <strong>Bids</strong> tab to change search, date, or assigned user.
 		</p>
@@ -1366,7 +1451,7 @@
 	</section>
 
 	<!-- Reports tab: Manila user activity by date range -->
-	<section id="panelReports" class="card" style="border-top-left-radius:0;{{ ($activeTab ?? 'bids') !== 'reports' ? ' display:none;' : '' }}">
+	<section id="panelReports" class="card tab-panel{{ ($activeTab ?? 'bids') !== 'reports' ? ' tab-hidden' : '' }}">
 		<p style="color:#6b7280; font-size:0.9rem; margin:0 0 1rem;">
 			Activity for directory users in <strong>Asia/Manila</strong>.
 			<strong>Bids added</strong> counts live and pending bids by assigned user and <code>CREATED</code> date.
@@ -1374,7 +1459,7 @@
 			<strong>Today's bids</strong> uses {{ ($userActivityReport['today'] ?? now('Asia/Manila'))->format('M j, Y') }} (Manila).
 		</p>
 
-		<form method="GET" action="{{ route('bids.index') }}" class="table-toolbar" style="margin-bottom:1rem;">
+		<form method="GET" action="{{ route('bids.index') }}" class="reports-toolbar">
 			<input type="hidden" name="tab" value="reports">
 			<input type="hidden" name="userid" value="{{ $filterUserIdRaw }}">
 			@if (($search ?? '') !== '')
@@ -1389,23 +1474,23 @@
 			@if (request('per_page'))
 				<input type="hidden" name="per_page" value="{{ request('per_page') }}">
 			@endif
-			<div class="left-controls" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.75rem;">
-				<label style="display:flex; align-items:center; gap:0.35rem; font-size:0.9rem;">
+			<div class="reports-toolbar-row">
+				<label>
 					From
 					<input type="date" name="report_from" value="{{ ($reportFrom ?? now('Asia/Manila')->startOfMonth())->toDateString() }}">
 				</label>
-				<label style="display:flex; align-items:center; gap:0.35rem; font-size:0.9rem;">
+				<label>
 					To
 					<input type="date" name="report_to" value="{{ ($reportTo ?? now('Asia/Manila')->endOfMonth())->toDateString() }}">
 				</label>
 				<button type="submit">Apply</button>
 				<a href="{{ route('bids.index', ['tab' => 'reports', 'userid' => $filterUserIdRaw, 'per_page' => request('per_page', 50)]) }}" class="secondary">Current month</a>
-			</div>
-			<div class="right-controls" style="font-size:0.85rem; color:#6b7280;">
-				Range:
-				<strong>{{ ($userActivityReport['from'] ?? $reportFrom)->format('M j, Y') }}</strong>
-				&ndash;
-				<strong>{{ ($userActivityReport['to'] ?? $reportTo)->format('M j, Y') }}</strong>
+				<span class="reports-range-meta">
+					Range:
+					<strong>{{ ($userActivityReport['from'] ?? $reportFrom)->format('M j, Y') }}</strong>
+					&ndash;
+					<strong>{{ ($userActivityReport['to'] ?? $reportTo)->format('M j, Y') }}</strong>
+				</span>
 			</div>
 		</form>
 
@@ -1446,6 +1531,9 @@
 			</table>
 		</div>
 	</section>
+
+	</div>
+	</div>
 
 	</main>
 
@@ -2110,14 +2198,17 @@
 		});
 
 		function switchTab(tab) {
-			document.getElementById('panelBids').style.display = tab === 'bids' ? '' : 'none';
-			document.getElementById('panelIssues').style.display = tab === 'issues' ? '' : 'none';
-			document.getElementById('panelNoEntities').style.display = tab === 'noentities' ? '' : 'none';
-			document.getElementById('panelReports').style.display = tab === 'reports' ? '' : 'none';
-			document.getElementById('tabBids').classList.toggle('tab-active', tab === 'bids');
-			document.getElementById('tabIssues').classList.toggle('tab-active', tab === 'issues');
-			document.getElementById('tabNoEntities').classList.toggle('tab-active', tab === 'noentities');
-			document.getElementById('tabReports').classList.toggle('tab-active', tab === 'reports');
+			const panels = ['bids', 'issues', 'noentities', 'reports'];
+			panels.forEach(function (name) {
+				const panel = document.getElementById('panel' + (name === 'noentities' ? 'NoEntities' : name.charAt(0).toUpperCase() + name.slice(1)));
+				const tabBtn = document.getElementById('tab' + (name === 'noentities' ? 'NoEntities' : name.charAt(0).toUpperCase() + name.slice(1)));
+				if (panel) {
+					panel.classList.toggle('tab-hidden', name !== tab);
+				}
+				if (tabBtn) {
+					tabBtn.classList.toggle('tab-active', name === tab);
+				}
+			});
 		}
 
 		function updateIssueUiAfterDelete() {

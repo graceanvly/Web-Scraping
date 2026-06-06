@@ -55,7 +55,14 @@ class BidReportsService
 			];
 		}
 
-		usort($rows, fn (array $a, array $b) => strcasecmp($a['label'], $b['label']));
+		usort($rows, function (array $a, array $b) {
+			$byBids = ($b['bids_added'] <=> $a['bids_added']);
+			if ($byBids !== 0) {
+				return $byBids;
+			}
+
+			return strcasecmp($a['label'], $b['label']);
+		});
 
 		return [
 			'rows' => $rows,
