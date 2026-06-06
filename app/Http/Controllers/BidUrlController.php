@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
+use App\Services\BidReferenceLookupService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class BidUrlController extends Controller
 {
@@ -64,7 +66,7 @@ class BidUrlController extends Controller
     /**
      * Show all BidUrl records.
      */
-    public function index(Request $request)
+    public function index(Request $request, BidReferenceLookupService $lookup)
     {
         $perPage = (int) $request->integer('per_page', 50);
         if ($perPage < 5) {
@@ -94,11 +96,19 @@ class BidUrlController extends Controller
         $bidUrls = $query->paginate($perPage, ['*'], 'page')->withQueryString();
         $failedBidUrls = $failedQuery->paginate($perPage, ['*'], 'failed_page')->withQueryString();
 
+        $manilaDirectoryUsers = [];
+        try {
+            $manilaDirectoryUsers = $lookup->getManilaAssignableUsersForSelect();
+        } catch (\Throwable $e) {
+            Log::warning('Manila directory users not loaded on Bid URLs page', ['error' => $e->getMessage()]);
+        }
+
         return view('bidurl.index', [
             'bidUrls' => $bidUrls,
             'failedBidUrls' => $failedBidUrls,
             'search' => $search,
             'failedCount' => $failedBidUrls->total(),
+            'manilaDirectoryUsers' => $manilaDirectoryUsers,
         ]);
     }
 

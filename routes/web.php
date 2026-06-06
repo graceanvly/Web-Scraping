@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\BidController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BidUrlController;
+use App\Http\Controllers\BidUrlManualBidController;
 use App\Http\Controllers\PendingBidController;
 
 // Auth
@@ -58,7 +59,13 @@ Route::middleware('auth')->group(function () {
     Route::get('/bidurl/{bidUrl}', [BidUrlController::class, 'show'])->name('bidurl.show');
     Route::put('/bidurl/{bidUrl}', [BidUrlController::class, 'update'])->name('bidurl.update');
     Route::delete('/bidurl/{bidUrl}', [BidUrlController::class, 'destroy'])->name('bidurl.destroy');
+    Route::post('/bidurl/{bidUrl}/manual-bid/start', [BidUrlManualBidController::class, 'startConfigured'])->name('bidurl.manualBid.start');
+    Route::post('/bidurl/{bidUrl}/manual-bid', [BidUrlManualBidController::class, 'storeConfigured'])->name('bidurl.manualBid.store');
+    Route::post('/bidurl/{bidUrl}/manual-bid/cancel', [BidUrlManualBidController::class, 'cancelConfigured'])->name('bidurl.manualBid.cancel');
     Route::post('/failed-bidurl/restore-all', [BidUrlController::class, 'restoreAllFailed'])->name('failed-bidurl.restoreAll');
+    Route::post('/failed-bidurl/{failedBidUrl}/manual-bid/start', [BidUrlManualBidController::class, 'startFailed'])->name('failed-bidurl.manualBid.start');
+    Route::post('/failed-bidurl/{failedBidUrl}/manual-bid', [BidUrlManualBidController::class, 'storeFailed'])->name('failed-bidurl.manualBid.store');
+    Route::post('/failed-bidurl/{failedBidUrl}/manual-bid/cancel', [BidUrlManualBidController::class, 'cancelFailed'])->name('failed-bidurl.manualBid.cancel');
     Route::post('/failed-bidurl/{failedBidUrl}/restore', [BidUrlController::class, 'restoreFailed'])->name('failed-bidurl.restore');
     Route::delete('/failed-bidurl/{failedBidUrl}', [BidUrlController::class, 'destroyFailed'])->name('failed-bidurl.destroy');
 });

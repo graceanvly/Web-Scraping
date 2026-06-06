@@ -4,6 +4,7 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="csrf-token" content="{{ csrf_token() }}">
 	<title>Bid URLs</title>
 	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 	<style>
@@ -195,9 +196,194 @@
 		}
 
 		.col-actions {
-			width: 6.5rem;
+			width: 8.75rem;
 			text-align: right;
 			white-space: nowrap;
+		}
+
+		.icon-action--add {
+			color: #16a34a;
+			border-color: #bbf7d0;
+			background: #f0fdf4;
+		}
+
+		.icon-action--add:hover {
+			background: #dcfce7;
+		}
+
+		.muted { color: var(--muted); }
+
+		dialog#manualBidModal {
+			width: calc(100vw - 1.5rem) !important;
+			max-width: calc(100vw - 1.5rem) !important;
+			height: calc(100dvh - 1.5rem) !important;
+			max-height: calc(100dvh - 1.5rem) !important;
+			margin: auto;
+			border: none;
+			border-radius: 10px;
+			padding: 0 !important;
+			box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+			overflow: hidden;
+		}
+
+		dialog#manualBidModal[open] {
+			display: flex !important;
+			flex-direction: column;
+		}
+
+		dialog#manualBidModal::backdrop { background: rgba(15, 23, 42, 0.45); }
+
+		.manual-modal-shell {
+			width: 100%;
+			padding: 2rem 2.25rem;
+			overflow-y: auto;
+			box-sizing: border-box;
+			background: #fff;
+		}
+
+		.manual-modal-layout {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+			gap: 2rem;
+			align-items: start;
+		}
+
+		.manual-edit-grid {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 1.1rem 1.25rem;
+		}
+
+		.manual-edit-grid .full { grid-column: 1 / -1; }
+
+		.manual-modal-footer {
+			display: flex;
+			justify-content: space-between;
+			gap: 0.75rem;
+			margin-top: 1.5rem;
+			flex-wrap: wrap;
+		}
+
+		.manual-modal-close {
+			background: none;
+			border: none;
+			font-size: 1.5rem;
+			cursor: pointer;
+			color: #6b7280;
+			padding: 0;
+			line-height: 1;
+		}
+
+		.ref-picker { position: relative; }
+
+		.ref-picker-results {
+			position: absolute;
+			left: 0;
+			right: 0;
+			top: 100%;
+			z-index: 30;
+			margin: 0.2rem 0 0;
+			padding: 0;
+			list-style: none;
+			background: #fff;
+			border: 1px solid #e5e7eb;
+			border-radius: 8px;
+			max-height: 240px;
+			overflow-y: auto;
+			box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+		}
+
+		.ref-picker-results li { padding: 0.5rem 0.7rem; cursor: pointer; font-size: 0.85rem; }
+
+		.ref-picker-results li:hover { background: #eff6ff; }
+
+		.ref-picker-clear {
+			margin: 0;
+			padding: 0;
+			border: none;
+			background: none;
+			cursor: pointer;
+			color: #2563eb;
+			text-decoration: underline;
+			font-size: 0.82rem;
+		}
+
+		.similar-panel {
+			background: #f8fafc;
+			border: 1px solid #e2e8f0;
+			border-radius: 10px;
+			padding: 1rem 1.1rem;
+			position: sticky;
+			top: 0;
+			max-height: calc(100dvh - 8rem);
+			overflow-y: auto;
+		}
+
+		.similar-panel h4 { margin: 0 0 0.35rem; font-size: 0.88rem; }
+
+		.similar-meta, .similar-loading, .similar-empty { font-size: 0.78rem; color: #64748b; }
+
+		.similar-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+
+		.similar-item {
+			background: #fff;
+			border: 1px solid #e5e7eb;
+			border-radius: 8px;
+			padding: 0.55rem 0.6rem;
+			font-size: 0.78rem;
+		}
+
+		.similar-badge {
+			display: inline-block;
+			font-size: 0.65rem;
+			font-weight: 700;
+			text-transform: uppercase;
+			padding: 0.1rem 0.35rem;
+			border-radius: 4px;
+		}
+
+		.similar-badge.live { background: #eff6ff; color: #1d4ed8; }
+
+		.similar-badge.pending { background: #fff7ed; color: #c2410c; }
+
+		.similar-detail-link {
+			background: none;
+			border: none;
+			padding: 0;
+			color: #2563eb;
+			font: inherit;
+			font-weight: 600;
+			cursor: pointer;
+			text-decoration: underline;
+		}
+
+		dialog#manualSimilarDetailModal {
+			max-width: 820px;
+			width: min(92vw, 820px);
+			border: none;
+			border-radius: 12px;
+			padding: 0;
+		}
+
+		.similar-detail-shell { padding: 2rem; max-height: 90dvh; overflow-y: auto; background: #fff; }
+
+		.similar-detail-meta {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+			gap: 1rem;
+			margin-bottom: 1rem;
+		}
+
+		.similar-detail-meta .meta-card {
+			background: #f9fafb;
+			border: 1px solid #e5e7eb;
+			border-radius: 8px;
+			padding: 0.85rem;
+		}
+
+		@media (max-width: 1024px) {
+			.manual-modal-layout { grid-template-columns: 1fr; }
+			.manual-edit-grid { grid-template-columns: 1fr; }
 		}
 
 		.table-wrapper {
@@ -549,6 +735,18 @@
 								</td>
 								<td class="col-actions">
 									<div class="row-actions">
+										@if (\App\Services\BidUrlManualEntryService::showAddButton($bidUrl->last_scraped_at))
+											<button type="button" class="icon-action icon-action--add" title="Add bid manually" aria-label="Add bid manually"
+												data-manual-add='@json([
+													"startUrl" => route("bidurl.manualBid.start", $bidUrl),
+													"storeUrl" => route("bidurl.manualBid.store", $bidUrl),
+													"cancelUrl" => route("bidurl.manualBid.cancel", $bidUrl),
+													"listingUrl" => $bidUrl->url,
+												])'
+												onclick="openManualBidFromBtn(this)">
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+											</button>
+										@endif
 										<button class="icon-action icon-action--view" type="button" onclick='openDetails(@json($bidUrl))' title="View details" aria-label="View details">
 											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
 										</button>
@@ -626,6 +824,18 @@
 								</td>
 								<td class="col-actions">
 									<div class="row-actions">
+										@if (\App\Services\BidUrlManualEntryService::showAddButton($bidUrl->last_scraped_at))
+											<button type="button" class="icon-action icon-action--add" title="Add bid manually" aria-label="Add bid manually"
+												data-manual-add='@json([
+													"startUrl" => route("failed-bidurl.manualBid.start", $bidUrl),
+													"storeUrl" => route("failed-bidurl.manualBid.store", $bidUrl),
+													"cancelUrl" => route("failed-bidurl.manualBid.cancel", $bidUrl),
+													"listingUrl" => $bidUrl->url,
+												])'
+												onclick="openManualBidFromBtn(this)">
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+											</button>
+										@endif
 										<button class="icon-action icon-action--view" type="button" onclick='openDetails(@json($bidUrl))' title="View details" aria-label="View details">
 											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
 										</button>
@@ -749,6 +959,8 @@
 			</form>
 		</article>
 	</dialog>
+
+	@include('bidurl.partials.manual-bid-modal')
 
 	<script>
 		const detailsModal = document.getElementById('detailsModal');
