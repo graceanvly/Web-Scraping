@@ -3,7 +3,9 @@
 		<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
 			<div>
 				<h3 style="margin:0;">Add bid manually</h3>
-				<p id="manualBidSourceLabel" class="muted" style="margin:0.35rem 0 0; font-size:0.85rem;"></p>
+				<p class="muted" style="margin:0.35rem 0 0; font-size:0.85rem;">
+					<a id="manualBidSourceLabel" href="#" target="_blank" rel="noopener noreferrer" style="word-break:break-all;"></a>
+				</p>
 			</div>
 			<button type="button" class="manual-modal-close" onclick="closeManualBidModal()">&times;</button>
 		</div>
@@ -218,14 +220,18 @@
 		if (!manualForm || !manualModal) return;
 		manualForm.action = cfg.storeUrl || '';
 		manualCancelUrl = cfg.cancelUrl || '';
-		document.getElementById('manualBidSourceLabel').textContent = cfg.listingUrl || '';
+		const sourceLink = document.getElementById('manualBidSourceLabel');
+		const listingUrl = cfg.listingUrl || '';
+		sourceLink.href = listingUrl || '#';
+		sourceLink.textContent = listingUrl;
+		sourceLink.hidden = listingUrl === '';
 		document.getElementById('manual_url').value = cfg.listingUrl || '';
 		document.getElementById('manual_title').value = '';
 		document.getElementById('manual_description').value = '';
 		document.getElementById('manual_email').value = '';
 		document.getElementById('manual_naics').value = '';
 		document.getElementById('manual_enddate').value = '';
-		document.getElementById('manual_userid').value = '';
+		document.getElementById('manual_userid').value = '120482';
 		entityPicker.setFromId('');
 		document.getElementById('manual_state_id').value = '';
 		document.getElementById('manual_state_search').value = '';
