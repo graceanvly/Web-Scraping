@@ -1243,7 +1243,7 @@
 				</div>
 				<div class="scrape-panel-footer scrape-panel-footer-bulk">
 					<label class="scrape-checkbox-label" title="Caps each Bid URL row at 5 minutes (fetch + AI + saves); then moves on. Unchecked uses SCRAPER_URL_MAX_SECONDS (typically 8 min).">
-						<input type="checkbox" id="singleUrlMaxCap" />
+						<input type="checkbox" id="singleUrlMaxCap" checked />
 						Single per-URL max (5 min)
 					</label>
 					<div class="scrape-panel-footer-actions">
