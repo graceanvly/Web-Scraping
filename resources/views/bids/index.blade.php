@@ -1572,7 +1572,7 @@
 	<!-- No Entities tab: bids with null or zero ENTITYID (same listing filters as main list) -->
 	<section id="panelNoEntities" class="card tab-panel{{ ($activeTab ?? 'bids') !== 'noentities' ? ' tab-hidden' : '' }}">
 		<p style="color:#6b7280; font-size:0.9rem; margin:0 0 1rem;">
-			Assigned bids with no entity (<code>ENTITYID</code> blank or 0) under the current filters. Use the <strong>Bids</strong> tab to change search, date, or assigned user.
+			Bids with no entity (<code>ENTITYID</code> blank or 0) for the selected assignee, using the same <strong>CREATED</strong> window and search/date filters as the <strong>Bids</strong> tab (enable <strong>Include historical</strong> there to search all time). Change filters on the <strong>Bids</strong> tab.
 		</p>
 
 		<div class="bids-table-wrap">
@@ -1668,7 +1668,7 @@
 	<!-- No Categories tab: bids with null or zero CATEGORYID (same listing filters as main list) -->
 	<section id="panelNoCategories" class="card tab-panel{{ ($activeTab ?? 'bids') !== 'nocategories' ? ' tab-hidden' : '' }}">
 		<p style="color:#6b7280; font-size:0.9rem; margin:0 0 1rem;">
-			Assigned bids with no category (<code>CATEGORYID</code> blank or 0) under the current filters. Use the <strong>Bids</strong> tab to change search, date, or assigned user.
+			Bids with no category (<code>CATEGORYID</code> blank or 0) for the selected assignee, using the same <strong>CREATED</strong> window and search/date filters as the <strong>Bids</strong> tab (enable <strong>Include historical</strong> there to search all time). Change filters on the <strong>Bids</strong> tab.
 		</p>
 
 		<div class="bids-table-wrap">

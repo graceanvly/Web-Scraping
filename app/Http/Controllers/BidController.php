@@ -48,17 +48,10 @@ class BidController extends Controller
 		$hasScrapedBidUrls = BidUrl::whereNotNull('last_scraped_at')->exists();
 
 		$scopedToScrapedBidUrlExists = function (\Illuminate\Database\Eloquent\Builder $outer) {
-			$bidTable = (new Bid())->getTable();
-			$url = new BidUrl();
-			$urlTable = $url->getTable();
-			$urlPk = $url->getKeyName();
-
-			$outer->whereExists(function ($sub) use ($bidTable, $urlTable, $urlPk) {
-				$sub->selectRaw('1')
-					->from($urlTable)
-					->whereColumn("{$urlTable}.{$urlPk}", "{$bidTable}.BID_URL_ID")
-					->whereNotNull("{$urlTable}.last_scraped_at");
-			});
+			$urlPk = (new BidUrl())->getKeyName();
+			$outer->whereIn('BID_URL_ID', BidUrl::query()
+				->select($urlPk)
+				->whereNotNull('last_scraped_at'));
 
 			return $outer;
 		};
@@ -94,17 +87,15 @@ class BidController extends Controller
 			$applyBidListingFilters($query);
 			$bids = $query->latest('CREATED')->paginate($perPage)->withQueryString();
 
-			$queryNoEntity = $scopedToScrapedBidUrlExists(Bid::query());
-			$queryNoEntity->where(function ($q) {
-				$q->whereNull('ENTITYID')->orWhere('ENTITYID', 0);
-			});
+			// Missing-entity/category lists: same assignee/search/date + 180-day CREATED window as the
+			// main Bids tab, but do not require BID_URL_ID ∈ bid_url (live Oracle rows often lack that link).
+			$queryNoEntity = Bid::query();
+			$this->applyBidMissingNumericIdFilter($queryNoEntity, 'ENTITYID');
 			$applyBidListingFilters($queryNoEntity);
 			$noEntityBids = $queryNoEntity->latest('CREATED')->paginate($perPage, ['*'], 'ne_page')->withQueryString();
 
-			$queryNoCategory = $scopedToScrapedBidUrlExists(Bid::query());
-			$queryNoCategory->where(function ($q) {
-				$q->whereNull('CATEGORYID')->orWhere('CATEGORYID', 0);
-			});
+			$queryNoCategory = Bid::query();
+			$this->applyBidMissingNumericIdFilter($queryNoCategory, 'CATEGORYID');
 			$applyBidListingFilters($queryNoCategory);
 			$noCategoryBids = $queryNoCategory->latest('CREATED')->paginate($perPage, ['*'], 'nc_page')->withQueryString();
 		}
@@ -1459,6 +1450,39 @@ class BidController extends Controller
 		$bid->update($this->filterBidUpdateAttributes($bid, $validated));
 
 		return redirect()->route('bids.index')->with('success', 'Bid updated successfully.');
+	}
+
+	/**
+	 * Match blank reference IDs stored as NULL or 0 (Oracle/MySQL).
+	 */
+	private function applyBidMissingNumericIdFilter(\Illuminate\Database\Eloquent\Builder $query, string $column): void
+	{
+		$resolved = $this->resolveBidTableColumn($column) ?? $column;
+		$driver = $query->getConnection()->getDriverName();
+		$expr = in_array($driver, ['oracle', 'oci8'], true)
+			? "NVL({$resolved}, 0) = 0"
+			: "COALESCE({$resolved}, 0) = 0";
+		$query->whereRaw($expr);
+	}
+
+	private function resolveBidTableColumn(string $preferred): ?string
+	{
+		static $cache = null;
+		if ($cache === null) {
+			try {
+				$cache = Schema::getColumnListing((new Bid())->getTable());
+			} catch (\Throwable $e) {
+				Log::warning('Bid listing: could not read bid table columns', ['error' => $e->getMessage()]);
+				$cache = [];
+			}
+		}
+		foreach ($cache as $col) {
+			if (strcasecmp((string) $col, $preferred) === 0) {
+				return (string) $col;
+			}
+		}
+
+		return null;
 	}
 
 	/**
