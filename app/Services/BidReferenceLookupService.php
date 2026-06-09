@@ -76,6 +76,29 @@ class BidReferenceLookupService
 		return $out;
 	}
 
+	/**
+	 * @return array<int, array{id: int|string, label: string}>
+	 */
+	public function getCategoriesForSelect(): array
+	{
+		$idCol = (string) $this->cfg('category_id_column', 'id');
+		$nameCol = (string) $this->cfg('category_name_column', 'name');
+		$out = [];
+
+		foreach ($this->cachedCategories() as $row) {
+			$id = $this->rowAttr($row, $idCol);
+			$name = $this->rowAttr($row, $nameCol);
+			if ($id === null || $name === null || trim((string) $name) === '') {
+				continue;
+			}
+			$out[] = ['id' => $id, 'label' => trim((string) $name)];
+		}
+
+		usort($out, fn (array $a, array $b) => strcasecmp($a['label'], $b['label']));
+
+		return $out;
+	}
+
 	public function resolveCategoryId(?string $bidCategoryHint, string $title, string $description): ?int
 	{
 		$hint = $this->normalizeHint($bidCategoryHint);

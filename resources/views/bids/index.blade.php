@@ -108,7 +108,8 @@
 		}
 
 		#bidsTable,
-		#noEntityBidsTable {
+		#noEntityBidsTable,
+		#noCategoryBidsTable {
 			table-layout: fixed;
 			width: 100%;
 			max-width: 100%;
@@ -120,7 +121,9 @@
 		#bidsTable thead th:first-child,
 		#bidsTable tbody td:first-child,
 		#noEntityBidsTable thead th:first-child,
-		#noEntityBidsTable tbody td:first-child {
+		#noEntityBidsTable tbody td:first-child,
+		#noCategoryBidsTable thead th:first-child,
+		#noCategoryBidsTable tbody td:first-child {
 			min-width: 0;
 			max-width: none;
 			overflow: visible;
@@ -133,7 +136,8 @@
 		}
 
 		#bidsTable tbody td:first-child .bid-detail-link,
-		#noEntityBidsTable tbody td:first-child .bid-detail-link {
+		#noEntityBidsTable tbody td:first-child .bid-detail-link,
+		#noCategoryBidsTable tbody td:first-child .bid-detail-link {
 			font-weight: 600;
 			line-height: 1.35;
 		}
@@ -141,7 +145,9 @@
 		#bidsTable thead th:nth-child(2),
 		#bidsTable tbody td:nth-child(2),
 		#noEntityBidsTable thead th:nth-child(2),
-		#noEntityBidsTable tbody td:nth-child(2) {
+		#noEntityBidsTable tbody td:nth-child(2),
+		#noCategoryBidsTable thead th:nth-child(2),
+		#noCategoryBidsTable tbody td:nth-child(2) {
 			width: 6.75rem;
 			min-width: 6.75rem;
 		}
@@ -149,14 +155,18 @@
 		#bidsTable thead th:nth-child(3),
 		#bidsTable tbody td:nth-child(3),
 		#noEntityBidsTable thead th:nth-child(3),
-		#noEntityBidsTable tbody td:nth-child(3) {
+		#noEntityBidsTable tbody td:nth-child(3),
+		#noCategoryBidsTable thead th:nth-child(3),
+		#noCategoryBidsTable tbody td:nth-child(3) {
 			width: 5.25rem;
 		}
 
 		#bidsTable thead th:nth-child(4),
 		#bidsTable tbody td:nth-child(4),
 		#noEntityBidsTable thead th:nth-child(4),
-		#noEntityBidsTable tbody td:nth-child(4) {
+		#noEntityBidsTable tbody td:nth-child(4),
+		#noCategoryBidsTable thead th:nth-child(4),
+		#noCategoryBidsTable tbody td:nth-child(4) {
 			width: 6.75rem;
 			min-width: 6.75rem;
 		}
@@ -164,7 +174,9 @@
 		#bidsTable thead th:nth-child(5),
 		#bidsTable tbody td:nth-child(5),
 		#noEntityBidsTable thead th:nth-child(5),
-		#noEntityBidsTable tbody td:nth-child(5) {
+		#noEntityBidsTable tbody td:nth-child(5),
+		#noCategoryBidsTable thead th:nth-child(5),
+		#noCategoryBidsTable tbody td:nth-child(5) {
 			width: 5.25rem;
 			min-width: 5rem;
 			text-align: center;
@@ -218,7 +230,9 @@
 		#bidsTable thead th:nth-child(6),
 		#bidsTable tbody td:nth-child(6),
 		#noEntityBidsTable thead th:nth-child(6),
-		#noEntityBidsTable tbody td:nth-child(6) {
+		#noEntityBidsTable tbody td:nth-child(6),
+		#noCategoryBidsTable thead th:nth-child(6),
+		#noCategoryBidsTable tbody td:nth-child(6) {
 			width: 6rem;
 			min-width: 5.75rem;
 			white-space: nowrap;
@@ -228,7 +242,8 @@
 		}
 
 		#bidsTable .action-buttons,
-		#noEntityBidsTable .action-buttons {
+		#noEntityBidsTable .action-buttons,
+		#noCategoryBidsTable .action-buttons {
 			flex-shrink: 0;
 			flex-wrap: nowrap;
 			justify-content: center;
@@ -238,7 +253,9 @@
 		#bidsTable .action-buttons button,
 		#bidsTable .action-buttons form button,
 		#noEntityBidsTable .action-buttons button,
-		#noEntityBidsTable .action-buttons form button {
+		#noEntityBidsTable .action-buttons form button,
+		#noCategoryBidsTable .action-buttons button,
+		#noCategoryBidsTable .action-buttons form button {
 			padding: 0.35rem;
 			min-width: 2.25rem;
 			min-height: 2.25rem;
@@ -251,7 +268,8 @@
 		}
 
 		#bidsTable .action-buttons form,
-		#noEntityBidsTable .action-buttons form {
+		#noEntityBidsTable .action-buttons form,
+		#noCategoryBidsTable .action-buttons form {
 			display: inline-flex;
 			margin: 0;
 		}
@@ -911,7 +929,8 @@
 			}
 
 			#bidsTable tbody td:first-child,
-			#noEntityBidsTable tbody td:first-child {
+			#noEntityBidsTable tbody td:first-child,
+			#noCategoryBidsTable tbody td:first-child {
 				max-width: none;
 				white-space: normal;
 				overflow: visible;
@@ -932,7 +951,9 @@
 			#bidsTable .action-buttons button,
 			#bidsTable .action-buttons form button,
 			#noEntityBidsTable .action-buttons button,
-			#noEntityBidsTable .action-buttons form button {
+			#noEntityBidsTable .action-buttons form button,
+			#noCategoryBidsTable .action-buttons button,
+			#noCategoryBidsTable .action-buttons form button {
 				min-width: 2.125rem;
 				min-height: 2.125rem;
 				padding: 0.28rem;
@@ -1321,6 +1342,12 @@
 				<span class="tab-badge">{{ $noEntityBids->total() }}</span>
 			@endif
 		</button>
+		<button id="tabNoCategories" type="button" class="tab-btn {{ ($activeTab ?? 'bids') === 'nocategories' ? 'tab-active' : '' }}" onclick="switchTab('nocategories')">
+			No Categories
+			@if (($noCategoryBids->total() ?? 0) > 0)
+				<span class="tab-badge">{{ $noCategoryBids->total() }}</span>
+			@endif
+		</button>
 		<button id="tabReports" type="button" class="tab-btn {{ ($activeTab ?? 'bids') === 'reports' ? 'tab-active' : '' }}" onclick="switchTab('reports')">
 			Reports
 		</button>
@@ -1638,6 +1665,102 @@
 		</div>
 	</section>
 
+	<!-- No Categories tab: bids with null or zero CATEGORYID (same listing filters as main list) -->
+	<section id="panelNoCategories" class="card tab-panel{{ ($activeTab ?? 'bids') !== 'nocategories' ? ' tab-hidden' : '' }}">
+		<p style="color:#6b7280; font-size:0.9rem; margin:0 0 1rem;">
+			Assigned bids with no category (<code>CATEGORYID</code> blank or 0) under the current filters. Use the <strong>Bids</strong> tab to change search, date, or assigned user.
+		</p>
+
+		<div class="bids-table-wrap">
+			<table role="grid" id="noCategoryBidsTable">
+				<thead>
+					<tr>
+						<th>Title</th>
+						<th>End Date</th>
+						<th>NAICS</th>
+						<th>Scraped</th>
+						<th>URL</th>
+						<th>Actions</th>
+					</tr>
+				</thead>
+				<tbody>
+					@forelse ($noCategoryBids as $idx => $bid)
+						<tr data-scraped="{{ $bid->CREATED ? \Carbon\Carbon::parse($bid->CREATED)->toDateString() : '' }}">
+							<td title="{{ $bid->TITLE }}">
+								<a href="javascript:void(0)" data-bid-idx="{{ $idx }}" data-bid-source="nocategories" class="bid-detail-link">{{ $bid->TITLE ?? '—' }}</a>
+							</td>
+							<td>
+								{{ $bid->ENDDATE ? \Carbon\Carbon::parse($bid->ENDDATE)->format('M d') : '—' }}
+							</td>
+							<td title="{{ $bid->NAICSCODE }}">{{ $bid->NAICSCODE ?? '—' }}</td>
+							<td style="font-size:0.85rem; color:#6b7280;">
+								{{ $bid->CREATED ? \Carbon\Carbon::parse($bid->CREATED)->format('M d') : '—' }}
+							</td>
+							<td>
+								@php
+									$safbDetailUrlNc = \App\Support\StateAndFederalBidsShowBidUrl::urlForBid($bid->TITLE ?? '', $bid->ID ?? $bid->id ?? null, $bid->THIRD_PARTY_IDENTIFIER ?? null);
+								@endphp
+								@if ($bid->URL || $safbDetailUrlNc)
+									<div class="url-col-icons" role="group" aria-label="Listing links">
+										@if ($bid->URL)
+											<a href="{{ $bid->URL }}" target="_blank" rel="noopener noreferrer"
+												class="url-col-icon url-col-icon--open"
+												title="Open listing URL"
+												aria-label="Open listing URL">
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+											</a>
+										@endif
+										@if ($safbDetailUrlNc)
+											<a href="{{ $safbDetailUrlNc }}" target="_blank" rel="noopener noreferrer"
+												class="safb-detail-link url-col-icon url-col-icon--safb"
+												title="Open on stateandfederalbids.com"
+												aria-label="Open on State and Federal Bids">
+												<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+											</a>
+										@endif
+									</div>
+								@else
+									<span style="color:#9ca3af;">—</span>
+								@endif
+							</td>
+							<td>
+								<div class="action-buttons">
+									<button type="button" class="secondary" onclick="openEditModal({{ $idx }}, 'nocategories')"
+										title="Edit bid" aria-label="Edit bid">
+										✏️
+									</button>
+									<form action="{{ route('bids.destroy', ['bid' => $bid->ID]) }}" method="POST">
+										@csrf
+										@method('DELETE')
+										<button type="submit"
+											onclick="return confirm('Do you really want to delete this?')"
+											class="contrast"
+											title="Delete bid" aria-label="Delete bid">
+											🗑
+										</button>
+									</form>
+								</div>
+							</td>
+						</tr>
+					@empty
+						<tr>
+							<td colspan="6" style="text-align:center; color:#6b7280;">No bids without a category for this filter.</td>
+						</tr>
+					@endforelse
+				</tbody>
+			</table>
+		</div>
+
+		<div class="pagination-bar">
+			<div>
+				Showing <span id="noCategoryShowingCount">{{ $noCategoryBids->count() }}</span> of <span id="noCategoryTotalCount">{{ $noCategoryBids->total() }}</span> entries
+			</div>
+			<div class="pagination">
+				{{ $noCategoryBids->links('pagination.bidurl') }}
+			</div>
+		</div>
+	</section>
+
 	<!-- Reports tab: Manila user activity by date range -->
 	<section id="panelReports" class="card tab-panel{{ ($activeTab ?? 'bids') !== 'reports' ? ' tab-hidden' : '' }}">
 		<p style="color:#6b7280; font-size:0.9rem; margin:0 0 1rem;">
@@ -1871,8 +1994,13 @@
 					</div>
 
 					<div>
-						<label for="edit_category_id">CATEGORYID</label>
-						<input type="number" id="edit_category_id" name="CATEGORYID">
+						<label for="edit_category_id">Category</label>
+						<select id="edit_category_id" name="CATEGORYID">
+							<option value="">— None —</option>
+							@foreach ($categoryOptions ?? [] as $cat)
+								<option value="{{ $cat['id'] }}">{{ $cat['label'] }}</option>
+							@endforeach
+						</select>
 					</div>
 					<div>
 						<label for="edit_category_alias_id">CATEGORY_ALIAS_ID</label>
@@ -1989,10 +2117,12 @@
 		};
 		$bidsModalData = collect($bids->items())->map($modalRowFn)->values();
 		$noEntityBidsModalData = collect($noEntityBids->items())->map($modalRowFn)->values();
+		$noCategoryBidsModalData = collect($noCategoryBids->items())->map($modalRowFn)->values();
 	@endphp
 	<script>
 		const bidsData = @json($bidsModalData);
 		const noEntityBidsData = @json($noEntityBidsModalData);
+		const noCategoryBidsData = @json($noCategoryBidsModalData);
 		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 		const entitySearchUrl = @json(route('bids.reference.entities'));
 		let entityPickerReq = 0;
@@ -2004,7 +2134,9 @@
 				e.preventDefault();
 				const idx = parseInt(link.dataset.bidIdx, 10);
 				const src = link.dataset.bidSource || 'bids';
-				const row = src === 'noentities' ? noEntityBidsData[idx] : bidsData[idx];
+				const row = src === 'noentities' ? noEntityBidsData[idx]
+					: src === 'nocategories' ? noCategoryBidsData[idx]
+					: bidsData[idx];
 				if (row) openDetailModal(row);
 			}
 		});
@@ -2292,7 +2424,9 @@
 		});
 
 		function openEditModal(idx, sourceList = 'bids') {
-			const list = sourceList === 'noentities' ? noEntityBidsData : bidsData;
+			const list = sourceList === 'noentities' ? noEntityBidsData
+				: sourceList === 'nocategories' ? noCategoryBidsData
+				: bidsData;
 			const b = list[idx];
 			if (!b) return;
 			const modal = document.getElementById('editModal');
@@ -2322,7 +2456,21 @@
 			setVal('edit_last_modified', b.LAST_MODIFIED);
 			document.getElementById('edit_needs_review').checked = !!b.NEEDS_REVIEW;
 			document.getElementById('edit_under_review').checked = !!b.UNDERREVIEW;
-			setNum('edit_category_id', b.CATEGORYID);
+			const catSel = document.getElementById('edit_category_id');
+			if (catSel) {
+				catSel.querySelectorAll('option[data-legacy-category="1"]').forEach((o) => o.remove());
+				const catId = b.CATEGORYID != null && b.CATEGORYID !== '' && String(b.CATEGORYID) !== '0'
+					? String(b.CATEGORYID) : '';
+				const hasCatOpt = catId && Array.from(catSel.options).some((o) => o.value === catId);
+				if (catId && !hasCatOpt) {
+					const opt = document.createElement('option');
+					opt.value = catId;
+					opt.textContent = catId + ' (unknown category)';
+					opt.setAttribute('data-legacy-category', '1');
+					catSel.appendChild(opt);
+				}
+				catSel.value = catId;
+			}
 			setNumEditEntityFromBid(b.ENTITYID);
 			setNum('edit_subscription_type_id', b.SUBSCRIPTIONTYPEID);
 			const userSel = document.getElementById('edit_user_id');
@@ -2382,14 +2530,24 @@
 			if (nePageInput) {
 				nePageInput.remove();
 			}
+			const ncPageInput = filtersForm.querySelector('input[name="nc_page"]');
+			if (ncPageInput) {
+				ncPageInput.remove();
+			}
 			filtersForm.requestSubmit();
 		});
 
+		function tabDomSuffix(name) {
+			if (name === 'noentities') return 'NoEntities';
+			if (name === 'nocategories') return 'NoCategories';
+			return name.charAt(0).toUpperCase() + name.slice(1);
+		}
+
 		function switchTab(tab) {
-			const panels = ['bids', 'issues', 'noentities', 'reports'];
+			const panels = ['bids', 'issues', 'noentities', 'nocategories', 'reports'];
 			panels.forEach(function (name) {
-				const panel = document.getElementById('panel' + (name === 'noentities' ? 'NoEntities' : name.charAt(0).toUpperCase() + name.slice(1)));
-				const tabBtn = document.getElementById('tab' + (name === 'noentities' ? 'NoEntities' : name.charAt(0).toUpperCase() + name.slice(1)));
+				const panel = document.getElementById('panel' + tabDomSuffix(name));
+				const tabBtn = document.getElementById('tab' + tabDomSuffix(name));
 				if (panel) {
 					panel.classList.toggle('tab-hidden', name !== tab);
 				}

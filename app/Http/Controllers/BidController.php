@@ -68,6 +68,8 @@ class BidController extends Controller
 			$bids->withQueryString();
 			$noEntityBids = new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage);
 			$noEntityBids->withQueryString();
+			$noCategoryBids = new \Illuminate\Pagination\LengthAwarePaginator([], 0, $perPage);
+			$noCategoryBids->withQueryString();
 		} else {
 			$applyBidListingFilters = function ($q) use ($search, $filterDate, $filterUserIdRaw, $includeHistorical, $bidListingRecentDays) {
 				if (!$includeHistorical && $bidListingRecentDays > 0) {
@@ -98,6 +100,13 @@ class BidController extends Controller
 			});
 			$applyBidListingFilters($queryNoEntity);
 			$noEntityBids = $queryNoEntity->latest('CREATED')->paginate($perPage, ['*'], 'ne_page')->withQueryString();
+
+			$queryNoCategory = $scopedToScrapedBidUrlExists(Bid::query());
+			$queryNoCategory->where(function ($q) {
+				$q->whereNull('CATEGORYID')->orWhere('CATEGORYID', 0);
+			});
+			$applyBidListingFilters($queryNoCategory);
+			$noCategoryBids = $queryNoCategory->latest('CREATED')->paginate($perPage, ['*'], 'nc_page')->withQueryString();
 		}
 
 		$issueCount = 0;
@@ -112,11 +121,19 @@ class BidController extends Controller
 		$latestDateLabel = null;
 		$showAll = true;
 
+		$lookup = app(BidReferenceLookupService::class);
 		$manilaDirectoryUsers = [];
 		try {
-			$manilaDirectoryUsers = app(BidReferenceLookupService::class)->getManilaAssignableUsersForSelect();
+			$manilaDirectoryUsers = $lookup->getManilaAssignableUsersForSelect();
 		} catch (\Throwable $e) {
 			Log::warning('Manila directory users not loaded', ['error' => $e->getMessage()]);
+		}
+
+		$categoryOptions = [];
+		try {
+			$categoryOptions = $lookup->getCategoriesForSelect();
+		} catch (\Throwable $e) {
+			Log::warning('Category list not loaded', ['error' => $e->getMessage()]);
 		}
 
 		$pendingCount = 0;
@@ -164,13 +181,14 @@ class BidController extends Controller
 		}
 
 		$activeTab = $request->query('tab', 'bids');
-		if (!in_array($activeTab, ['bids', 'issues', 'noentities', 'reports'], true)) {
+		if (!in_array($activeTab, ['bids', 'issues', 'noentities', 'nocategories', 'reports'], true)) {
 			$activeTab = 'bids';
 		}
 
 		return view('bids.index', compact(
 			'bids',
 			'noEntityBids',
+			'noCategoryBids',
 			'issueCount',
 			'scrapeLogs',
 			'search',
@@ -179,6 +197,7 @@ class BidController extends Controller
 			'showAll',
 			'latestDateLabel',
 			'manilaDirectoryUsers',
+			'categoryOptions',
 			'bidListingRecentDays',
 			'includeHistorical',
 			'pendingCount',
