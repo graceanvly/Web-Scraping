@@ -15,6 +15,7 @@ use App\Services\BidReportsService;
 use App\Services\BidUrlManualEntryService;
 use App\Services\ScraperService;
 use App\Support\BidDetailPayload;
+use App\Support\BidLiveColumnFilter;
 use App\Support\ThirdPartyProcurementPortalUrl;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
@@ -1490,26 +1491,7 @@ class BidController extends Controller
 	 */
 	private function filterBidUpdateAttributes(Bid $bid, array $validated): array
 	{
-		try {
-			$listing = Schema::getColumnListing($bid->getTable());
-		} catch (\Throwable $e) {
-			return $validated;
-		}
-		if ($listing === []) {
-			return $validated;
-		}
-		$allowed = [];
-		foreach ($listing as $col) {
-			$allowed[strtolower((string) $col)] = true;
-		}
-		$out = [];
-		foreach ($validated as $key => $value) {
-			if (isset($allowed[strtolower((string) $key)])) {
-				$out[$key] = $value;
-			}
-		}
-
-		return $out;
+		return BidLiveColumnFilter::filter($validated);
 	}
 
 	private function applyCorporateTitlePrefix(string $title, ?string $postingEntity): string

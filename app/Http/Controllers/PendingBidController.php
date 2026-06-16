@@ -7,6 +7,7 @@ use App\Models\TempBid;
 use App\Services\BidReferenceLookupService;
 use App\Services\PendingSimilarEntriesService;
 use App\Support\BidDetailPayload;
+use App\Support\BidLiveColumnFilter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -236,7 +237,7 @@ class PendingBidController extends Controller
 				return 'duplicate';
 			}
 
-			$attrs = $pendingBid->toLiveBidAttributes();
+			$attrs = BidLiveColumnFilter::filter($pendingBid->toLiveBidAttributes());
 			$attrs['LAST_MODIFIED'] = now();
 
 			// Bid's creating hook assigns the Oracle sequence id + production defaults.
