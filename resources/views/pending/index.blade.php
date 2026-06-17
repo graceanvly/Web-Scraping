@@ -390,6 +390,20 @@
 							<span>Pick a row to set STATEID.</span>
 						</div>
 					</div>
+					<div class="full ref-picker" id="categoryPicker">
+						<label for="edit_category_search">Category <span id="editCategoryHint" class="muted" style="font-weight:400;"></span></label>
+						<input type="hidden" id="edit_category_id" name="CATEGORYID">
+						<div class="ref-picker-inner">
+							<input type="search" id="edit_category_search" autocomplete="off" autocorrect="off" spellcheck="false"
+								placeholder="Search categories by name…"
+								aria-autocomplete="list" aria-expanded="false" aria-controls="edit_category_results">
+							<ul id="edit_category_results" class="ref-picker-results" role="listbox" hidden></ul>
+						</div>
+						<div class="ref-picker-meta">
+							<button type="button" class="ref-picker-clear" id="edit_category_clear">Clear category</button>
+							<span>Pick a row to set CATEGORYID.</span>
+						</div>
+					</div>
 					<div>
 						<label for="edit_enddate">End date</label>
 						<input type="date" id="edit_enddate" name="ENDDATE">
@@ -495,6 +509,7 @@
 		@php
 			$entitySearchUrl = route('bids.reference.entities');
 			$stateSearchUrl = route('bids.reference.states');
+			$categorySearchUrl = route('bids.reference.categories');
 			$similarUrl = route('pending.similar');
 			$liveDetailUrlTpl = route('bids.json', ['bid' => '__ID__']);
 			$pendingDetailUrlTpl = route('pending.json', ['pendingBid' => '__ID__']);
@@ -511,6 +526,7 @@
 					'NAICSCODE' => $r->NAICSCODE,
 					'ENTITYID' => $r->ENTITYID,
 					'STATEID' => $r->STATEID,
+					'CATEGORYID' => $r->CATEGORYID,
 					'USERID' => $r->USERID,
 				];
 			})->values();
@@ -518,6 +534,7 @@
 		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 		const entitySearchUrl = @json($entitySearchUrl);
 		const stateSearchUrl = @json($stateSearchUrl);
+		const categorySearchUrl = @json($categorySearchUrl);
 		const similarUrl = @json($similarUrl);
 		const liveDetailUrlTpl = @json($liveDetailUrlTpl);
 		const pendingDetailUrlTpl = @json($pendingDetailUrlTpl);
@@ -553,6 +570,18 @@
 			hint: document.getElementById('editStateHint'),
 			searchUrl: stateSearchUrl,
 			fallbackPrefix: 'State #',
+			searchLimit: 60,
+			minChars: 0,
+		});
+
+		const categoryPicker = initRefPicker({
+			hidden: document.getElementById('edit_category_id'),
+			search: document.getElementById('edit_category_search'),
+			results: document.getElementById('edit_category_results'),
+			clearBtn: document.getElementById('edit_category_clear'),
+			hint: document.getElementById('editCategoryHint'),
+			searchUrl: categorySearchUrl,
+			fallbackPrefix: 'Category #',
 			searchLimit: 60,
 			minChars: 0,
 		});
@@ -948,6 +977,7 @@
 
 			await entityPicker.setFromId(bid.ENTITYID);
 			await statePicker.setFromId(bid.STATEID);
+			await categoryPicker.setFromId(bid.CATEGORYID);
 			document.getElementById('editModal').showModal();
 			refreshSimilarPanel();
 		}

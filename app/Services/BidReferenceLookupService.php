@@ -99,6 +99,79 @@ class BidReferenceLookupService
 		return $out;
 	}
 
+	/**
+	 * @return array{id: int|string, label: string}|null
+	 */
+	public function getCategoryOptionById(int $categoryId): ?array
+	{
+		if ($categoryId < 1) {
+			return null;
+		}
+
+		$idCol = (string) $this->cfg('category_id_column', 'id');
+		$nameCol = (string) $this->cfg('category_name_column', 'name');
+		foreach ($this->cachedCategories() as $row) {
+			$idRaw = $this->rowAttr($row, $idCol);
+			if ($idRaw === null || $idRaw === '' || (int) $idRaw !== $categoryId) {
+				continue;
+			}
+			$name = trim((string) ($this->rowAttr($row, $nameCol) ?? ''));
+			if ($name === '') {
+				return null;
+			}
+
+			return [
+				'id' => is_numeric($idRaw) ? (int) $idRaw : (string) $idRaw,
+				'label' => $name,
+			];
+		}
+
+		return null;
+	}
+
+	/**
+	 * Typeahead rows for CATEGORYID on bid / pending edit forms.
+	 *
+	 * @return array<int, array{id: int|string, label: string}>
+	 */
+	public function searchCategoriesForSelect(string $query, int $limit = 50): array
+	{
+		$limit = max(5, min(100, $limit));
+		$needle = mb_strtolower(preg_replace('/[%_\\\\]/', '', mb_substr(trim($query), 0, 80)));
+		$idCol = (string) $this->cfg('category_id_column', 'id');
+		$nameCol = (string) $this->cfg('category_name_column', 'name');
+		$out = [];
+
+		foreach ($this->cachedCategories() as $row) {
+			$idRaw = $this->rowAttr($row, $idCol);
+			$name = trim((string) ($this->rowAttr($row, $nameCol) ?? ''));
+			if ($idRaw === null || $idRaw === '' || $name === '') {
+				continue;
+			}
+			$opt = [
+				'id' => is_numeric($idRaw) ? (int) $idRaw : (string) $idRaw,
+				'label' => $name,
+			];
+			if ($needle === '') {
+				$out[] = $opt;
+
+				continue;
+			}
+			$nameLower = mb_strtolower($name);
+			$idStr = (string) $idRaw;
+			if (
+				str_contains($nameLower, $needle)
+				|| ($idStr !== '' && $idStr === trim($query))
+			) {
+				$out[] = $opt;
+			}
+		}
+
+		usort($out, static fn (array $a, array $b): int => strcasecmp($a['label'], $b['label']));
+
+		return array_slice($out, 0, $limit);
+	}
+
 	public function resolveCategoryId(?string $bidCategoryHint, string $title, string $description): ?int
 	{
 		$hint = $this->normalizeHint($bidCategoryHint);
