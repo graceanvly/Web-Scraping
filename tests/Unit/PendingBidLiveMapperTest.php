@@ -128,4 +128,26 @@ class PendingBidLiveMapperTest extends TestCase
 
 		$this->assertSame('RFP-100', $attrs['SOLICITATIONNUMBER']);
 	}
+
+	public function test_mapper_request_overrides_take_precedence_over_temp_row(): void
+	{
+		$this->stubBidColumnMap(['id', 'title', 'entityid', 'stateid', 'bid_url_id', 'last_modified']);
+
+		$temp = new TempBid([
+			'TITLE' => 'Test bid',
+			'ENTITYID' => 1,
+			'STATEID' => 2,
+			'BID_URL_ID' => 3,
+		]);
+
+		$attrs = PendingBidLiveMapper::attributesForInsert($temp, [
+			'ENTITYID' => 34309,
+			'STATEID' => 44,
+			'BID_URL_ID' => 1171,
+		]);
+
+		$this->assertSame(34309, $attrs['ENTITYID']);
+		$this->assertSame(44, $attrs['STATEID']);
+		$this->assertSame(1171, $attrs['BID_URL_ID']);
+	}
 }

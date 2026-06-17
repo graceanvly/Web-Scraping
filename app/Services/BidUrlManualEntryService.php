@@ -7,6 +7,7 @@ use App\Models\BidUrl;
 use App\Models\BidUrlHistory;
 use App\Models\FailedBidUrl;
 use App\Models\TempBid;
+use App\Support\BidLiveWriter;
 use App\Support\PendingBidLiveMapper;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -341,11 +342,11 @@ class BidUrlManualEntryService
 		}
 
 		$bid = new Bid();
-		$bid->forceFill(PendingBidLiveMapper::withoutPrimaryKey(
-			PendingBidLiveMapper::attributesForInsert($temp)
-		));
+		$attrs = PendingBidLiveMapper::attributesForInsert($temp);
+		BidLiveWriter::applyAttributes($bid, PendingBidLiveMapper::withoutPrimaryKey($attrs));
 		$bid->LAST_MODIFIED = now();
 		$bid->save();
+		BidLiveWriter::patchReferenceIds($bid, $attrs);
 		$temp->delete();
 
 		return 'approved';

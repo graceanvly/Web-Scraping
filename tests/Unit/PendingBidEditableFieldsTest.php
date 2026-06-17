@@ -75,4 +75,33 @@ class PendingBidEditableFieldsTest extends TestCase
 		$this->assertSame(7, (int) $attrs['STATEID']);
 		$this->assertSame(99, (int) $attrs['BID_URL_ID']);
 	}
+
+	private function applyReferenceIdsFromRequest(Request $request, TempBid $pendingBid): void
+	{
+		$controller = new PendingBidController();
+		$method = new ReflectionMethod($controller, 'applyReferenceIdsFromRequest');
+		$method->setAccessible(true);
+		$method->invoke($controller, $request, $pendingBid);
+	}
+
+	public function test_apply_reference_ids_skips_missing_request_keys(): void
+	{
+		$temp = new TempBid([
+			'TITLE' => 'Original',
+			'ENTITYID' => 42,
+			'STATEID' => 7,
+			'BID_URL_ID' => 99,
+		]);
+
+		$request = Request::create('/pending/1', 'POST', [
+			'edit_modal' => '1',
+			'TITLE' => 'Updated title',
+		]);
+
+		$this->applyReferenceIdsFromRequest($request, $temp);
+
+		$this->assertSame(42, (int) $temp->ENTITYID);
+		$this->assertSame(7, (int) $temp->STATEID);
+		$this->assertSame(99, (int) $temp->BID_URL_ID);
+	}
 }

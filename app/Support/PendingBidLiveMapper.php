@@ -31,10 +31,20 @@ final class PendingBidLiveMapper
 		'NAICSCODE_INT',
 	];
 
+	/** @var list<string> */
+	public const REFERENCE_ID_COLUMNS = [
+		'ENTITYID',
+		'STATEID',
+		'BID_URL_ID',
+		'CATEGORYID',
+		'USERID',
+	];
+
 	/**
+	 * @param  array<string, mixed>  $referenceOverrides  request/edit-modal IDs (ENTITYID, …)
 	 * @return array<string, mixed>
 	 */
-	public static function attributesForInsert(TempBid $pendingBid): array
+	public static function attributesForInsert(TempBid $pendingBid, array $referenceOverrides = []): array
 	{
 		$source = $pendingBid->toLiveBidAttributes();
 		foreach (self::MYSQL_ONLY_COLUMNS as $col) {
@@ -51,6 +61,8 @@ final class PendingBidLiveMapper
 			$attrs = self::mergeColumn($attrs, $pendingBid, $logical);
 		}
 
+		$attrs = self::applyReferenceOverrides($attrs, $referenceOverrides);
+
 		$title = trim((string) ($pendingBid->getAttribute('TITLE') ?? ''));
 		if ($title === '') {
 			throw new \RuntimeException('Pending bid title is required before promoting to live.');
@@ -65,6 +77,28 @@ final class PendingBidLiveMapper
 	 * @param  array<string, mixed>  $attrs
 	 * @return array<string, mixed>
 	 */
+	/**
+	 * @param  array<string, mixed>  $attrs
+	 * @param  array<string, mixed>  $referenceOverrides
+	 * @return array<string, mixed>
+	 */
+	private static function applyReferenceOverrides(array $attrs, array $referenceOverrides): array
+	{
+		foreach ($referenceOverrides as $key => $value) {
+			$logical = strtoupper((string) $key);
+			if (!in_array($logical, self::REFERENCE_ID_COLUMNS, true)) {
+				continue;
+			}
+			if ($value === null || $value === '') {
+				unset($attrs[$logical]);
+				continue;
+			}
+			$attrs[$logical] = self::castValue($logical, $value);
+		}
+
+		return $attrs;
+	}
+
 	private static function mergeColumn(array $attrs, TempBid $pendingBid, string $logical): array
 	{
 		$val = $pendingBid->getAttribute($logical);

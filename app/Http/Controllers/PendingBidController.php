@@ -7,6 +7,7 @@ use App\Models\TempBid;
 use App\Services\BidReferenceLookupService;
 use App\Services\PendingSimilarEntriesService;
 use App\Support\BidDetailPayload;
+use App\Support\BidLiveWriter;
 use App\Support\PendingBidLiveMapper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -117,10 +118,13 @@ class PendingBidController extends Controller
 			}
 		}
 
+		$referenceIds = $this->extractReferenceIds($request);
+
 		try {
 			$result = $this->promoteToLive(
 				$pendingBid,
 				$request->boolean('edit_modal') || $request->has('TITLE'),
+				$referenceIds,
 			);
 		} catch (\RuntimeException $e) {
 			return redirect()->route('pending.index', $request->only(['search', 'per_page', 'page']))
@@ -243,7 +247,10 @@ class PendingBidController extends Controller
 	/** Apply ENTITYID / STATEID / BID_URL_ID from the edit form even if temp save omits them. */
 	private function applyReferenceIdsFromRequest(Request $request, TempBid $pendingBid): void
 	{
-		foreach (['ENTITYID', 'STATEID', 'BID_URL_ID', 'CATEGORYID', 'USERID'] as $key) {
+		foreach (PendingBidLiveMapper::REFERENCE_ID_COLUMNS as $key) {
+			if (!$request->has($key)) {
+				continue;
+			}
 			$raw = $request->input($key);
 			if ($raw === null || $raw === '') {
 				$pendingBid->setAttribute($key, null);
@@ -256,25 +263,46 @@ class PendingBidController extends Controller
 		}
 	}
 
-	private function applyPendingAttrsToLiveBid(TempBid $pendingBid, Bid $existing): void
+	/**
+	 * @return array<string, int|null>
+	 */
+	private function extractReferenceIds(Request $request): array
 	{
-		$existing->forceFill(PendingBidLiveMapper::withoutPrimaryKey(
-			PendingBidLiveMapper::attributesForInsert($pendingBid)
-		));
+		$out = [];
+		foreach (PendingBidLiveMapper::REFERENCE_ID_COLUMNS as $key) {
+			if (!$request->has($key)) {
+				continue;
+			}
+			$raw = $request->input($key);
+			if ($raw === null || $raw === '') {
+				$out[$key] = null;
+			} elseif (is_numeric($raw)) {
+				$out[$key] = (int) $raw;
+			}
+		}
+
+		return $out;
+	}
+
+	private function applyPendingAttrsToLiveBid(TempBid $pendingBid, Bid $existing, array $referenceIds = []): void
+	{
+		$attrs = PendingBidLiveMapper::attributesForInsert($pendingBid, $referenceIds);
+		BidLiveWriter::applyAttributes($existing, PendingBidLiveMapper::withoutPrimaryKey($attrs));
 		$existing->save();
+		BidLiveWriter::patchReferenceIds($existing, $attrs);
 	}
 
 	/**
 	 * Copy a pending bid into the live `bid` table and remove it from the queue.
 	 * Returns 'approved' or 'duplicate' (already live — temp row is dropped either way).
 	 */
-	private function promoteToLive(TempBid $pendingBid, bool $fromEditModal = false): string
+	private function promoteToLive(TempBid $pendingBid, bool $fromEditModal = false, array $referenceIds = []): string
 	{
-		return DB::transaction(function () use ($pendingBid, $fromEditModal) {
+		return DB::transaction(function () use ($pendingBid, $fromEditModal, $referenceIds) {
 			$existing = $this->findMatchingLiveBid($pendingBid);
 			if ($existing !== null) {
 				if ($fromEditModal) {
-					$this->applyPendingAttrsToLiveBid($pendingBid, $existing);
+					$this->applyPendingAttrsToLiveBid($pendingBid, $existing, $referenceIds);
 					Log::info('Pending approve: updated existing live bid from edit modal', [
 						'temp_id' => $pendingBid->id,
 						'live_id' => $existing->getKey(),
@@ -288,10 +316,13 @@ class PendingBidController extends Controller
 				return 'duplicate';
 			}
 
-			$attrs = PendingBidLiveMapper::attributesForInsert($pendingBid);
+			$attrs = PendingBidLiveMapper::attributesForInsert($pendingBid, $referenceIds);
 
 			Log::info('Pending bid promote attrs', [
 				'temp_id' => $pendingBid->id,
+				'request_entityid' => $referenceIds['ENTITYID'] ?? null,
+				'request_stateid' => $referenceIds['STATEID'] ?? null,
+				'request_bid_url_id' => $referenceIds['BID_URL_ID'] ?? null,
 				'entityid' => $attrs['ENTITYID'] ?? null,
 				'stateid' => $attrs['STATEID'] ?? null,
 				'bid_url_id' => $attrs['BID_URL_ID'] ?? null,
@@ -299,8 +330,9 @@ class PendingBidController extends Controller
 			]);
 
 			$bid = new Bid();
-			$bid->forceFill(PendingBidLiveMapper::withoutPrimaryKey($attrs));
+			BidLiveWriter::applyAttributes($bid, PendingBidLiveMapper::withoutPrimaryKey($attrs));
 			$bid->save();
+			BidLiveWriter::patchReferenceIds($bid, $attrs);
 
 			Log::info('Pending bid promoted to live', [
 				'temp_id' => $pendingBid->id,

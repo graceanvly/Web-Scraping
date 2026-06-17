@@ -456,8 +456,8 @@
 				<footer style="display:flex; justify-content:space-between; gap:0.75rem; margin-top:1.5rem;">
 					<button type="button" class="secondary outline" onclick="document.getElementById('editModal').close()">Cancel</button>
 					<div style="display:flex; gap:0.5rem;">
-						<button type="submit" id="saveChangesBtn" class="secondary">Save changes</button>
-						<button type="submit" id="saveApproveBtn" style="background:#16a34a; border-color:#16a34a;">Save &amp; approve</button>
+						<button type="button" id="saveChangesBtn" class="secondary">Save changes</button>
+						<button type="button" id="saveApproveBtn" style="background:#16a34a; border-color:#16a34a;">Save &amp; approve</button>
 					</div>
 				</footer>
 			</form>
@@ -1010,8 +1010,9 @@
 			}
 		}
 
-		document.getElementById('editForm')?.addEventListener('submit', function (ev) {
-			const isApprove = ev.submitter && ev.submitter.id === 'saveApproveBtn';
+		let pendingEditSubmitIsApprove = false;
+
+		function prepareEditFormSubmit(isApprove) {
 			syncEditFormSubmitTarget(isApprove);
 			entityPicker.ensureHiddenForSubmit();
 			statePicker.ensureHiddenForSubmit();
@@ -1023,6 +1024,22 @@
 					el.value = '';
 				}
 			});
+		}
+
+		document.getElementById('saveChangesBtn')?.addEventListener('click', function () {
+			pendingEditSubmitIsApprove = false;
+			prepareEditFormSubmit(false);
+			document.getElementById('editForm')?.requestSubmit();
+		});
+
+		document.getElementById('saveApproveBtn')?.addEventListener('click', function () {
+			pendingEditSubmitIsApprove = true;
+			prepareEditFormSubmit(true);
+			document.getElementById('editForm')?.requestSubmit();
+		});
+
+		document.getElementById('editForm')?.addEventListener('submit', function () {
+			prepareEditFormSubmit(pendingEditSubmitIsApprove);
 		});
 
 		async function openEdit(idx) {
