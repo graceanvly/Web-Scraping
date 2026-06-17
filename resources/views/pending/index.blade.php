@@ -211,7 +211,7 @@
 		.ref-picker { position:relative; }
 		.ref-picker-inner input[type="search"] { margin-bottom:0.15rem; }
 		.ref-picker-results {
-			position:absolute; left:0; right:0; top:100%; z-index:30; margin:0.2rem 0 0; padding:0; list-style:none;
+			position:absolute; left:0; right:0; top:100%; z-index:50; margin:0.2rem 0 0; padding:0; list-style:none;
 			background:#fff; border:1px solid #e5e7eb; border-radius:8px; max-height:240px; overflow-y:auto;
 			box-shadow:0 6px 18px rgba(0,0,0,0.12);
 		}
@@ -362,6 +362,20 @@
 						<label for="edit_title">Title</label>
 						<input type="text" id="edit_title" name="TITLE" required maxlength="255">
 					</div>
+					<div class="full ref-picker" id="bidUrlPicker">
+						<label for="edit_bid_url_search">Bid URL <span class="muted" style="font-weight:400;">(BID_URL_ID)</span> <span id="editBidUrlHint" class="muted" style="font-weight:400;"></span></label>
+						<input type="hidden" id="edit_bid_url_id" name="BID_URL_ID">
+						<div class="ref-picker-inner">
+							<input type="search" id="edit_bid_url_search" autocomplete="off" autocorrect="off" spellcheck="false"
+								placeholder="Search configured bid URLs by name or URL…"
+								aria-autocomplete="list" aria-expanded="false" aria-controls="edit_bid_url_results">
+							<ul id="edit_bid_url_results" class="ref-picker-results" role="listbox" hidden></ul>
+						</div>
+						<div class="ref-picker-meta">
+							<button type="button" class="ref-picker-clear" id="edit_bid_url_clear">Clear bid URL</button>
+							<span>Search by site name; sets <code>BID_URL_ID</code> on save.</span>
+						</div>
+					</div>
 					<div class="full ref-picker" id="entityPicker">
 						<label for="edit_entity_search">Entity <span id="editEntityHint" class="muted" style="font-weight:400;"></span></label>
 						<input type="hidden" id="edit_entity_id" name="ENTITYID">
@@ -402,20 +416,6 @@
 						<div class="ref-picker-meta">
 							<button type="button" class="ref-picker-clear" id="edit_category_clear">Clear category</button>
 							<span>Pick a row to set CATEGORYID.</span>
-						</div>
-					</div>
-					<div class="full ref-picker" id="bidUrlPicker">
-						<label for="edit_bid_url_search">Listing URL source <span id="editBidUrlHint" class="muted" style="font-weight:400;"></span></label>
-						<input type="hidden" id="edit_bid_url_id" name="BID_URL_ID">
-						<div class="ref-picker-inner">
-							<input type="search" id="edit_bid_url_search" autocomplete="off" autocorrect="off" spellcheck="false"
-								placeholder="Search configured bid URLs by name…"
-								aria-autocomplete="list" aria-expanded="false" aria-controls="edit_bid_url_results">
-							<ul id="edit_bid_url_results" class="ref-picker-results" role="listbox" hidden></ul>
-						</div>
-						<div class="ref-picker-meta">
-							<button type="button" class="ref-picker-clear" id="edit_bid_url_clear">Clear listing URL</button>
-							<span>Pick a row to set BID_URL_ID.</span>
 						</div>
 					</div>
 					<div>
@@ -577,43 +577,6 @@
 			minChars: 0,
 			onChange: null,
 		};
-		const entityPicker = initRefPicker(entityPickerCfg);
-
-		const statePicker = initRefPicker({
-			hidden: document.getElementById('edit_state_id'),
-			search: document.getElementById('edit_state_search'),
-			results: document.getElementById('edit_state_results'),
-			clearBtn: document.getElementById('edit_state_clear'),
-			hint: document.getElementById('editStateHint'),
-			searchUrl: stateSearchUrl,
-			fallbackPrefix: 'State #',
-			searchLimit: 60,
-			minChars: 0,
-		});
-
-		const categoryPicker = initRefPicker({
-			hidden: document.getElementById('edit_category_id'),
-			search: document.getElementById('edit_category_search'),
-			results: document.getElementById('edit_category_results'),
-			clearBtn: document.getElementById('edit_category_clear'),
-			hint: document.getElementById('editCategoryHint'),
-			searchUrl: categorySearchUrl,
-			fallbackPrefix: 'Category #',
-			searchLimit: 60,
-			minChars: 0,
-		});
-
-		const bidUrlPicker = initRefPicker({
-			hidden: document.getElementById('edit_bid_url_id'),
-			search: document.getElementById('edit_bid_url_search'),
-			results: document.getElementById('edit_bid_url_results'),
-			clearBtn: document.getElementById('edit_bid_url_clear'),
-			hint: document.getElementById('editBidUrlHint'),
-			searchUrl: bidUrlSearchUrl,
-			fallbackPrefix: 'Bid URL #',
-			searchLimit: 40,
-			minChars: 0,
-		});
 
 		function initRefPicker(cfg) {
 			let reqSeq = 0;
@@ -796,6 +759,44 @@
 
 			return { setFromId, hideResults };
 		}
+
+		const entityPicker = initRefPicker(entityPickerCfg);
+
+		const statePicker = initRefPicker({
+			hidden: document.getElementById('edit_state_id'),
+			search: document.getElementById('edit_state_search'),
+			results: document.getElementById('edit_state_results'),
+			clearBtn: document.getElementById('edit_state_clear'),
+			hint: document.getElementById('editStateHint'),
+			searchUrl: stateSearchUrl,
+			fallbackPrefix: 'State #',
+			searchLimit: 60,
+			minChars: 0,
+		});
+
+		const categoryPicker = initRefPicker({
+			hidden: document.getElementById('edit_category_id'),
+			search: document.getElementById('edit_category_search'),
+			results: document.getElementById('edit_category_results'),
+			clearBtn: document.getElementById('edit_category_clear'),
+			hint: document.getElementById('editCategoryHint'),
+			searchUrl: categorySearchUrl,
+			fallbackPrefix: 'Category #',
+			searchLimit: 60,
+			minChars: 0,
+		});
+
+		const bidUrlPicker = initRefPicker({
+			hidden: document.getElementById('edit_bid_url_id'),
+			search: document.getElementById('edit_bid_url_search'),
+			results: document.getElementById('edit_bid_url_results'),
+			clearBtn: document.getElementById('edit_bid_url_clear'),
+			hint: document.getElementById('editBidUrlHint'),
+			searchUrl: bidUrlSearchUrl,
+			fallbackPrefix: 'Bid URL #',
+			searchLimit: 40,
+			minChars: 0,
+		});
 
 		function escHtml(str) {
 			const d = document.createElement('div');
