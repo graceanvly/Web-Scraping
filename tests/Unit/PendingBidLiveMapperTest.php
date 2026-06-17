@@ -70,4 +70,18 @@ class PendingBidLiveMapperTest extends TestCase
 		$this->assertSame(1171, $attrs['BID_URL_ID']);
 		$this->assertArrayHasKey('LAST_MODIFIED', $attrs);
 	}
+
+	public function test_mapper_always_sets_title_when_missing_from_schema_map(): void
+	{
+		$this->stubBidColumnMap(['ID', 'ENTITYID', 'STATEID', 'LAST_MODIFIED']);
+
+		$temp = new TempBid([
+			'TITLE' => 'Roof replacement project',
+			'ENTITYID' => 34309,
+		]);
+
+		$attrs = PendingBidLiveMapper::attributesForInsert($temp);
+
+		$this->assertSame('Roof replacement project', $attrs['TITLE']);
+	}
 }

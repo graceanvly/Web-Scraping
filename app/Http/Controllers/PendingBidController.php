@@ -116,10 +116,15 @@ class PendingBidController extends Controller
 			}
 		}
 
-		$result = $this->promoteToLive(
-			$pendingBid,
-			$request->boolean('edit_modal') || $request->has('TITLE'),
-		);
+		try {
+			$result = $this->promoteToLive(
+				$pendingBid,
+				$request->boolean('edit_modal') || $request->has('TITLE'),
+			);
+		} catch (\RuntimeException $e) {
+			return redirect()->route('pending.index', $request->only(['search', 'per_page', 'page']))
+				->with('error', $e->getMessage());
+		}
 
 		$msg = $result === 'duplicate'
 			? 'That bid is already live — removed from the queue.'
