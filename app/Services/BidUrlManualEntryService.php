@@ -341,7 +341,9 @@ class BidUrlManualEntryService
 		}
 
 		$bid = new Bid();
-		$bid->fill(PendingBidLiveMapper::attributesForInsert($temp));
+		$bid->forceFill(PendingBidLiveMapper::withoutPrimaryKey(
+			PendingBidLiveMapper::attributesForInsert($temp)
+		));
 		$bid->LAST_MODIFIED = now();
 		$bid->save();
 		$temp->delete();

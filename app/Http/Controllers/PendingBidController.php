@@ -93,6 +93,7 @@ class PendingBidController extends Controller
 	public function update(Request $request, TempBid $pendingBid)
 	{
 		$this->applyEditableFields($request, $pendingBid);
+		$this->applyReferenceIdsFromRequest($request, $pendingBid);
 		$pendingBid->save();
 
 		return redirect()->route('pending.index', $request->only(['search', 'per_page', 'page']))
@@ -105,8 +106,8 @@ class PendingBidController extends Controller
 		// Row-level "Approve" only carries entity/user (or nothing).
 		if ($request->boolean('edit_modal') || $request->has('TITLE')) {
 			$this->applyEditableFields($request, $pendingBid);
+			$this->applyReferenceIdsFromRequest($request, $pendingBid);
 			$pendingBid->save();
-			$pendingBid->refresh();
 		} else {
 			if ($request->filled('ENTITYID') && is_numeric($request->input('ENTITYID'))) {
 				$pendingBid->ENTITYID = (int) $request->input('ENTITYID');
@@ -239,9 +240,25 @@ class PendingBidController extends Controller
 		$pendingBid->fill($validated);
 	}
 
+	/** Apply ENTITYID / STATEID / BID_URL_ID from the edit form even if temp save omits them. */
+	private function applyReferenceIdsFromRequest(Request $request, TempBid $pendingBid): void
+	{
+		foreach (['ENTITYID', 'STATEID', 'BID_URL_ID', 'CATEGORYID', 'USERID'] as $key) {
+			$raw = $request->input($key);
+			if ($raw === null || $raw === '') {
+				$pendingBid->setAttribute($key, null);
+
+				continue;
+			}
+			if (is_numeric($raw)) {
+				$pendingBid->setAttribute($key, (int) $raw);
+			}
+		}
+	}
+
 	private function applyPendingAttrsToLiveBid(TempBid $pendingBid, Bid $existing): void
 	{
-		$existing->fill(PendingBidLiveMapper::withoutPrimaryKey(
+		$existing->forceFill(PendingBidLiveMapper::withoutPrimaryKey(
 			PendingBidLiveMapper::attributesForInsert($pendingBid)
 		));
 		$existing->save();
@@ -273,8 +290,16 @@ class PendingBidController extends Controller
 
 			$attrs = PendingBidLiveMapper::attributesForInsert($pendingBid);
 
+			Log::info('Pending bid promote attrs', [
+				'temp_id' => $pendingBid->id,
+				'entityid' => $attrs['ENTITYID'] ?? null,
+				'stateid' => $attrs['STATEID'] ?? null,
+				'bid_url_id' => $attrs['BID_URL_ID'] ?? null,
+				'categoryid' => $attrs['CATEGORYID'] ?? null,
+			]);
+
 			$bid = new Bid();
-			$bid->fill(PendingBidLiveMapper::withoutPrimaryKey($attrs));
+			$bid->forceFill(PendingBidLiveMapper::withoutPrimaryKey($attrs));
 			$bid->save();
 
 			Log::info('Pending bid promoted to live', [

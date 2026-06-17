@@ -91,6 +91,27 @@ class PendingBidLiveMapperTest extends TestCase
 		$attrs = PendingBidLiveMapper::attributesForInsert($temp);
 
 		$this->assertSame('Roof replacement project', $attrs['TITLE']);
+		$this->assertSame(34309, $attrs['ENTITYID']);
 		$this->assertFalse(BidLiveColumnFilter::hasColumn('TITLE'));
+	}
+
+	public function test_mapper_applies_reference_ids_when_schema_listing_is_incomplete(): void
+	{
+		$this->stubBidColumnMap(['id', 'title', 'last_modified']);
+
+		$temp = new TempBid([
+			'TITLE' => 'Test bid',
+			'ENTITYID' => 34309,
+			'STATEID' => 44,
+			'BID_URL_ID' => 1171,
+			'CATEGORYID' => 7,
+		]);
+
+		$attrs = PendingBidLiveMapper::attributesForInsert($temp);
+
+		$this->assertSame(34309, $attrs['ENTITYID']);
+		$this->assertSame(44, $attrs['STATEID']);
+		$this->assertSame(1171, $attrs['BID_URL_ID']);
+		$this->assertSame(7, $attrs['CATEGORYID']);
 	}
 }

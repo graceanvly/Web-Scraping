@@ -585,6 +585,7 @@
 		function initRefPicker(cfg) {
 			let reqSeq = 0;
 			let selectedLabel = '';
+			let committedId = '';
 			let highlightIdx = -1;
 
 			function refreshHint() {
@@ -611,7 +612,8 @@
 
 			function applyChoice(id, label) {
 				if (!cfg.hidden || !cfg.search) return;
-				cfg.hidden.value = String(id);
+				committedId = String(id);
+				cfg.hidden.value = committedId;
 				cfg.search.value = label;
 				selectedLabel = label;
 				refreshHint();
@@ -621,11 +623,22 @@
 				}
 			}
 
+			function ensureHiddenForSubmit() {
+				if (!cfg.hidden) return;
+				const current = (cfg.hidden.value || '').trim();
+				if (current !== '' && current !== '0') return;
+				if (committedId !== '' && committedId !== '0') {
+					cfg.hidden.value = committedId;
+					refreshHint();
+				}
+			}
+
 			async function setFromId(raw) {
 				if (!cfg.hidden || !cfg.search) return;
 				selectedLabel = '';
 				hideResults();
 				const idStr = raw != null && String(raw) !== '' && String(raw) !== '0' ? String(raw) : '';
+				committedId = idStr;
 				cfg.hidden.value = idStr;
 				if (!idStr) {
 					cfg.search.value = '';
@@ -754,6 +767,7 @@
 				if (cfg.hidden) cfg.hidden.value = '';
 				if (cfg.search) cfg.search.value = '';
 				selectedLabel = '';
+				committedId = '';
 				refreshHint();
 				hideResults();
 				if (typeof cfg.onChange === 'function') {
@@ -761,7 +775,7 @@
 				}
 			});
 
-			return { setFromId, hideResults };
+			return { setFromId, hideResults, ensureHiddenForSubmit };
 		}
 
 		const entityPicker = initRefPicker(entityPickerCfg);
@@ -999,7 +1013,11 @@
 		document.getElementById('editForm')?.addEventListener('submit', function (ev) {
 			const isApprove = ev.submitter && ev.submitter.id === 'saveApproveBtn';
 			syncEditFormSubmitTarget(isApprove);
-			['edit_entity_id', 'edit_state_id', 'edit_bid_url_id'].forEach(function (id) {
+			entityPicker.ensureHiddenForSubmit();
+			statePicker.ensureHiddenForSubmit();
+			categoryPicker.ensureHiddenForSubmit();
+			bidUrlPicker.ensureHiddenForSubmit();
+			['edit_entity_id', 'edit_state_id', 'edit_bid_url_id', 'edit_category_id'].forEach(function (id) {
 				const el = document.getElementById(id);
 				if (el && String(el.value).trim() === '0') {
 					el.value = '';

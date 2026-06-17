@@ -9,6 +9,12 @@ use Illuminate\Support\Facades\Log;
 final class PendingBidLiveMapper
 {
 	/** @var list<string> */
+	private const MYSQL_ONLY_COLUMNS = [
+		'raw_html',
+		'extracted_json',
+	];
+
+	/** @var list<string> */
 	private const INTEGER_COLUMNS = [
 		'CATEGORYID',
 		'ENTITYID',
@@ -30,10 +36,16 @@ final class PendingBidLiveMapper
 	 */
 	public static function attributesForInsert(TempBid $pendingBid): array
 	{
-		$attrs = BidLiveColumnFilter::filter($pendingBid->toLiveBidAttributes());
+		$source = $pendingBid->toLiveBidAttributes();
+		foreach (self::MYSQL_ONLY_COLUMNS as $col) {
+			unset($source[$col]);
+		}
 
+		$attrs = BidLiveColumnFilter::filter($source);
+
+		// Re-apply from the pending row: Oracle schema listings are often incomplete.
 		foreach (TempBid::BID_COLUMNS as $logical) {
-			if (in_array($logical, ['raw_html', 'extracted_json'], true)) {
+			if (in_array($logical, self::MYSQL_ONLY_COLUMNS, true)) {
 				continue;
 			}
 			$attrs = self::mergeColumn($attrs, $pendingBid, $logical);
@@ -55,19 +67,16 @@ final class PendingBidLiveMapper
 	 */
 	private static function mergeColumn(array $attrs, TempBid $pendingBid, string $logical): array
 	{
-		if (!BidLiveColumnFilter::hasColumn($logical)) {
-			if ($logical === 'TITLE') {
-				Log::warning('Pending promote: TITLE missing from live BID schema listing', [
-					'temp_id' => $pendingBid->id,
-				]);
-			}
-
-			return $attrs;
-		}
-
 		$val = $pendingBid->getAttribute($logical);
 		if ($val === null || $val === '') {
 			return $attrs;
+		}
+
+		if (!BidLiveColumnFilter::hasColumn($logical)) {
+			Log::warning('Pending promote: column absent from live BID schema listing; applying anyway', [
+				'column' => $logical,
+				'temp_id' => $pendingBid->id,
+			]);
 		}
 
 		$attrs[$logical] = self::castValue($logical, $val);
