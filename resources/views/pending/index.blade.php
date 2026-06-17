@@ -354,6 +354,7 @@
 				<form id="editForm" method="POST" class="edit-modal-main">
 				@csrf
 				<input type="hidden" name="_method" id="edit_method" value="PUT">
+				<input type="hidden" name="edit_modal" value="1">
 				<input type="hidden" name="search" value="{{ $search }}">
 				<input type="hidden" name="page" value="{{ $pending->currentPage() }}">
 
@@ -452,8 +453,8 @@
 				<footer style="display:flex; justify-content:space-between; gap:0.75rem; margin-top:1.5rem;">
 					<button type="button" class="secondary outline" onclick="document.getElementById('editModal').close()">Cancel</button>
 					<div style="display:flex; gap:0.5rem;">
-						<button type="submit" class="secondary" onclick="prepareSubmit('update')">Save changes</button>
-						<button type="submit" id="saveApproveBtn" style="background:#16a34a; border-color:#16a34a;" onclick="prepareSubmit('approve')">Save &amp; approve</button>
+						<button type="submit" id="saveChangesBtn" class="secondary">Save changes</button>
+						<button type="submit" id="saveApproveBtn" style="background:#16a34a; border-color:#16a34a;">Save &amp; approve</button>
 					</div>
 				</footer>
 			</form>
@@ -975,16 +976,27 @@
 			}
 		}
 
-		function prepareSubmit(target) {
+		function syncEditFormSubmitTarget(isApprove) {
 			const form = document.getElementById('editForm');
-			if (target === 'approve') {
+			const methodInput = document.getElementById('edit_method');
+			const saveBtn = document.getElementById('saveChangesBtn');
+			const approveBtn = document.getElementById('saveApproveBtn');
+			if (!form) return;
+			if (saveBtn) saveBtn.setAttribute('formaction', currentUpdateUrl);
+			if (approveBtn) approveBtn.setAttribute('formaction', currentApproveUrl);
+			if (isApprove) {
 				form.action = currentApproveUrl;
-				document.getElementById('edit_method').value = 'POST';
+				if (methodInput) methodInput.value = 'POST';
 			} else {
 				form.action = currentUpdateUrl;
-				document.getElementById('edit_method').value = 'PUT';
+				if (methodInput) methodInput.value = 'PUT';
 			}
 		}
+
+		document.getElementById('editForm')?.addEventListener('submit', function (ev) {
+			const isApprove = ev.submitter && ev.submitter.id === 'saveApproveBtn';
+			syncEditFormSubmitTarget(isApprove);
+		});
 
 		async function openEdit(idx) {
 			const bid = pendingData[idx];
@@ -993,8 +1005,7 @@
 			currentPendingId = bid.id;
 			currentUpdateUrl = updateUrlTpl.replace('__ID__', bid.id);
 			currentApproveUrl = approveUrlTpl.replace('__ID__', bid.id);
-			form.action = currentUpdateUrl;
-			document.getElementById('edit_method').value = 'PUT';
+			syncEditFormSubmitTarget(false);
 
 			document.getElementById('edit_title').value = bid.TITLE || '';
 			document.getElementById('edit_description').value = bid.DESCRIPTION || '';

@@ -101,9 +101,9 @@ class PendingBidController extends Controller
 
 	public function approve(Request $request, TempBid $pendingBid)
 	{
-		// "Save & approve" comes from the edit modal and carries the full field set;
-		// a plain row "Approve" only carries entity/user (or nothing).
-		if ($request->has('TITLE')) {
+		// Edit modal sets edit_modal=1 and posts ENTITYID, STATEID, BID_URL_ID, etc.
+		// Row-level "Approve" only carries entity/user (or nothing).
+		if ($request->boolean('edit_modal') || $request->has('TITLE')) {
 			$this->applyEditableFields($request, $pendingBid);
 			$pendingBid->save();
 		} else {
