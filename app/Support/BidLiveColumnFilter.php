@@ -8,10 +8,51 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * Drop attribute keys that are not real columns on the live bid table (Oracle vs MySQL).
- * Preserves the caller's attribute key casing so Eloquent fill() matches $fillable.
+ * Preserves app attribute key casing for Eloquent fill() while recognizing Oracle DDL names.
  */
 final class BidLiveColumnFilter
 {
+	/**
+	 * Production Oracle ODS.BID columns (merged with Schema::getColumnListing when introspection is incomplete).
+	 *
+	 * @var list<string>
+	 */
+	private const CANONICAL_ORACLE_BID_COLUMNS = [
+		'ID',
+		'TITLE',
+		'DESCRIPTION',
+		'EMAIL',
+		'URL',
+		'CREATED',
+		'ENDDATE',
+		'CATEGORYID',
+		'ENTITYID',
+		'SUBSCRIPTIONTYPEID',
+		'USERID',
+		'THIRD_PARTY_IDENTIFIER',
+		'SOLICITATIONNUMBER',
+		'FEDDATE',
+		'SETASIDECODEID',
+		'NAICSCODE',
+		'BID_URL_ID',
+		'INLINEURL',
+		'NEEDS_REVIEW',
+		'SOURCE_ID',
+		'STATEID',
+		'LAST_MODIFIED',
+		'CATEGORY_ALIAS_ID',
+		'ENTITY_ALIAS_ID',
+		'COUNTRY_ID',
+		'UNDERREVIEW',
+		'NAICSCODE_INT',
+		'NSN',
+	];
+
+	/** App / MySQL attribute name => live Oracle column names. */
+	private const APP_COLUMN_ALIASES = [
+		'SOLICIATIONNUMBER' => ['SOLICITATIONNUMBER'],
+	];
+
 	/** @var array<string, true>|null null when schema unreadable */
 	private static ?array $allowedLower = null;
 
@@ -30,8 +71,7 @@ final class BidLiveColumnFilter
 
 		$out = [];
 		foreach ($attributes as $key => $value) {
-			$lower = strtolower((string) $key);
-			if (isset($map[$lower])) {
+			if (self::matchesLiveColumn((string) $key)) {
 				$out[$key] = $value;
 			}
 		}
@@ -46,7 +86,13 @@ final class BidLiveColumnFilter
 			return $preferred;
 		}
 
-		return $map[strtolower($preferred)] ?? null;
+		foreach (self::liveColumnCandidates($preferred) as $lower) {
+			if (isset($map[$lower])) {
+				return $map[$lower];
+			}
+		}
+
+		return null;
 	}
 
 	public static function hasColumn(string $preferred): bool
@@ -56,7 +102,42 @@ final class BidLiveColumnFilter
 			return true;
 		}
 
-		return isset($map[strtolower($preferred)]);
+		return self::matchesLiveColumn($preferred);
+	}
+
+	/** Attribute key to use on Bid model for insert/update (uppercase). */
+	public static function liveAttributeKeyFor(string $appKey): string
+	{
+		$resolved = self::resolveColumnName($appKey);
+
+		return $resolved !== null ? strtoupper($resolved) : strtoupper($appKey);
+	}
+
+	private static function matchesLiveColumn(string $appKey): bool
+	{
+		$map = self::columnMap();
+		if ($map === null) {
+			return true;
+		}
+
+		foreach (self::liveColumnCandidates($appKey) as $lower) {
+			if (isset($map[$lower])) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * @return list<string> lowercase live column names that satisfy an app attribute key
+	 */
+	private static function liveColumnCandidates(string $appKey): array
+	{
+		$upper = strtoupper($appKey);
+		$names = self::APP_COLUMN_ALIASES[$upper] ?? [$upper];
+
+		return array_map(static fn (string $name): string => strtolower($name), $names);
 	}
 
 	/**
@@ -76,15 +157,17 @@ final class BidLiveColumnFilter
 		}
 		self::$schemaResolved = true;
 
+		$listing = [];
 		try {
 			$listing = Schema::getColumnListing((new Bid())->getTable());
 		} catch (\Throwable $e) {
 			Log::warning('BidLiveColumnFilter: could not read bid table columns', ['error' => $e->getMessage()]);
-			self::$allowedLower = null;
-			self::$columnMapLower = null;
-
-			return;
 		}
+
+		$listing = array_values(array_unique(array_merge(
+			$listing,
+			self::CANONICAL_ORACLE_BID_COLUMNS,
+		)));
 
 		if ($listing === []) {
 			self::$allowedLower = null;

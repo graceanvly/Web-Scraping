@@ -114,4 +114,18 @@ class PendingBidLiveMapperTest extends TestCase
 		$this->assertSame(1171, $attrs['BID_URL_ID']);
 		$this->assertSame(7, $attrs['CATEGORYID']);
 	}
+
+	public function test_mapper_maps_soliciationnumber_to_oracle_solicitationnumber(): void
+	{
+		$this->stubBidColumnMap(['id', 'title', 'solicitationnumber', 'last_modified']);
+
+		$temp = new TempBid([
+			'TITLE' => 'Test bid',
+			'SOLICIATIONNUMBER' => 'RFP-100',
+		]);
+
+		$attrs = PendingBidLiveMapper::attributesForInsert($temp);
+
+		$this->assertSame('RFP-100', $attrs['SOLICITATIONNUMBER']);
+	}
 }

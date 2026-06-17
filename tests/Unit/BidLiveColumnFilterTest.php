@@ -52,12 +52,13 @@ class BidLiveColumnFilterTest extends TestCase
 
 	public function test_filter_preserves_uppercase_keys_for_eloquent_fill(): void
 	{
-		$this->stubBidColumnMap(['id', 'title', 'entityid', 'stateid']);
+		$this->stubBidColumnMap(['id', 'title', 'entityid', 'stateid', 'bid_url_id']);
 
 		$filtered = BidLiveColumnFilter::filter([
 			'TITLE' => 'Roof project',
 			'ENTITYID' => 34309,
 			'STATEID' => 7,
+			'BID_URL_ID' => 1171,
 			'raw_html' => '<p>skip</p>',
 		]);
 
@@ -65,6 +66,7 @@ class BidLiveColumnFilterTest extends TestCase
 			'TITLE' => 'Roof project',
 			'ENTITYID' => 34309,
 			'STATEID' => 7,
+			'BID_URL_ID' => 1171,
 		], $filtered);
 
 		$bid = new Bid();
@@ -73,5 +75,20 @@ class BidLiveColumnFilterTest extends TestCase
 		$this->assertSame('Roof project', $bid->getAttribute('TITLE'));
 		$this->assertSame(34309, (int) $bid->getAttribute('ENTITYID'));
 		$this->assertSame(7, (int) $bid->getAttribute('STATEID'));
+		$this->assertSame(1171, (int) $bid->getAttribute('BID_URL_ID'));
+	}
+
+	public function test_filter_accepts_soliciationnumber_alias_for_oracle_solicitationnumber(): void
+	{
+		$this->stubBidColumnMap(['id', 'title', 'solicitationnumber']);
+
+		$this->assertTrue(BidLiveColumnFilter::hasColumn('SOLICIATIONNUMBER'));
+		$this->assertSame('SOLICITATIONNUMBER', BidLiveColumnFilter::liveAttributeKeyFor('SOLICIATIONNUMBER'));
+
+		$filtered = BidLiveColumnFilter::filter([
+			'SOLICIATIONNUMBER' => 'ABC-123',
+		]);
+
+		$this->assertSame(['SOLICIATIONNUMBER' => 'ABC-123'], $filtered);
 	}
 }

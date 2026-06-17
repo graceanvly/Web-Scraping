@@ -103,7 +103,8 @@ final class PendingBidLiveMapper
 	{
 		$out = [];
 		foreach ($attrs as $key => $value) {
-			$out[strtoupper((string) $key)] = $value;
+			$liveKey = BidLiveColumnFilter::liveAttributeKeyFor((string) $key);
+			$out[$liveKey] = $value;
 		}
 
 		return $out;
