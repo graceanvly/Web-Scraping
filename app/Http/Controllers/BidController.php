@@ -1545,7 +1545,7 @@ class BidController extends Controller
 	 */
 	private function filterBidUpdateAttributes(Bid $bid, array $validated): array
 	{
-		return BidLiveColumnFilter::filter($validated);
+		return BidLiveColumnFilter::filterForWrite($validated);
 	}
 
 	private function applyCorporateTitlePrefix(string $title, ?string $postingEntity): string

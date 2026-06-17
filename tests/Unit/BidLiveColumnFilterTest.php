@@ -80,7 +80,7 @@ class BidLiveColumnFilterTest extends TestCase
 
 	public function test_filter_accepts_soliciationnumber_alias_for_oracle_solicitationnumber(): void
 	{
-		$this->stubBidColumnMap(['id', 'title', 'solicitationnumber']);
+		$this->stubBidColumnMap(['id', 'title', 'entityid', 'solicitationnumber']);
 
 		$this->assertTrue(BidLiveColumnFilter::hasColumn('SOLICIATIONNUMBER'));
 		$this->assertSame('SOLICITATIONNUMBER', BidLiveColumnFilter::liveAttributeKeyFor('SOLICIATIONNUMBER'));
@@ -90,5 +90,28 @@ class BidLiveColumnFilterTest extends TestCase
 		]);
 
 		$this->assertSame(['SOLICIATIONNUMBER' => 'ABC-123'], $filtered);
+
+		$forWrite = BidLiveColumnFilter::filterForWrite([
+			'SOLICIATIONNUMBER' => 'ABC-123',
+			'ENTITYID' => 30547,
+		]);
+
+		$this->assertSame([
+			'SOLICITATIONNUMBER' => 'ABC-123',
+			'ENTITYID' => 30547,
+		], $forWrite);
+	}
+
+	public function test_filter_for_write_uses_mysql_typo_column_when_oracle_name_missing(): void
+	{
+		$this->stubBidColumnMap(['id', 'title', 'soliciationnumber']);
+
+		$this->assertSame('SOLICIATIONNUMBER', BidLiveColumnFilter::liveAttributeKeyFor('SOLICIATIONNUMBER'));
+
+		$forWrite = BidLiveColumnFilter::filterForWrite([
+			'SOLICIATIONNUMBER' => 'RFP-9',
+		]);
+
+		$this->assertSame(['SOLICIATIONNUMBER' => 'RFP-9'], $forWrite);
 	}
 }

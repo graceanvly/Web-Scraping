@@ -23,7 +23,7 @@ final class BidLiveWriter
 	 */
 	public static function applyAttributes(Bid $bid, array $attrs): void
 	{
-		foreach ($attrs as $key => $value) {
+		foreach (BidLiveColumnFilter::normalizeAttributeKeys($attrs) as $key => $value) {
 			if (strcasecmp((string) $key, 'ID') === 0) {
 				continue;
 			}

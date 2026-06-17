@@ -48,9 +48,9 @@ final class BidLiveColumnFilter
 		'NSN',
 	];
 
-	/** App / MySQL attribute name => live Oracle column names. */
+	/** App / MySQL attribute name => live column names (first match in schema wins). */
 	private const APP_COLUMN_ALIASES = [
-		'SOLICIATIONNUMBER' => ['SOLICITATIONNUMBER'],
+		'SOLICIATIONNUMBER' => ['SOLICITATIONNUMBER', 'SOLICIATIONNUMBER'],
 	];
 
 	/** @var array<string, true>|null null when schema unreadable */
@@ -74,6 +74,32 @@ final class BidLiveColumnFilter
 			if (self::matchesLiveColumn((string) $key)) {
 				$out[$key] = $value;
 			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Filter unknown columns and map app keys to real live table column names for insert/update.
+	 *
+	 * @param  array<string, mixed>  $attributes
+	 * @return array<string, mixed>
+	 */
+	public static function filterForWrite(array $attributes): array
+	{
+		return self::normalizeAttributeKeys(self::filter($attributes));
+	}
+
+	/**
+	 * @param  array<string, mixed>  $attributes
+	 * @return array<string, mixed>
+	 */
+	public static function normalizeAttributeKeys(array $attributes): array
+	{
+		$out = [];
+		foreach ($attributes as $key => $value) {
+			$liveKey = self::liveAttributeKeyFor((string) $key);
+			$out[$liveKey] = $value;
 		}
 
 		return $out;
