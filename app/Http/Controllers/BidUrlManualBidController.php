@@ -80,25 +80,18 @@ class BidUrlManualBidController extends Controller
 		$resolveId = (int) $request->query('id', 0);
 
 		if ($resolveId > 0) {
-			$row = BidUrl::query()
-				->where('id', $resolveId)
-				->where('user_id', $userId)
-				->first();
-
-			if (!$row) {
+			$opt = $entries->getBidUrlOptionById($resolveId);
+			if ($opt === null) {
 				return response()->json(['resolved' => null]);
 			}
+			if ($userId > 0) {
+				$row = BidUrl::find($resolveId);
+				if (!$row || (int) ($row->user_id ?? 0) !== $userId) {
+					return response()->json(['resolved' => null]);
+				}
+			}
 
-			$url = trim((string) ($row->url ?? ''));
-			$name = trim((string) ($row->name ?? ''));
-
-			return response()->json([
-				'resolved' => [
-					'id' => (int) $row->id,
-					'label' => $name !== '' ? ($name . ' — ' . $url) : $url,
-					'url' => $url,
-				],
-			]);
+			return response()->json(['resolved' => $opt]);
 		}
 
 		return response()->json([

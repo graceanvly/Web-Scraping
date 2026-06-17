@@ -195,7 +195,7 @@ class PendingBidController extends Controller
 				$request->merge([$key => null]);
 			}
 		}
-		foreach (['ENTITYID', 'CATEGORYID', 'STATEID', 'USERID'] as $key) {
+		foreach (['ENTITYID', 'CATEGORYID', 'STATEID', 'USERID', 'BID_URL_ID'] as $key) {
 			if ($request->input($key) === '' || $request->input($key) === null) {
 				$request->merge([$key => null]);
 			}
@@ -215,6 +215,7 @@ class PendingBidController extends Controller
 			'CATEGORYID' => ['nullable', 'integer'],
 			'STATEID' => ['nullable', 'integer'],
 			'USERID' => ['nullable', 'integer'],
+			'BID_URL_ID' => ['nullable', 'integer'],
 		], [
 			'TITLE.required' => 'Title is required.',
 			'ENDDATE.date' => 'End date must be a valid date.',

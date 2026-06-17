@@ -1085,6 +1085,7 @@
 
 		.ref-picker-results li { padding: 0.5rem 0.7rem; cursor: pointer; font-size: 0.85rem; }
 
+		.ref-picker-results li.ref-res-active,
 		.ref-picker-results li:hover { background: #eff6ff; }
 
 		.ref-picker-clear {
@@ -2035,9 +2036,22 @@
 					<details class="edit-field-full">
 						<summary>More IDs &amp; technical fields</summary>
 						<div class="edit-form-grid" style="margin-top:0.75rem;">
-							<div>
-								<label for="edit_bid_url_id">BID_URL_ID</label>
-								<input type="number" id="edit_bid_url_id" name="BID_URL_ID">
+							<div class="edit-field-full ref-picker" id="bidUrlPicker">
+								<label for="edit_bid_url_search">Listing URL source <span id="editBidUrlHint" style="font-weight:400; color:#6b7280;"></span></label>
+								<input type="hidden" id="edit_bid_url_id" name="BID_URL_ID">
+								<div class="ref-picker-inner">
+									<input type="search" id="edit_bid_url_search" autocomplete="off" autocorrect="off" spellcheck="false"
+										placeholder="Search configured bid URLs by name…"
+										aria-autocomplete="list" aria-expanded="false" aria-controls="edit_bid_url_results">
+									<ul id="edit_bid_url_results" class="ref-picker-results" role="listbox" hidden></ul>
+								</div>
+								<div class="ref-picker-meta" style="margin-top:0.25rem; display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center;">
+									<button type="button" id="edit_bid_url_clear"
+										style="margin:0; padding:0; border:none; background:none; cursor:pointer; color:#2563eb; text-decoration:underline; font-size:0.82rem;">
+										Clear listing URL
+									</button>
+									<span style="font-size:0.78rem; color:#6b7280;">Pick a row to set BID_URL_ID.</span>
+								</div>
 							</div>
 						</div>
 						<div class="edit-field-full" style="margin-top:0.75rem;">
@@ -2125,6 +2139,7 @@
 		const noCategoryBidsData = @json($noCategoryBidsModalData);
 		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 		const entitySearchUrl = @json(route('bids.reference.entities'));
+		const bidUrlSearchUrl = @json(route('bids.reference.bidUrls'));
 		let entityPickerReq = 0;
 		let entityPickerSelectedLabel = '';
 
@@ -2398,6 +2413,200 @@
 			});
 		}
 
+		function initRefPicker(cfg) {
+			let reqSeq = 0;
+			let selectedLabel = '';
+			let highlightIdx = -1;
+
+			function refreshHint() {
+				if (!cfg.hint) return;
+				const id = (cfg.hidden?.value || '').trim();
+				cfg.hint.textContent = (id !== '' && id !== '0') ? '· #' + id : '· none';
+			}
+
+			function hideResults() {
+				if (!cfg.results || !cfg.search) return;
+				cfg.results.hidden = true;
+				cfg.results.innerHTML = '';
+				cfg.search.setAttribute('aria-expanded', 'false');
+				highlightIdx = -1;
+			}
+
+			function highlightRows(rows, activeIdx) {
+				rows.forEach((li, i) => {
+					const on = activeIdx >= 0 && i === activeIdx;
+					li.classList.toggle('ref-res-active', on);
+					li.setAttribute('aria-selected', on ? 'true' : 'false');
+				});
+			}
+
+			function applyChoice(id, label) {
+				if (!cfg.hidden || !cfg.search) return;
+				cfg.hidden.value = String(id);
+				cfg.search.value = label;
+				selectedLabel = label;
+				refreshHint();
+				hideResults();
+				if (typeof cfg.onChange === 'function') {
+					cfg.onChange();
+				}
+			}
+
+			async function setFromId(raw) {
+				if (!cfg.hidden || !cfg.search) return;
+				selectedLabel = '';
+				hideResults();
+				const idStr = raw != null && String(raw) !== '' && String(raw) !== '0' ? String(raw) : '';
+				cfg.hidden.value = idStr;
+				if (!idStr) {
+					cfg.search.value = '';
+					refreshHint();
+					return;
+				}
+				refreshHint();
+				try {
+					const r = await fetch(cfg.searchUrl + '?id=' + encodeURIComponent(idStr), {
+						headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
+					});
+					const data = await r.json();
+					cfg.search.value = (data.resolved && data.resolved.label) ? data.resolved.label : (cfg.fallbackPrefix + idStr);
+				} catch (e) {
+					cfg.search.value = cfg.fallbackPrefix + idStr;
+				}
+				selectedLabel = cfg.search.value;
+			}
+
+			async function runSearch(query) {
+				if (!cfg.results || !cfg.search) return;
+				reqSeq += 1;
+				const seq = reqSeq;
+				let data;
+				try {
+					const r = await fetch(cfg.searchUrl + '?q=' + encodeURIComponent(query) + '&limit=' + cfg.searchLimit, {
+						headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
+					});
+					data = await r.json();
+				} catch (e) {
+					return;
+				}
+				if (seq !== reqSeq || cfg.search.value.trim() !== query) return;
+
+				cfg.results.innerHTML = '';
+				const items = Array.isArray(data.results) ? data.results : [];
+				if (!items.length) {
+					const li = document.createElement('li');
+					li.className = 'muted';
+					li.textContent = 'No matches.';
+					cfg.results.appendChild(li);
+				} else {
+					items.forEach(function (row) {
+						const li = document.createElement('li');
+						li.setAttribute('role', 'option');
+						li.dataset.refId = String(row.id);
+						const lab = row.label || (cfg.fallbackPrefix + row.id);
+						li.dataset.refLabel = lab;
+						li.textContent = lab;
+						cfg.results.appendChild(li);
+					});
+				}
+				cfg.results.hidden = false;
+				cfg.search.setAttribute('aria-expanded', 'true');
+				highlightRows([...cfg.results.children].filter((li) => li.dataset.refId), -1);
+			}
+
+			function pickableRows() {
+				return [...(cfg.results?.children || [])].filter((li) => li.dataset.refId);
+			}
+
+			if (cfg.search && cfg.results) {
+				let timer = null;
+
+				cfg.search.addEventListener('input', function () {
+					highlightIdx = -1;
+					if (selectedLabel !== '' && cfg.search.value !== selectedLabel) {
+						cfg.hidden.value = '';
+						refreshHint();
+						if (typeof cfg.onChange === 'function') {
+							cfg.onChange();
+						}
+					}
+					clearTimeout(timer);
+					const q = cfg.search.value.trim();
+					if (q.length < cfg.minChars) {
+						hideResults();
+						return;
+					}
+					timer = setTimeout(() => runSearch(q), 220);
+				});
+
+				cfg.search.addEventListener('focus', function () {
+					const q = cfg.search.value.trim();
+					if (q.length >= cfg.minChars && cfg.results.hidden) {
+						runSearch(q);
+					}
+				});
+
+				cfg.search.addEventListener('keydown', function (e) {
+					const picks = pickableRows();
+					if (!picks.length || cfg.results.hidden) return;
+					if (e.key === 'ArrowDown') {
+						e.preventDefault();
+						highlightIdx = highlightIdx < 0 || highlightIdx >= picks.length - 1 ? 0 : highlightIdx + 1;
+						highlightRows(picks, highlightIdx);
+					} else if (e.key === 'ArrowUp') {
+						e.preventDefault();
+						highlightIdx = highlightIdx <= 0 ? picks.length - 1 : highlightIdx - 1;
+						highlightRows(picks, highlightIdx);
+					} else if (e.key === 'Enter' && highlightIdx >= 0 && picks[highlightIdx]) {
+						e.preventDefault();
+						const li = picks[highlightIdx];
+						applyChoice(li.dataset.refId, li.dataset.refLabel || '');
+					} else if (e.key === 'Escape') {
+						hideResults();
+					}
+				});
+
+				cfg.search.addEventListener('blur', function () {
+					setTimeout(hideResults, 220);
+				});
+
+				cfg.results.addEventListener('mousedown', function (ev) {
+					if (ev.target.closest('li[data-ref-id]')) ev.preventDefault();
+				});
+
+				cfg.results.addEventListener('click', function (ev) {
+					const li = ev.target.closest('li[data-ref-id]');
+					if (!li) return;
+					applyChoice(li.dataset.refId, li.dataset.refLabel || '');
+				});
+			}
+
+			cfg.clearBtn?.addEventListener('click', function () {
+				if (cfg.hidden) cfg.hidden.value = '';
+				if (cfg.search) cfg.search.value = '';
+				selectedLabel = '';
+				refreshHint();
+				hideResults();
+				if (typeof cfg.onChange === 'function') {
+					cfg.onChange();
+				}
+			});
+
+			return { setFromId, hideResults };
+		}
+
+		const bidUrlPicker = initRefPicker({
+			hidden: document.getElementById('edit_bid_url_id'),
+			search: document.getElementById('edit_bid_url_search'),
+			results: document.getElementById('edit_bid_url_results'),
+			clearBtn: document.getElementById('edit_bid_url_clear'),
+			hint: document.getElementById('editBidUrlHint'),
+			searchUrl: bidUrlSearchUrl,
+			fallbackPrefix: 'Bid URL #',
+			searchLimit: 40,
+			minChars: 0,
+		});
+
 		if (document.readyState === 'loading') {
 			document.addEventListener('DOMContentLoaded', bindEntityPickerAutocomplete);
 		} else {
@@ -2488,7 +2697,7 @@
 				userSel.value = uid;
 			}
 			setNum('edit_setaside_id', b.SETASIDECODEID);
-			setNum('edit_bid_url_id', b.BID_URL_ID);
+			bidUrlPicker.setFromId(b.BID_URL_ID);
 			setNum('edit_source_id', b.SOURCE_ID);
 			setNum('edit_state_id', b.STATEID);
 			setNum('edit_category_alias_id', b.CATEGORY_ALIAS_ID);

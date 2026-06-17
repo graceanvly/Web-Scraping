@@ -35,6 +35,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/reference/entities', [BidController::class, 'referenceEntitiesSearch'])->name('bids.reference.entities');
     Route::get('/reference/states', [BidController::class, 'referenceStatesSearch'])->name('bids.reference.states');
     Route::get('/reference/categories', [BidController::class, 'referenceCategoriesSearch'])->name('bids.reference.categories');
+    Route::get('/reference/bid-urls', [BidController::class, 'referenceBidUrlsSearch'])->name('bids.reference.bidUrls');
     Route::get('/bids/manual-bid/bid-urls', [BidUrlManualBidController::class, 'searchBidUrls'])->name('bids.manualBid.searchBidUrls');
     Route::post('/bids/manual-bid/start', [BidUrlManualBidController::class, 'startFromBids'])->name('bids.manualBid.start');
     Route::post('/bids/manual-bid', [BidUrlManualBidController::class, 'storeFromBids'])->name('bids.manualBid.store');

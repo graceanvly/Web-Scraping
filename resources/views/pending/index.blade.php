@@ -404,6 +404,20 @@
 							<span>Pick a row to set CATEGORYID.</span>
 						</div>
 					</div>
+					<div class="full ref-picker" id="bidUrlPicker">
+						<label for="edit_bid_url_search">Listing URL source <span id="editBidUrlHint" class="muted" style="font-weight:400;"></span></label>
+						<input type="hidden" id="edit_bid_url_id" name="BID_URL_ID">
+						<div class="ref-picker-inner">
+							<input type="search" id="edit_bid_url_search" autocomplete="off" autocorrect="off" spellcheck="false"
+								placeholder="Search configured bid URLs by name…"
+								aria-autocomplete="list" aria-expanded="false" aria-controls="edit_bid_url_results">
+							<ul id="edit_bid_url_results" class="ref-picker-results" role="listbox" hidden></ul>
+						</div>
+						<div class="ref-picker-meta">
+							<button type="button" class="ref-picker-clear" id="edit_bid_url_clear">Clear listing URL</button>
+							<span>Pick a row to set BID_URL_ID.</span>
+						</div>
+					</div>
 					<div>
 						<label for="edit_enddate">End date</label>
 						<input type="date" id="edit_enddate" name="ENDDATE">
@@ -510,6 +524,7 @@
 			$entitySearchUrl = route('bids.reference.entities');
 			$stateSearchUrl = route('bids.reference.states');
 			$categorySearchUrl = route('bids.reference.categories');
+			$bidUrlSearchUrl = route('bids.reference.bidUrls');
 			$similarUrl = route('pending.similar');
 			$liveDetailUrlTpl = route('bids.json', ['bid' => '__ID__']);
 			$pendingDetailUrlTpl = route('pending.json', ['pendingBid' => '__ID__']);
@@ -527,6 +542,7 @@
 					'ENTITYID' => $r->ENTITYID,
 					'STATEID' => $r->STATEID,
 					'CATEGORYID' => $r->CATEGORYID,
+					'BID_URL_ID' => $r->BID_URL_ID,
 					'USERID' => $r->USERID,
 				];
 			})->values();
@@ -535,6 +551,7 @@
 		const entitySearchUrl = @json($entitySearchUrl);
 		const stateSearchUrl = @json($stateSearchUrl);
 		const categorySearchUrl = @json($categorySearchUrl);
+		const bidUrlSearchUrl = @json($bidUrlSearchUrl);
 		const similarUrl = @json($similarUrl);
 		const liveDetailUrlTpl = @json($liveDetailUrlTpl);
 		const pendingDetailUrlTpl = @json($pendingDetailUrlTpl);
@@ -583,6 +600,18 @@
 			searchUrl: categorySearchUrl,
 			fallbackPrefix: 'Category #',
 			searchLimit: 60,
+			minChars: 0,
+		});
+
+		const bidUrlPicker = initRefPicker({
+			hidden: document.getElementById('edit_bid_url_id'),
+			search: document.getElementById('edit_bid_url_search'),
+			results: document.getElementById('edit_bid_url_results'),
+			clearBtn: document.getElementById('edit_bid_url_clear'),
+			hint: document.getElementById('editBidUrlHint'),
+			searchUrl: bidUrlSearchUrl,
+			fallbackPrefix: 'Bid URL #',
+			searchLimit: 40,
 			minChars: 0,
 		});
 
@@ -978,6 +1007,7 @@
 			await entityPicker.setFromId(bid.ENTITYID);
 			await statePicker.setFromId(bid.STATEID);
 			await categoryPicker.setFromId(bid.CATEGORYID);
+			await bidUrlPicker.setFromId(bid.BID_URL_ID);
 			document.getElementById('editModal').showModal();
 			refreshSimilarPanel();
 		}

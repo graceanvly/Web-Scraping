@@ -60,15 +60,51 @@ class BidUrlManualEntryService
 	}
 
 	/**
-	 * @return array<int, array{id: int, label: string, url: string}>
+	 * @return array{id: int, label: string, url: string}|null
 	 */
-	public function searchAssignedBidUrls(int $userId, string $query, int $limit = 40): array
+	public function getBidUrlOptionById(int $id): ?array
 	{
-		if ($userId <= 0) {
-			return [];
+		if ($id < 1) {
+			return null;
 		}
 
-		$builder = BidUrl::query()->where('user_id', $userId);
+		$row = BidUrl::find($id);
+
+		return $row ? $this->bidUrlToSelectOption($row) : null;
+	}
+
+	/**
+	 * @return array{id: int, label: string, url: string}|null
+	 */
+	private function bidUrlToSelectOption(object $row): ?array
+	{
+		$url = trim((string) ($row->url ?? ''));
+		if ($url === '') {
+			return null;
+		}
+		$name = trim((string) ($row->name ?? ''));
+		$idRaw = $row->id ?? $row->ID ?? null;
+		if ($idRaw === null || $idRaw === '') {
+			return null;
+		}
+
+		return [
+			'id' => (int) $idRaw,
+			'label' => $name !== '' ? ($name . ' — ' . $url) : $url,
+			'url' => $url,
+		];
+	}
+
+	/**
+	 * @return array<int, array{id: int, label: string, url: string}>
+	 */
+	public function searchBidUrlsForSelect(string $query, int $limit = 40, ?int $userId = null): array
+	{
+		$limit = max(5, min(100, $limit));
+		$builder = BidUrl::query();
+		if ($userId !== null && $userId > 0) {
+			$builder->where('user_id', $userId);
+		}
 
 		$query = trim($query);
 		if ($query !== '') {
@@ -78,22 +114,27 @@ class BidUrlManualEntryService
 			});
 		}
 
-		$rows = $builder->orderBy('url')->limit($limit)->get();
 		$out = [];
-		foreach ($rows as $row) {
-			$url = trim((string) ($row->url ?? ''));
-			if ($url === '') {
-				continue;
+		foreach ($builder->orderBy('name')->orderBy('url')->limit($limit)->get() as $row) {
+			$opt = $this->bidUrlToSelectOption($row);
+			if ($opt !== null) {
+				$out[] = $opt;
 			}
-			$name = trim((string) ($row->name ?? ''));
-			$out[] = [
-				'id' => (int) $row->id,
-				'label' => $name !== '' ? ($name . ' — ' . $url) : $url,
-				'url' => $url,
-			];
 		}
 
 		return $out;
+	}
+
+	/**
+	 * @return array<int, array{id: int, label: string, url: string}>
+	 */
+	public function searchAssignedBidUrls(int $userId, string $query, int $limit = 40): array
+	{
+		if ($userId <= 0) {
+			return [];
+		}
+
+		return $this->searchBidUrlsForSelect($query, $limit, $userId);
 	}
 
 	public function resolveBidUrlForManualEntry(?int $bidUrlId, ?string $listingUrl): ?BidUrl

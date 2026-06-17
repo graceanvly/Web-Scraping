@@ -1369,6 +1369,38 @@ class BidController extends Controller
 		]);
 	}
 
+	/**
+	 * JSON for bid / pending edit BID_URL_ID search (authenticated).
+	 * Query params: optional id=int (single label), optional q=str, optional user_id, optional limit (10–100).
+	 */
+	public function referenceBidUrlsSearch(Request $request, BidUrlManualEntryService $entries)
+	{
+		if ($request->filled('id')) {
+			$id = (int) $request->query('id', 0);
+			$opt = $id > 0 ? $entries->getBidUrlOptionById($id) : null;
+
+			return response()->json([
+				'resolved' => $opt ? ['id' => $opt['id'], 'label' => $opt['label']] : null,
+			]);
+		}
+
+		$limit = (int) $request->query('limit', 40);
+		$limit = max(10, min(100, $limit));
+		$userId = $request->filled('user_id') ? (int) $request->query('user_id') : null;
+		if ($userId !== null && $userId <= 0) {
+			$userId = null;
+		}
+
+		$results = $entries->searchBidUrlsForSelect($request->string('q')->toString(), $limit, $userId);
+
+		return response()->json([
+			'results' => array_map(
+				static fn (array $row) => ['id' => $row['id'], 'label' => $row['label']],
+				$results
+			),
+		]);
+	}
+
 	public function update(Request $request, Bid $bid)
 	{
 		$nullableStrings = ['DESCRIPTION', 'EMAIL', 'URL', 'NAICSCODE', 'SOLICIATIONNUMBER', 'THIRD_PARTY_IDENTIFIER', 'NSN', 'INLINEURL', 'COUNTRY_ID', 'raw_html', 'extracted_json'];
