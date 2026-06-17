@@ -2,7 +2,9 @@
 
 namespace Tests\Unit;
 
+use App\Models\Bid;
 use App\Models\TempBid;
+use App\Support\BidLiveColumnFilter;
 use App\Support\PendingBidLiveMapper;
 use ReflectionClass;
 use Tests\TestCase;
@@ -52,7 +54,7 @@ class PendingBidLiveMapperTest extends TestCase
 
 	public function test_mapper_uses_schema_column_casing_and_keeps_reference_ids(): void
 	{
-		$this->stubBidColumnMap(['ID', 'TITLE', 'ENTITYID', 'STATEID', 'BID_URL_ID', 'LAST_MODIFIED']);
+		$this->stubBidColumnMap(['id', 'title', 'entityid', 'stateid', 'bid_url_id', 'last_modified']);
 
 		$temp = new TempBid([
 			'TITLE' => 'Test bid',
@@ -65,15 +67,21 @@ class PendingBidLiveMapperTest extends TestCase
 		$attrs = PendingBidLiveMapper::attributesForInsert($temp);
 
 		$this->assertArrayNotHasKey('raw_html', $attrs);
+		$this->assertSame('Test bid', $attrs['TITLE']);
 		$this->assertSame(34309, $attrs['ENTITYID']);
 		$this->assertSame(7, $attrs['STATEID']);
 		$this->assertSame(1171, $attrs['BID_URL_ID']);
 		$this->assertArrayHasKey('LAST_MODIFIED', $attrs);
+
+		$bid = new Bid();
+		$bid->fill(PendingBidLiveMapper::withoutPrimaryKey($attrs));
+		$this->assertSame('Test bid', $bid->getAttribute('TITLE'));
+		$this->assertSame(34309, (int) $bid->getAttribute('ENTITYID'));
 	}
 
 	public function test_mapper_always_sets_title_when_missing_from_schema_map(): void
 	{
-		$this->stubBidColumnMap(['ID', 'ENTITYID', 'STATEID', 'LAST_MODIFIED']);
+		$this->stubBidColumnMap(['id', 'entityid', 'stateid', 'last_modified']);
 
 		$temp = new TempBid([
 			'TITLE' => 'Roof replacement project',
@@ -83,5 +91,6 @@ class PendingBidLiveMapperTest extends TestCase
 		$attrs = PendingBidLiveMapper::attributesForInsert($temp);
 
 		$this->assertSame('Roof replacement project', $attrs['TITLE']);
+		$this->assertFalse(BidLiveColumnFilter::hasColumn('TITLE'));
 	}
 }

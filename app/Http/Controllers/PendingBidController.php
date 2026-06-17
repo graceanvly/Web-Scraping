@@ -274,7 +274,7 @@ class PendingBidController extends Controller
 			$attrs = PendingBidLiveMapper::attributesForInsert($pendingBid);
 
 			$bid = new Bid();
-			$bid->fill($attrs);
+			$bid->fill(PendingBidLiveMapper::withoutPrimaryKey($attrs));
 			$bid->save();
 
 			Log::info('Pending bid promoted to live', [

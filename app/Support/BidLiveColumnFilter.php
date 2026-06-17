@@ -7,8 +7,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Drop attribute keys that are not real columns on the live bid table (Oracle vs MySQL),
- * and map surviving keys to the exact column names returned by the database schema.
+ * Drop attribute keys that are not real columns on the live bid table (Oracle vs MySQL).
+ * Preserves the caller's attribute key casing so Eloquent fill() matches $fillable.
  */
 final class BidLiveColumnFilter
 {
@@ -32,7 +32,7 @@ final class BidLiveColumnFilter
 		foreach ($attributes as $key => $value) {
 			$lower = strtolower((string) $key);
 			if (isset($map[$lower])) {
-				$out[$map[$lower]] = $value;
+				$out[$key] = $value;
 			}
 		}
 
@@ -47,6 +47,16 @@ final class BidLiveColumnFilter
 		}
 
 		return $map[strtolower($preferred)] ?? null;
+	}
+
+	public static function hasColumn(string $preferred): bool
+	{
+		$map = self::columnMap();
+		if ($map === null) {
+			return true;
+		}
+
+		return isset($map[strtolower($preferred)]);
 	}
 
 	/**

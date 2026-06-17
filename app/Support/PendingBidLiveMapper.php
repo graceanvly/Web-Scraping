@@ -43,13 +43,10 @@ final class PendingBidLiveMapper
 		if ($title === '') {
 			throw new \RuntimeException('Pending bid title is required before promoting to live.');
 		}
-		$titleCol = BidLiveColumnFilter::resolveColumnName('TITLE') ?? 'TITLE';
-		$attrs[$titleCol] = mb_substr($title, 0, 255);
+		$attrs['TITLE'] = mb_substr($title, 0, 255);
+		$attrs['LAST_MODIFIED'] = now();
 
-		$lastModCol = BidLiveColumnFilter::resolveColumnName('LAST_MODIFIED') ?? 'LAST_MODIFIED';
-		$attrs[$lastModCol] = now();
-
-		return $attrs;
+		return self::normalizeFillableKeys($attrs);
 	}
 
 	/**
@@ -58,13 +55,7 @@ final class PendingBidLiveMapper
 	 */
 	private static function mergeColumn(array $attrs, TempBid $pendingBid, string $logical): array
 	{
-		$val = $pendingBid->getAttribute($logical);
-		if ($val === null || $val === '') {
-			return $attrs;
-		}
-
-		$col = BidLiveColumnFilter::resolveColumnName($logical);
-		if ($col === null) {
+		if (!BidLiveColumnFilter::hasColumn($logical)) {
 			if ($logical === 'TITLE') {
 				Log::warning('Pending promote: TITLE missing from live BID schema listing', [
 					'temp_id' => $pendingBid->id,
@@ -74,7 +65,12 @@ final class PendingBidLiveMapper
 			return $attrs;
 		}
 
-		$attrs[$col] = self::castValue($logical, $val);
+		$val = $pendingBid->getAttribute($logical);
+		if ($val === null || $val === '') {
+			return $attrs;
+		}
+
+		$attrs[$logical] = self::castValue($logical, $val);
 
 		return $attrs;
 	}
@@ -86,6 +82,22 @@ final class PendingBidLiveMapper
 		}
 
 		return $val;
+	}
+
+	/**
+	 * Uppercase keys so they match Bid::$fillable (Eloquent fill is case-sensitive).
+	 *
+	 * @param  array<string, mixed>  $attrs
+	 * @return array<string, mixed>
+	 */
+	private static function normalizeFillableKeys(array $attrs): array
+	{
+		$out = [];
+		foreach ($attrs as $key => $value) {
+			$out[strtoupper((string) $key)] = $value;
+		}
+
+		return $out;
 	}
 
 	/**
