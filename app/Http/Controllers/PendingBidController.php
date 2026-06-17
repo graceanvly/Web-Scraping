@@ -7,7 +7,7 @@ use App\Models\TempBid;
 use App\Services\BidReferenceLookupService;
 use App\Services\PendingSimilarEntriesService;
 use App\Support\BidDetailPayload;
-use App\Support\BidLiveColumnFilter;
+use App\Support\PendingBidLiveMapper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -106,6 +106,7 @@ class PendingBidController extends Controller
 		if ($request->boolean('edit_modal') || $request->has('TITLE')) {
 			$this->applyEditableFields($request, $pendingBid);
 			$pendingBid->save();
+			$pendingBid->refresh();
 		} else {
 			if ($request->filled('ENTITYID') && is_numeric($request->input('ENTITYID'))) {
 				$pendingBid->ENTITYID = (int) $request->input('ENTITYID');
@@ -115,7 +116,10 @@ class PendingBidController extends Controller
 			}
 		}
 
-		$result = $this->promoteToLive($pendingBid);
+		$result = $this->promoteToLive(
+			$pendingBid,
+			$request->boolean('edit_modal') || $request->has('TITLE'),
+		);
 
 		$msg = $result === 'duplicate'
 			? 'That bid is already live — removed from the queue.'
@@ -222,29 +226,59 @@ class PendingBidController extends Controller
 		]);
 
 		$validated['LAST_MODIFIED'] = now();
+		foreach (['ENTITYID', 'CATEGORYID', 'STATEID', 'USERID', 'BID_URL_ID'] as $key) {
+			if (array_key_exists($key, $validated) && $validated[$key] !== null) {
+				$validated[$key] = (int) $validated[$key];
+			}
+		}
 		$pendingBid->fill($validated);
+	}
+
+	private function applyPendingAttrsToLiveBid(TempBid $pendingBid, Bid $existing): void
+	{
+		$existing->fill(PendingBidLiveMapper::withoutPrimaryKey(
+			PendingBidLiveMapper::attributesForInsert($pendingBid)
+		));
+		$existing->save();
 	}
 
 	/**
 	 * Copy a pending bid into the live `bid` table and remove it from the queue.
 	 * Returns 'approved' or 'duplicate' (already live — temp row is dropped either way).
 	 */
-	private function promoteToLive(TempBid $pendingBid): string
+	private function promoteToLive(TempBid $pendingBid, bool $fromEditModal = false): string
 	{
-		return DB::transaction(function () use ($pendingBid) {
-			if ($this->liveBidExists($pendingBid)) {
+		return DB::transaction(function () use ($pendingBid, $fromEditModal) {
+			$existing = $this->findMatchingLiveBid($pendingBid);
+			if ($existing !== null) {
+				if ($fromEditModal) {
+					$this->applyPendingAttrsToLiveBid($pendingBid, $existing);
+					Log::info('Pending approve: updated existing live bid from edit modal', [
+						'temp_id' => $pendingBid->id,
+						'live_id' => $existing->getKey(),
+						'entityid' => $existing->getAttribute('ENTITYID'),
+						'stateid' => $existing->getAttribute('STATEID'),
+						'bid_url_id' => $existing->getAttribute('BID_URL_ID'),
+					]);
+				}
 				$pendingBid->delete();
 
 				return 'duplicate';
 			}
 
-			$attrs = BidLiveColumnFilter::filter($pendingBid->toLiveBidAttributes());
-			$attrs['LAST_MODIFIED'] = now();
+			$attrs = PendingBidLiveMapper::attributesForInsert($pendingBid);
 
-			// Bid's creating hook assigns the Oracle sequence id + production defaults.
 			$bid = new Bid();
 			$bid->fill($attrs);
 			$bid->save();
+
+			Log::info('Pending bid promoted to live', [
+				'temp_id' => $pendingBid->id,
+				'live_id' => $bid->getKey(),
+				'entityid' => $bid->getAttribute('ENTITYID'),
+				'stateid' => $bid->getAttribute('STATEID'),
+				'bid_url_id' => $bid->getAttribute('BID_URL_ID'),
+			]);
 
 			$pendingBid->delete();
 
@@ -252,11 +286,11 @@ class PendingBidController extends Controller
 		});
 	}
 
-	private function liveBidExists(TempBid $pendingBid): bool
+	private function findMatchingLiveBid(TempBid $pendingBid): ?Bid
 	{
 		$title = (string) ($pendingBid->TITLE ?? '');
 		if ($title === '') {
-			return false;
+			return null;
 		}
 		$url = (string) ($pendingBid->URL ?? '');
 		$endDate = $pendingBid->ENDDATE ? (string) $pendingBid->ENDDATE : null;
@@ -274,6 +308,11 @@ class PendingBidController extends Controller
 					$q->orWhere('ENDDATE', $endDate);
 				}
 			})
-			->exists();
+			->first();
+	}
+
+	private function liveBidExists(TempBid $pendingBid): bool
+	{
+		return $this->findMatchingLiveBid($pendingBid) !== null;
 	}
 }

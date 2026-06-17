@@ -41,7 +41,16 @@ class Bid extends Model
 			}
 
 			foreach ($defaults as $col => $default) {
-				if (is_null($bid->getAttribute($col))) {
+				$hasKey = false;
+				$val = null;
+				foreach ($bid->getAttributes() as $k => $v) {
+					if (strcasecmp((string) $k, $col) === 0) {
+						$hasKey = true;
+						$val = $v;
+						break;
+					}
+				}
+				if (!$hasKey || $val === null) {
 					$bid->setAttribute($col, $default);
 				}
 			}

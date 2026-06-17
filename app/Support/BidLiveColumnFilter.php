@@ -7,60 +7,90 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Drop attribute keys that are not real columns on the live bid table (Oracle vs MySQL).
+ * Drop attribute keys that are not real columns on the live bid table (Oracle vs MySQL),
+ * and map surviving keys to the exact column names returned by the database schema.
  */
 final class BidLiveColumnFilter
 {
-	/** @var array<string, true>|null|null when schema unreadable */
+	/** @var array<string, true>|null null when schema unreadable */
 	private static ?array $allowedLower = null;
+
+	/** @var array<string, string>|null lower => actual column name */
+	private static ?array $columnMapLower = null;
 
 	/** @var bool */
 	private static bool $schemaResolved = false;
 
 	public static function filter(array $attributes): array
 	{
-		$allowed = self::allowedLowerKeys();
-		if ($allowed === null) {
+		$map = self::columnMap();
+		if ($map === null) {
 			return $attributes;
 		}
+
 		$out = [];
 		foreach ($attributes as $key => $value) {
-			if (isset($allowed[strtolower((string) $key)])) {
-				$out[$key] = $value;
+			$lower = strtolower((string) $key);
+			if (isset($map[$lower])) {
+				$out[$map[$lower]] = $value;
 			}
 		}
 
 		return $out;
 	}
 
+	public static function resolveColumnName(string $preferred): ?string
+	{
+		$map = self::columnMap();
+		if ($map === null) {
+			return $preferred;
+		}
+
+		return $map[strtolower($preferred)] ?? null;
+	}
+
 	/**
-	 * @return array<string, true>|null null = allow all (schema unreadable)
+	 * @return array<string, string>|null null = schema unreadable (caller may pass attrs through)
 	 */
-	private static function allowedLowerKeys(): ?array
+	private static function columnMap(): ?array
+	{
+		self::resolveSchema();
+
+		return self::$columnMapLower;
+	}
+
+	private static function resolveSchema(): void
 	{
 		if (self::$schemaResolved) {
-			return self::$allowedLower;
+			return;
 		}
 		self::$schemaResolved = true;
+
 		try {
 			$listing = Schema::getColumnListing((new Bid())->getTable());
 		} catch (\Throwable $e) {
 			Log::warning('BidLiveColumnFilter: could not read bid table columns', ['error' => $e->getMessage()]);
 			self::$allowedLower = null;
+			self::$columnMapLower = null;
 
-			return null;
+			return;
 		}
+
 		if ($listing === []) {
 			self::$allowedLower = null;
+			self::$columnMapLower = null;
 
-			return null;
+			return;
 		}
+
 		$allowed = [];
+		$map = [];
 		foreach ($listing as $col) {
-			$allowed[strtolower((string) $col)] = true;
+			$lower = strtolower((string) $col);
+			$allowed[$lower] = true;
+			$map[$lower] = (string) $col;
 		}
 		self::$allowedLower = $allowed;
-
-		return self::$allowedLower;
+		self::$columnMapLower = $map;
 	}
 }

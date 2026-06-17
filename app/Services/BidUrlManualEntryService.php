@@ -7,7 +7,7 @@ use App\Models\BidUrl;
 use App\Models\BidUrlHistory;
 use App\Models\FailedBidUrl;
 use App\Models\TempBid;
-use App\Support\BidLiveColumnFilter;
+use App\Support\PendingBidLiveMapper;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -341,7 +341,7 @@ class BidUrlManualEntryService
 		}
 
 		$bid = new Bid();
-		$bid->fill(BidLiveColumnFilter::filter($temp->toLiveBidAttributes()));
+		$bid->fill(PendingBidLiveMapper::attributesForInsert($temp));
 		$bid->LAST_MODIFIED = now();
 		$bid->save();
 		$temp->delete();

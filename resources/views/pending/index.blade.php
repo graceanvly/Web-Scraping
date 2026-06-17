@@ -996,6 +996,12 @@
 		document.getElementById('editForm')?.addEventListener('submit', function (ev) {
 			const isApprove = ev.submitter && ev.submitter.id === 'saveApproveBtn';
 			syncEditFormSubmitTarget(isApprove);
+			['edit_entity_id', 'edit_state_id', 'edit_bid_url_id'].forEach(function (id) {
+				const el = document.getElementById(id);
+				if (el && String(el.value).trim() === '0') {
+					el.value = '';
+				}
+			});
 		});
 
 		async function openEdit(idx) {
