@@ -54,8 +54,12 @@ final class BidLiveWriter
 		}
 
 		if ($patch === []) {
+			PendingBidApproveLogger::referencePatch($bid, [], 'skipped_empty');
+
 			return;
 		}
+
+		PendingBidApproveLogger::referencePatch($bid, $patch, 'before');
 
 		$table = $bid->getTable();
 		$pkColumn = BidLiveColumnFilter::resolveColumnName('ID') ?? 'ID';
@@ -74,6 +78,8 @@ final class BidLiveWriter
 		foreach ($patch as $column => $value) {
 			$bid->setAttribute($column, $value);
 		}
+
+		PendingBidApproveLogger::referencePatch($bid, $patch, 'after');
 	}
 
 	/**

@@ -358,6 +358,7 @@
 				@csrf
 				<input type="hidden" name="_method" id="edit_method" value="PUT">
 				<input type="hidden" name="edit_modal" value="1">
+				<input type="hidden" id="edit_approve_action" name="approve_action" value="">
 				<input type="hidden" name="search" value="{{ $search }}">
 				<input type="hidden" name="page" value="{{ $pending->currentPage() }}">
 
@@ -1014,6 +1015,10 @@
 
 		function prepareEditFormSubmit(isApprove) {
 			syncEditFormSubmitTarget(isApprove);
+			const approveAction = document.getElementById('edit_approve_action');
+			if (approveAction) {
+				approveAction.value = isApprove ? '1' : '';
+			}
 			entityPicker.ensureHiddenForSubmit();
 			statePicker.ensureHiddenForSubmit();
 			categoryPicker.ensureHiddenForSubmit();
@@ -1049,6 +1054,9 @@
 			currentPendingId = bid.id;
 			currentUpdateUrl = updateUrlTpl.replace('__ID__', bid.id);
 			currentApproveUrl = approveUrlTpl.replace('__ID__', bid.id);
+			pendingEditSubmitIsApprove = false;
+			const approveAction = document.getElementById('edit_approve_action');
+			if (approveAction) approveAction.value = '';
 			syncEditFormSubmitTarget(false);
 
 			document.getElementById('edit_title').value = bid.TITLE || '';

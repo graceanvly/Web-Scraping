@@ -8,6 +8,7 @@ use App\Services\BidReferenceLookupService;
 use App\Services\PendingSimilarEntriesService;
 use App\Support\BidDetailPayload;
 use App\Support\BidLiveWriter;
+use App\Support\PendingBidApproveLogger;
 use App\Support\PendingBidLiveMapper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -93,6 +94,17 @@ class PendingBidController extends Controller
 
 	public function update(Request $request, TempBid $pendingBid)
 	{
+		PendingBidApproveLogger::updateReceived($request, $pendingBid);
+
+		if ((string) $request->input('approve_action') === '1') {
+			PendingBidApproveLogger::requestReceived($request, $pendingBid);
+			Log::warning('Pending approve: routed_to_update_with_approve_action — delegating to approve()', [
+				'temp_id' => $pendingBid->id,
+			]);
+
+			return $this->approve($request, $pendingBid);
+		}
+
 		$this->applyEditableFields($request, $pendingBid);
 		$this->applyReferenceIdsFromRequest($request, $pendingBid);
 		$pendingBid->save();
@@ -103,9 +115,11 @@ class PendingBidController extends Controller
 
 	public function approve(Request $request, TempBid $pendingBid)
 	{
+		PendingBidApproveLogger::requestReceived($request, $pendingBid);
+
 		// Edit modal sets edit_modal=1 and posts ENTITYID, STATEID, BID_URL_ID, etc.
 		// Row-level "Approve" only carries entity/user (or nothing).
-		if ($request->boolean('edit_modal') || $request->has('TITLE')) {
+		if ($request->boolean('edit_modal') || $request->has('TITLE') || (string) $request->input('approve_action') === '1') {
 			$this->applyEditableFields($request, $pendingBid);
 			$this->applyReferenceIdsFromRequest($request, $pendingBid);
 			$pendingBid->save();
@@ -119,11 +133,17 @@ class PendingBidController extends Controller
 		}
 
 		$referenceIds = $this->extractReferenceIds($request);
+		PendingBidApproveLogger::tempRowPrepared($pendingBid, $referenceIds);
+
+		$fromEditModal = $request->boolean('edit_modal')
+			|| $request->has('TITLE')
+			|| (string) $request->input('approve_action') === '1'
+			|| $this->hasReferenceIdOverrides($referenceIds);
 
 		try {
 			$result = $this->promoteToLive(
 				$pendingBid,
-				$request->boolean('edit_modal') || $request->has('TITLE'),
+				$fromEditModal,
 				$referenceIds,
 			);
 		} catch (\RuntimeException $e) {
@@ -284,12 +304,27 @@ class PendingBidController extends Controller
 		return $out;
 	}
 
+	/** @param  array<string, int|null>  $referenceIds */
+	private function hasReferenceIdOverrides(array $referenceIds): bool
+	{
+		foreach (['ENTITYID', 'STATEID', 'BID_URL_ID', 'CATEGORYID'] as $key) {
+			if (!empty($referenceIds[$key])) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	private function applyPendingAttrsToLiveBid(TempBid $pendingBid, Bid $existing, array $referenceIds = []): void
 	{
 		$attrs = PendingBidLiveMapper::attributesForInsert($pendingBid, $referenceIds);
+		PendingBidApproveLogger::promoteAttrsBuilt((int) $pendingBid->id, $referenceIds, $attrs);
 		BidLiveWriter::applyAttributes($existing, PendingBidLiveMapper::withoutPrimaryKey($attrs));
+		PendingBidApproveLogger::bidModelBeforeSave($existing, 'duplicate_update');
 		$existing->save();
 		BidLiveWriter::patchReferenceIds($existing, $attrs);
+		PendingBidApproveLogger::verifyLiveRow($existing, 'duplicate_update');
 	}
 
 	/**
@@ -301,15 +336,20 @@ class PendingBidController extends Controller
 		return DB::transaction(function () use ($pendingBid, $fromEditModal, $referenceIds) {
 			$existing = $this->findMatchingLiveBid($pendingBid);
 			if ($existing !== null) {
+				$liveId = $existing->getKey();
 				if ($fromEditModal) {
+					PendingBidApproveLogger::duplicateMatched((int) $pendingBid->id, $liveId ?? 0, true);
 					$this->applyPendingAttrsToLiveBid($pendingBid, $existing, $referenceIds);
 					Log::info('Pending approve: updated existing live bid from edit modal', [
 						'temp_id' => $pendingBid->id,
-						'live_id' => $existing->getKey(),
+						'live_id' => $liveId,
 						'entityid' => $existing->getAttribute('ENTITYID'),
 						'stateid' => $existing->getAttribute('STATEID'),
 						'bid_url_id' => $existing->getAttribute('BID_URL_ID'),
 					]);
+				} else {
+					PendingBidApproveLogger::duplicateMatched((int) $pendingBid->id, $liveId ?? 0, false);
+					PendingBidApproveLogger::duplicateSkipped((int) $pendingBid->id, $liveId ?? 0);
 				}
 				$pendingBid->delete();
 
@@ -317,6 +357,7 @@ class PendingBidController extends Controller
 			}
 
 			$attrs = PendingBidLiveMapper::attributesForInsert($pendingBid, $referenceIds);
+			PendingBidApproveLogger::promoteAttrsBuilt((int) $pendingBid->id, $referenceIds, $attrs);
 
 			Log::info('Pending bid promote attrs', [
 				'temp_id' => $pendingBid->id,
@@ -331,8 +372,10 @@ class PendingBidController extends Controller
 
 			$bid = new Bid();
 			BidLiveWriter::applyAttributes($bid, PendingBidLiveMapper::withoutPrimaryKey($attrs));
+			PendingBidApproveLogger::bidModelBeforeSave($bid, 'insert');
 			$bid->save();
 			BidLiveWriter::patchReferenceIds($bid, $attrs);
+			PendingBidApproveLogger::verifyLiveRow($bid, 'insert');
 
 			Log::info('Pending bid promoted to live', [
 				'temp_id' => $pendingBid->id,
