@@ -5,13 +5,18 @@ namespace App\Support;
 use App\Models\Bid;
 use App\Models\TempBid;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
 
 /** Structured diagnostics for pending bid approve / promote. */
 final class PendingBidApproveLogger
 {
+	private const ENABLED = false;
+
 	public static function requestReceived(Request $request, TempBid $pendingBid): void
 	{
+		if (!self::ENABLED) {
+			return;
+		}
+
 		self::info('request_received', [
 			'temp_id' => $pendingBid->id,
 			'route' => $request->route()?->getName(),
@@ -32,6 +37,10 @@ final class PendingBidApproveLogger
 
 	public static function tempRowPrepared(TempBid $pendingBid, array $referenceIds): void
 	{
+		if (!self::ENABLED) {
+			return;
+		}
+
 		self::info('temp_row_before_promote', [
 			'temp_id' => $pendingBid->id,
 			'title' => $pendingBid->getAttribute('TITLE'),
@@ -48,6 +57,10 @@ final class PendingBidApproveLogger
 	 */
 	public static function promoteAttrsBuilt(int $tempId, array $referenceIds, array $attrs): void
 	{
+		if (!self::ENABLED) {
+			return;
+		}
+
 		self::info('promote_attrs_built', [
 			'temp_id' => $tempId,
 			'request_entityid' => $referenceIds['ENTITYID'] ?? null,
@@ -63,6 +76,10 @@ final class PendingBidApproveLogger
 
 	public static function bidModelBeforeSave(Bid $bid, string $context): void
 	{
+		if (!self::ENABLED) {
+			return;
+		}
+
 		$attrs = $bid->getAttributes();
 		self::info('bid_model_before_save', [
 			'context' => $context,
@@ -81,6 +98,10 @@ final class PendingBidApproveLogger
 	 */
 	public static function referencePatch(Bid $bid, array $patch, string $phase): void
 	{
+		if (!self::ENABLED) {
+			return;
+		}
+
 		self::info('reference_patch_' . $phase, [
 			'live_id' => $bid->getKey(),
 			'patch' => $patch,
@@ -89,6 +110,10 @@ final class PendingBidApproveLogger
 
 	public static function duplicateMatched(int $tempId, int|string $liveId, bool $willUpdate): void
 	{
+		if (!self::ENABLED) {
+			return;
+		}
+
 		self::info('duplicate_live_bid_matched', [
 			'temp_id' => $tempId,
 			'live_id' => $liveId,
@@ -98,6 +123,10 @@ final class PendingBidApproveLogger
 
 	public static function duplicateSkipped(int $tempId, int|string $liveId): void
 	{
+		if (!self::ENABLED) {
+			return;
+		}
+
 		self::warning('duplicate_live_bid_skipped_update', [
 			'temp_id' => $tempId,
 			'live_id' => $liveId,
@@ -107,6 +136,10 @@ final class PendingBidApproveLogger
 
 	public static function verifyLiveRow(Bid $bid, string $context): void
 	{
+		if (!self::ENABLED) {
+			return;
+		}
+
 		$pk = $bid->getKey();
 		if ($pk === null || $pk === '') {
 			self::warning('verify_live_row_no_pk', ['context' => $context]);
@@ -133,6 +166,10 @@ final class PendingBidApproveLogger
 
 	public static function updateReceived(Request $request, TempBid $pendingBid): void
 	{
+		if (!self::ENABLED) {
+			return;
+		}
+
 		self::info('update_request_received', [
 			'temp_id' => $pendingBid->id,
 			'approve_action' => $request->input('approve_action'),
@@ -158,11 +195,11 @@ final class PendingBidApproveLogger
 
 	private static function info(string $stage, array $context): void
 	{
-		Log::info('Pending approve: ' . $stage, $context);
+		// Log::info('Pending approve: ' . $stage, $context);
 	}
 
 	private static function warning(string $stage, array $context): void
 	{
-		Log::warning('Pending approve: ' . $stage, $context);
+		// Log::warning('Pending approve: ' . $stage, $context);
 	}
 }

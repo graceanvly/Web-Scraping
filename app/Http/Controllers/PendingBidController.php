@@ -98,9 +98,9 @@ class PendingBidController extends Controller
 
 		if ((string) $request->input('approve_action') === '1') {
 			PendingBidApproveLogger::requestReceived($request, $pendingBid);
-			Log::warning('Pending approve: routed_to_update_with_approve_action — delegating to approve()', [
-				'temp_id' => $pendingBid->id,
-			]);
+			// Log::warning('Pending approve: routed_to_update_with_approve_action — delegating to approve()', [
+			// 	'temp_id' => $pendingBid->id,
+			// ]);
 
 			return $this->approve($request, $pendingBid);
 		}
@@ -340,13 +340,13 @@ class PendingBidController extends Controller
 				if ($fromEditModal) {
 					PendingBidApproveLogger::duplicateMatched((int) $pendingBid->id, $liveId ?? 0, true);
 					$this->applyPendingAttrsToLiveBid($pendingBid, $existing, $referenceIds);
-					Log::info('Pending approve: updated existing live bid from edit modal', [
-						'temp_id' => $pendingBid->id,
-						'live_id' => $liveId,
-						'entityid' => $existing->getAttribute('ENTITYID'),
-						'stateid' => $existing->getAttribute('STATEID'),
-						'bid_url_id' => $existing->getAttribute('BID_URL_ID'),
-					]);
+					// Log::info('Pending approve: updated existing live bid from edit modal', [
+					// 	'temp_id' => $pendingBid->id,
+					// 	'live_id' => $liveId,
+					// 	'entityid' => $existing->getAttribute('ENTITYID'),
+					// 	'stateid' => $existing->getAttribute('STATEID'),
+					// 	'bid_url_id' => $existing->getAttribute('BID_URL_ID'),
+					// ]);
 				} else {
 					PendingBidApproveLogger::duplicateMatched((int) $pendingBid->id, $liveId ?? 0, false);
 					PendingBidApproveLogger::duplicateSkipped((int) $pendingBid->id, $liveId ?? 0);
@@ -359,16 +359,16 @@ class PendingBidController extends Controller
 			$attrs = PendingBidLiveMapper::attributesForInsert($pendingBid, $referenceIds);
 			PendingBidApproveLogger::promoteAttrsBuilt((int) $pendingBid->id, $referenceIds, $attrs);
 
-			Log::info('Pending bid promote attrs', [
-				'temp_id' => $pendingBid->id,
-				'request_entityid' => $referenceIds['ENTITYID'] ?? null,
-				'request_stateid' => $referenceIds['STATEID'] ?? null,
-				'request_bid_url_id' => $referenceIds['BID_URL_ID'] ?? null,
-				'entityid' => $attrs['ENTITYID'] ?? null,
-				'stateid' => $attrs['STATEID'] ?? null,
-				'bid_url_id' => $attrs['BID_URL_ID'] ?? null,
-				'categoryid' => $attrs['CATEGORYID'] ?? null,
-			]);
+			// Log::info('Pending bid promote attrs', [
+			// 	'temp_id' => $pendingBid->id,
+			// 	'request_entityid' => $referenceIds['ENTITYID'] ?? null,
+			// 	'request_stateid' => $referenceIds['STATEID'] ?? null,
+			// 	'request_bid_url_id' => $referenceIds['BID_URL_ID'] ?? null,
+			// 	'entityid' => $attrs['ENTITYID'] ?? null,
+			// 	'stateid' => $attrs['STATEID'] ?? null,
+			// 	'bid_url_id' => $attrs['BID_URL_ID'] ?? null,
+			// 	'categoryid' => $attrs['CATEGORYID'] ?? null,
+			// ]);
 
 			$bid = new Bid();
 			BidLiveWriter::applyAttributes($bid, PendingBidLiveMapper::withoutPrimaryKey($attrs));
@@ -377,13 +377,13 @@ class PendingBidController extends Controller
 			BidLiveWriter::patchReferenceIds($bid, $attrs);
 			PendingBidApproveLogger::verifyLiveRow($bid, 'insert');
 
-			Log::info('Pending bid promoted to live', [
-				'temp_id' => $pendingBid->id,
-				'live_id' => $bid->getKey(),
-				'entityid' => $bid->getAttribute('ENTITYID'),
-				'stateid' => $bid->getAttribute('STATEID'),
-				'bid_url_id' => $bid->getAttribute('BID_URL_ID'),
-			]);
+			// Log::info('Pending bid promoted to live', [
+			// 	'temp_id' => $pendingBid->id,
+			// 	'live_id' => $bid->getKey(),
+			// 	'entityid' => $bid->getAttribute('ENTITYID'),
+			// 	'stateid' => $bid->getAttribute('STATEID'),
+			// 	'bid_url_id' => $bid->getAttribute('BID_URL_ID'),
+			// ]);
 
 			$pendingBid->delete();
 

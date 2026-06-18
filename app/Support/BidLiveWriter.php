@@ -54,12 +54,12 @@ final class BidLiveWriter
 		}
 
 		if ($patch === []) {
-			PendingBidApproveLogger::referencePatch($bid, [], 'skipped_empty');
+			// PendingBidApproveLogger::referencePatch($bid, [], 'skipped_empty');
 
 			return;
 		}
 
-		PendingBidApproveLogger::referencePatch($bid, $patch, 'before');
+		// PendingBidApproveLogger::referencePatch($bid, $patch, 'before');
 
 		$table = $bid->getTable();
 		$pkColumn = BidLiveColumnFilter::resolveColumnName('ID') ?? 'ID';
@@ -79,7 +79,7 @@ final class BidLiveWriter
 			$bid->setAttribute($column, $value);
 		}
 
-		PendingBidApproveLogger::referencePatch($bid, $patch, 'after');
+		// PendingBidApproveLogger::referencePatch($bid, $patch, 'after');
 	}
 
 	/**
