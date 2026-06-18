@@ -2028,9 +2028,19 @@
 						<label for="edit_source_id">SOURCEID <span style="font-weight:400; color:#6b7280;">(SOURCE_ID)</span></label>
 						<input type="number" id="edit_source_id" name="SOURCE_ID">
 					</div>
-					<div>
-						<label for="edit_state_id">STATEID</label>
-						<input type="number" id="edit_state_id" name="STATEID">
+					<div class="edit-field-full ref-picker" id="statePicker">
+						<label for="edit_state_search">State <span id="editStateHint" style="font-weight:400; color:#6b7280;"></span></label>
+						<input type="hidden" id="edit_state_id" name="STATEID">
+						<div class="ref-picker-inner">
+							<input type="search" id="edit_state_search" autocomplete="off" autocorrect="off" spellcheck="false"
+								placeholder="Search states by name or abbreviation (e.g. MD)…"
+								aria-autocomplete="list" aria-expanded="false" aria-controls="edit_state_results">
+							<ul id="edit_state_results" class="ref-picker-results" role="listbox" hidden></ul>
+						</div>
+						<div class="ref-picker-meta" style="margin-top:0.25rem; display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center;">
+							<button type="button" id="edit_state_clear" class="ref-picker-clear">Clear state</button>
+							<span style="font-size:0.78rem; color:#6b7280;">Pick a row to set STATEID.</span>
+						</div>
 					</div>
 
 					<details class="edit-field-full">
@@ -2139,6 +2149,7 @@
 		const noCategoryBidsData = @json($noCategoryBidsModalData);
 		const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 		const entitySearchUrl = @json(route('bids.reference.entities'));
+		const stateSearchUrl = @json(route('bids.reference.states'));
 		const bidUrlSearchUrl = @json(route('bids.reference.bidUrls'));
 		let entityPickerReq = 0;
 		let entityPickerSelectedLabel = '';
@@ -2607,6 +2618,18 @@
 			minChars: 0,
 		});
 
+		const statePicker = initRefPicker({
+			hidden: document.getElementById('edit_state_id'),
+			search: document.getElementById('edit_state_search'),
+			results: document.getElementById('edit_state_results'),
+			clearBtn: document.getElementById('edit_state_clear'),
+			hint: document.getElementById('editStateHint'),
+			searchUrl: stateSearchUrl,
+			fallbackPrefix: 'State #',
+			searchLimit: 60,
+			minChars: 0,
+		});
+
 		if (document.readyState === 'loading') {
 			document.addEventListener('DOMContentLoaded', bindEntityPickerAutocomplete);
 		} else {
@@ -2699,7 +2722,7 @@
 			setNum('edit_setaside_id', b.SETASIDECODEID);
 			bidUrlPicker.setFromId(b.BID_URL_ID);
 			setNum('edit_source_id', b.SOURCE_ID);
-			setNum('edit_state_id', b.STATEID);
+			statePicker.setFromId(b.STATEID);
 			setNum('edit_category_alias_id', b.CATEGORY_ALIAS_ID);
 			setVal('edit_raw_html', b.raw_html);
 			setVal('edit_extracted_json', b.extracted_json);
