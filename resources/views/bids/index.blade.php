@@ -842,15 +842,59 @@
 
 		dialog#reportBidsAddedModal .report-bids-table-wrap {
 			flex: 1 1 auto;
-			overflow: auto;
+			overflow-x: hidden;
+			overflow-y: auto;
 			min-height: 0;
 			border: 1px solid #e5e7eb;
 			border-radius: 8px;
 		}
 
-		dialog#reportBidsAddedModal table {
+		dialog#reportBidsAddedModal table.report-bids-table {
 			width: 100%;
+			max-width: 100%;
+			table-layout: fixed;
 			font-size: 0.88rem;
+		}
+
+		dialog#reportBidsAddedModal table.report-bids-table th,
+		dialog#reportBidsAddedModal table.report-bids-table td {
+			white-space: normal;
+			vertical-align: top;
+			overflow-wrap: anywhere;
+			word-break: break-word;
+			min-width: 0;
+		}
+
+		dialog#reportBidsAddedModal table.report-bids-table th:nth-child(1),
+		dialog#reportBidsAddedModal table.report-bids-table td:nth-child(1) {
+			width: 6.5rem;
+			white-space: nowrap;
+		}
+
+		dialog#reportBidsAddedModal table.report-bids-table th:nth-child(2),
+		dialog#reportBidsAddedModal table.report-bids-table td:nth-child(2) {
+			width: 34%;
+		}
+
+		dialog#reportBidsAddedModal table.report-bids-table th:nth-child(3),
+		dialog#reportBidsAddedModal table.report-bids-table td:nth-child(3) {
+			width: 24%;
+		}
+
+		dialog#reportBidsAddedModal table.report-bids-table th:nth-child(4),
+		dialog#reportBidsAddedModal table.report-bids-table td:nth-child(4) {
+			width: 10rem;
+			max-width: 10rem;
+		}
+
+		dialog#reportBidsAddedModal table.report-bids-table th:nth-child(5),
+		dialog#reportBidsAddedModal table.report-bids-table td:nth-child(5) {
+			width: 5.5rem;
+		}
+
+		dialog#reportBidsAddedModal .report-bids-url {
+			display: inline-block;
+			max-width: 100%;
 		}
 
 		dialog#reportBidsAddedModal th {
@@ -2010,7 +2054,7 @@
 			<p id="reportBidsAddedEmpty" class="report-bids-loading" hidden>No bids found for this range.</p>
 			<p id="reportBidsAddedNoMatches" class="report-bids-loading" hidden>No bids match your search.</p>
 			<div id="reportBidsAddedTableWrap" class="report-bids-table-wrap" hidden>
-				<table role="grid">
+				<table role="grid" class="report-bids-table">
 					<thead>
 						<tr>
 							<th>Created</th>
@@ -2979,6 +3023,14 @@
 			].map(function (v) { return String(v == null ? '' : v).toLowerCase(); }).join(' ');
 		}
 
+		function formatReportBidUrlCell(value) {
+			const full = String(value == null ? '' : value);
+			if (full === '' || full === '—') return '—';
+			const display = full.length > 20 ? full.slice(0, 20) + '…' : full;
+			const titleAttr = full.length > 20 ? ' title="' + escHtml(full) + '"' : '';
+			return '<span class="report-bids-url"' + titleAttr + '>' + escHtml(display) + '</span>';
+		}
+
 		function renderReportBidsAddedRows(rows) {
 			const bodyEl = document.getElementById('reportBidsAddedBody');
 			const tableWrap = document.getElementById('reportBidsAddedTableWrap');
@@ -2997,10 +3049,10 @@
 			noMatchesEl.hidden = true;
 			bodyEl.innerHTML = rows.map(function (row) {
 				return '<tr>'
-					+ '<td style="white-space:nowrap;">' + escHtml(row.created_display || '—') + '</td>'
+					+ '<td>' + escHtml(row.created_display || '—') + '</td>'
 					+ '<td>' + escHtml(row.title || 'Untitled') + '</td>'
 					+ '<td>' + escHtml(row.entity || '—') + '</td>'
-					+ '<td>' + escHtml(row.bid_url || '—') + '</td>'
+					+ '<td>' + formatReportBidUrlCell(row.bid_url) + '</td>'
 					+ '<td>' + escHtml(row.state || '—') + '</td>'
 					+ '</tr>';
 			}).join('');
