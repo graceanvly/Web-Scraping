@@ -17,6 +17,7 @@ use App\Services\ScraperService;
 use App\Support\BidDetailPayload;
 use App\Support\BidLiveColumnFilter;
 use App\Support\BidRecordPayload;
+use App\Support\BidUrlScrapeMarker;
 use App\Support\ThirdPartyProcurementPortalUrl;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
@@ -47,15 +48,10 @@ class BidController extends Controller
 		$includeHistorical = $request->boolean('historical');
 		$bidListingRecentDays = (int) config('scraper.bid_listing_recent_days', 180);
 
-		$hasScrapedBidUrls = BidUrl::whereNotNull('last_scraped_at')->exists();
+		$hasScrapedBidUrls = BidUrlScrapeMarker::hasScrapedBidUrls();
 
-		$scopedToScrapedBidUrlExists = function (\Illuminate\Database\Eloquent\Builder $outer) {
-			$urlPk = (new BidUrl())->getKeyName();
-			$outer->whereIn('BID_URL_ID', BidUrl::query()
-				->select($urlPk)
-				->whereNotNull('last_scraped_at'));
-
-			return $outer;
+		$scopedToScrapedBidUrlExists = static function (\Illuminate\Database\Eloquent\Builder $outer) {
+			return BidUrlScrapeMarker::scopeBidListingToScrapedBidUrls($outer);
 		};
 
 		if (!$hasScrapedBidUrls) {

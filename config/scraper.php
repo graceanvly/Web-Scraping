@@ -70,6 +70,8 @@
 	'bid_url_url_column' => env('SCRAPER_BID_URL_URL_COLUMN', 'url'),
 	'bid_url_name_column' => env('SCRAPER_BID_URL_NAME_COLUMN', 'name'),
 	'bid_url_user_id_column' => env('SCRAPER_BID_URL_USER_ID_COLUMN', 'user_id'),
+	/** Empty = auto-detect last_scraped_at then END_TIME. Oracle BIDURL uses END_TIME. */
+	'bid_url_last_scraped_column' => env('SCRAPER_BID_URL_LAST_SCRAPED_COLUMN', ''),
 
 	/*
 	|--------------------------------------------------------------------------

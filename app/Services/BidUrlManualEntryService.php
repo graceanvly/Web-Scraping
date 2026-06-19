@@ -8,6 +8,7 @@ use App\Models\BidUrlHistory;
 use App\Models\FailedBidUrl;
 use App\Models\TempBid;
 use App\Support\BidLiveWriter;
+use App\Support\BidUrlScrapeMarker;
 use App\Support\PendingBidLiveMapper;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -240,17 +241,13 @@ class BidUrlManualEntryService
 		$end = now();
 
 		if ($bidUrl !== null && $bidUrl->exists) {
-			$bidUrl->start_time = $startTime;
-			$bidUrl->end_time = $end;
-			$bidUrl->last_scraped_at = $end;
+			BidUrlScrapeMarker::applyFinishScrapeTimes($bidUrl, $startTime, $end);
 			$bidUrl->save();
 		} else {
 			$urlPk = (new BidUrl())->getKeyName();
-			BidUrl::where($urlPk, $bidUrlId)->update([
-				'start_time' => $startTime,
-				'end_time' => $end,
-				'last_scraped_at' => $end,
-			]);
+			BidUrl::where($urlPk, $bidUrlId)->update(
+				BidUrlScrapeMarker::finishScrapeUpdateAttributes($startTime, $end)
+			);
 		}
 
 		FailedBidUrl::where('original_bid_url_id', $bidUrlId)->update([

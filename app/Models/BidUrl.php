@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Models\Concerns\CaseInsensitiveAttributes;
+use App\Support\BidUrlScrapeMarker;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -49,5 +51,16 @@ class BidUrl extends Model
         'end_time' => 'datetime',
 		'last_scraped_at' => 'datetime',
 	];
+
+	protected function lastScrapedAt(): Attribute
+	{
+		return Attribute::get(function ($value) {
+			if ($value !== null && $value !== '') {
+				return $this->asDateTime($value);
+			}
+
+			return BidUrlScrapeMarker::readFromModel($this);
+		});
+	}
 
 }

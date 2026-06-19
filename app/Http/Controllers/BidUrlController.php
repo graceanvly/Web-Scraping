@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
+use App\Support\BidUrlScrapeMarker;
 use App\Services\BidReferenceLookupService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -201,20 +202,29 @@ class BidUrlController extends Controller
         $clear = $request->boolean('clear_last_scraped');
 
         if ($clear) {
-            $updated = BidUrl::query()->update(['last_scraped_at' => null]);
-        } else {
-            // Query-builder update bypasses Eloquent casts; Oracle rejects ISO strings like
-            // 2026-06-01T13:57 (ORA-01858). Save per row so last_scraped_at is written
-            // the same way scrapeStream does (now() on individual models).
-            $at = Carbon::parse($data['last_scraped_at']);
             $updated = 0;
-            BidUrl::query()->orderBy('id')->chunkById(200, function ($rows) use ($at, &$updated) {
+            $urlPk = (new BidUrl())->getKeyName();
+            BidUrl::query()->orderBy($urlPk)->chunkById(200, function ($rows) use (&$updated) {
                 foreach ($rows as $bidUrl) {
-                    $bidUrl->last_scraped_at = $at;
+                    BidUrlScrapeMarker::clearManualLastScraped($bidUrl);
                     $bidUrl->save();
                     $updated++;
                 }
-            });
+            }, $urlPk);
+        } else {
+            // Query-builder update bypasses Eloquent casts; Oracle rejects ISO strings like
+            // 2026-06-01T13:57 (ORA-01858). Save per row so the scrape marker is written
+            // the same way scrapeStream does (now() on individual models).
+            $at = Carbon::parse($data['last_scraped_at']);
+            $updated = 0;
+            $urlPk = (new BidUrl())->getKeyName();
+            BidUrl::query()->orderBy($urlPk)->chunkById(200, function ($rows) use ($at, &$updated) {
+                foreach ($rows as $bidUrl) {
+                    BidUrlScrapeMarker::applyManualLastScraped($bidUrl, $at);
+                    $bidUrl->save();
+                    $updated++;
+                }
+            }, $urlPk);
         }
 
         $message = $clear
