@@ -12,6 +12,18 @@ class BidUrl extends Model
 
     protected $table = "bid_url";
 
+    protected $primaryKey = 'id';
+
+    public function getTable(): string
+    {
+        return (string) config('scraper.bid_url_table', $this->table);
+    }
+
+    public function getKeyName(): string
+    {
+        return (string) config('scraper.bid_url_id_column', $this->primaryKey);
+    }
+
     public $timestamps = false;
     protected $sequence = 'BIDURL_SEQ';
 

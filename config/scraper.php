@@ -60,6 +60,19 @@
 
 	/*
 	|--------------------------------------------------------------------------
+	| BIDURL reference (BID_URL_ID on bid → BIDURL.ID)
+	|--------------------------------------------------------------------------
+	| Oracle ODS uses table BIDURL with columns ID, URL, NAME, USER_ID, etc.
+	| Local MySQL dev uses bid_url with lowercase columns.
+	*/
+	'bid_url_table' => env('SCRAPER_BID_URL_TABLE', 'bid_url'),
+	'bid_url_id_column' => env('SCRAPER_BID_URL_ID_COLUMN', 'id'),
+	'bid_url_url_column' => env('SCRAPER_BID_URL_URL_COLUMN', 'url'),
+	'bid_url_name_column' => env('SCRAPER_BID_URL_NAME_COLUMN', 'name'),
+	'bid_url_user_id_column' => env('SCRAPER_BID_URL_USER_ID_COLUMN', 'user_id'),
+
+	/*
+	|--------------------------------------------------------------------------
 	| ENTITY reference (ENTITYID on bid)
 	|--------------------------------------------------------------------------
 	| Rows are matched in order: Bid URL name, email (exact), website/email domain vs non-portal URL hosts

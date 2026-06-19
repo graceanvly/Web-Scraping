@@ -11,10 +11,39 @@ use App\Support\BidLiveWriter;
 use App\Support\PendingBidLiveMapper;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class BidUrlManualEntryService
 {
 	public const DEFAULT_BID_URL_USER_ID = 120482;
+
+	private function cfg(string $key, mixed $default = null): mixed
+	{
+		return config("scraper.{$key}", $default);
+	}
+
+	private function rowAttr(object $row, string $column): mixed
+	{
+		foreach ((array) $row as $key => $value) {
+			if (strcasecmp((string) $key, $column) === 0) {
+				return $value;
+			}
+		}
+
+		return null;
+	}
+
+	/** @return array{table: string, id_col: string, url_col: string, name_col: string, user_col: string} */
+	private function bidUrlTableSpec(): array
+	{
+		return [
+			'table' => (string) $this->cfg('bid_url_table', 'bid_url'),
+			'id_col' => (string) $this->cfg('bid_url_id_column', 'id'),
+			'url_col' => (string) $this->cfg('bid_url_url_column', 'url'),
+			'name_col' => (string) $this->cfg('bid_url_name_column', 'name'),
+			'user_col' => (string) $this->cfg('bid_url_user_id_column', 'user_id'),
+		];
+	}
 
 	public static function showAddButton(?Carbon $lastScrapedAt): bool
 	{
@@ -57,7 +86,9 @@ class BidUrlManualEntryService
 			return null;
 		}
 
-		return BidUrl::where('url', $url)->first();
+		$spec = $this->bidUrlTableSpec();
+
+		return BidUrl::query()->where($spec['url_col'], $url)->first();
 	}
 
 	/**
@@ -69,22 +100,39 @@ class BidUrlManualEntryService
 			return null;
 		}
 
-		$row = BidUrl::find($id);
+		$spec = $this->bidUrlTableSpec();
 
-		return $row ? $this->bidUrlToSelectOption($row) : null;
+		try {
+			$row = DB::table($spec['table'])
+				->select([$spec['id_col'], $spec['url_col'], $spec['name_col']])
+				->where($spec['id_col'], $id)
+				->first();
+		} catch (\Throwable $e) {
+			Log::warning('BidUrl lookup by id failed', [
+				'table' => $spec['table'],
+				'id_col' => $spec['id_col'],
+				'id' => $id,
+				'error' => $e->getMessage(),
+			]);
+
+			return null;
+		}
+
+		return $row ? $this->bidUrlRowToSelectOption($row) : null;
 	}
 
 	/**
 	 * @return array{id: int, label: string, url: string}|null
 	 */
-	private function bidUrlToSelectOption(object $row): ?array
+	private function bidUrlRowToSelectOption(object $row): ?array
 	{
-		$url = trim((string) ($row->url ?? ''));
+		$spec = $this->bidUrlTableSpec();
+		$url = trim((string) ($this->rowAttr($row, $spec['url_col']) ?? ''));
 		if ($url === '') {
 			return null;
 		}
-		$name = trim((string) ($row->name ?? ''));
-		$idRaw = $row->id ?? $row->ID ?? null;
+		$name = trim((string) ($this->rowAttr($row, $spec['name_col']) ?? ''));
+		$idRaw = $this->rowAttr($row, $spec['id_col']);
 		if ($idRaw === null || $idRaw === '') {
 			return null;
 		}
@@ -102,22 +150,40 @@ class BidUrlManualEntryService
 	public function searchBidUrlsForSelect(string $query, int $limit = 40, ?int $userId = null): array
 	{
 		$limit = max(5, min(100, $limit));
-		$builder = BidUrl::query();
-		if ($userId !== null && $userId > 0) {
-			$builder->where('user_id', $userId);
-		}
+		$spec = $this->bidUrlTableSpec();
 
-		$query = trim($query);
-		if ($query !== '') {
-			$builder->where(function ($sub) use ($query) {
-				$sub->where('url', 'like', '%' . $query . '%')
-					->orWhere('name', 'like', '%' . $query . '%');
-			});
+		try {
+			$builder = DB::table($spec['table'])
+				->select([$spec['id_col'], $spec['url_col'], $spec['name_col']]);
+			if ($userId !== null && $userId > 0) {
+				$builder->where($spec['user_col'], $userId);
+			}
+
+			$query = trim($query);
+			if ($query !== '') {
+				$builder->where(function ($sub) use ($query, $spec) {
+					$sub->where($spec['url_col'], 'like', '%' . $query . '%')
+						->orWhere($spec['name_col'], 'like', '%' . $query . '%');
+				});
+			}
+
+			$rows = $builder
+				->orderBy($spec['name_col'])
+				->orderBy($spec['url_col'])
+				->limit($limit)
+				->get();
+		} catch (\Throwable $e) {
+			Log::warning('BidUrl search failed', [
+				'table' => $spec['table'],
+				'error' => $e->getMessage(),
+			]);
+
+			return [];
 		}
 
 		$out = [];
-		foreach ($builder->orderBy('name')->orderBy('url')->limit($limit)->get() as $row) {
-			$opt = $this->bidUrlToSelectOption($row);
+		foreach ($rows as $row) {
+			$opt = $this->bidUrlRowToSelectOption($row);
 			if ($opt !== null) {
 				$out[] = $opt;
 			}
@@ -141,7 +207,9 @@ class BidUrlManualEntryService
 	public function resolveBidUrlForManualEntry(?int $bidUrlId, ?string $listingUrl): ?BidUrl
 	{
 		if ($bidUrlId !== null && $bidUrlId > 0) {
-			return BidUrl::find($bidUrlId);
+			$spec = $this->bidUrlTableSpec();
+
+			return BidUrl::query()->where($spec['id_col'], $bidUrlId)->first();
 		}
 
 		return $this->findConfiguredByUrl($listingUrl);
@@ -177,7 +245,8 @@ class BidUrlManualEntryService
 			$bidUrl->last_scraped_at = $end;
 			$bidUrl->save();
 		} else {
-			BidUrl::where('id', $bidUrlId)->update([
+			$urlPk = (new BidUrl())->getKeyName();
+			BidUrl::where($urlPk, $bidUrlId)->update([
 				'start_time' => $startTime,
 				'end_time' => $end,
 				'last_scraped_at' => $end,
@@ -308,7 +377,9 @@ class BidUrlManualEntryService
 			return null;
 		}
 
-		return BidUrl::where('url', $url)->first();
+		$spec = $this->bidUrlTableSpec();
+
+		return BidUrl::query()->where($spec['url_col'], $url)->first();
 	}
 
 	private function resolveHistoryBidUrlId(FailedBidUrl $failedBidUrl, ?BidUrl $active): ?int
