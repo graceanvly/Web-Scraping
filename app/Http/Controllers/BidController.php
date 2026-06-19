@@ -144,10 +144,10 @@ class BidController extends Controller
 
 		try {
 			if ($reportFromInput !== '') {
-				$reportFrom = \Carbon\Carbon::parse($reportFromInput, 'Asia/Manila')->startOfDay();
+				$reportFrom = \Illuminate\Support\Carbon::parse($reportFromInput, 'Asia/Manila')->startOfDay();
 			}
 			if ($reportToInput !== '') {
-				$reportTo = \Carbon\Carbon::parse($reportToInput, 'Asia/Manila')->endOfDay();
+				$reportTo = \Illuminate\Support\Carbon::parse($reportToInput, 'Asia/Manila')->endOfDay();
 			}
 			if ($reportFrom->gt($reportTo)) {
 				[$reportFrom, $reportTo] = [$reportTo->copy()->startOfDay(), $reportFrom->copy()->endOfDay()];
@@ -2321,7 +2321,7 @@ class BidController extends Controller
 		return true;
 	}
 
-	/** @return array{0: \Carbon\Carbon, 1: \Carbon\Carbon} */
+	/** @return array{0: \Illuminate\Support\Carbon, 1: \Illuminate\Support\Carbon} */
 	private function parseReportRange(Request $request, BidReportsService $reports): array
 	{
 		$default = $reports->defaultReportRange();
@@ -2332,10 +2332,10 @@ class BidController extends Controller
 
 		try {
 			if ($fromInput !== '') {
-				$from = \Carbon\Carbon::parse($fromInput, 'Asia/Manila')->startOfDay();
+				$from = \Illuminate\Support\Carbon::parse($fromInput, 'Asia/Manila')->startOfDay();
 			}
 			if ($toInput !== '') {
-				$to = \Carbon\Carbon::parse($toInput, 'Asia/Manila')->endOfDay();
+				$to = \Illuminate\Support\Carbon::parse($toInput, 'Asia/Manila')->endOfDay();
 			}
 			if ($from->gt($to)) {
 				[$from, $to] = [$to->copy()->startOfDay(), $from->copy()->endOfDay()];
