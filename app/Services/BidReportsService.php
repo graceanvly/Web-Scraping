@@ -161,7 +161,7 @@ class BidReportsService
 				'bid_url' => $bidUrlLabel !== '' ? $bidUrlLabel : '—',
 				'state' => $stateId > 0 ? ($stateLabels[$stateId] ?? '—') : '—',
 				'created' => $createdCarbon?->toIso8601String() ?? '',
-				'created_display' => $createdCarbon?->timezone(self::REPORT_TZ)->format('M j, Y g:i A') ?? '—',
+				'created_display' => $createdCarbon?->timezone(self::REPORT_TZ)->format('M j, Y') ?? '—',
 			];
 		}
 

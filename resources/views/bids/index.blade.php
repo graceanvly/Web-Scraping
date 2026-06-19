@@ -761,21 +761,74 @@
 			cursor: default;
 		}
 
+		#reportBidsAddedModal {
+			max-width: none;
+			width: 100vw;
+			height: 100vh;
+			max-height: 100vh;
+			margin: 0;
+			padding: 0;
+			border: none;
+			border-radius: 0;
+		}
+
+		#reportBidsAddedModal .report-bids-shell {
+			display: flex;
+			flex-direction: column;
+			height: 100vh;
+			margin: 0;
+			padding: 1.25rem 1.5rem 1rem;
+			box-sizing: border-box;
+		}
+
+		#reportBidsAddedModal .report-bids-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: flex-start;
+			gap: 1rem;
+			flex-shrink: 0;
+		}
+
 		#reportBidsAddedModal .report-bids-meta {
 			color: #6b7280;
 			font-size: 0.88rem;
-			margin: 0 0 1rem;
+			margin: 0.25rem 0 0;
+		}
+
+		#reportBidsAddedModal .report-bids-toolbar {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0.75rem;
+			margin: 1rem 0 0.75rem;
+			flex-shrink: 0;
+		}
+
+		#reportBidsAddedModal .report-bids-search {
+			flex: 1 1 280px;
+			max-width: 420px;
+			margin: 0;
+		}
+
+		#reportBidsAddedModal .report-bids-filter-meta {
+			font-size: 0.85rem;
+			color: #6b7280;
+			white-space: nowrap;
 		}
 
 		#reportBidsAddedModal .report-bids-loading {
 			color: #6b7280;
 			font-size: 0.9rem;
 			margin: 0;
+			flex-shrink: 0;
 		}
 
 		#reportBidsAddedModal .report-bids-table-wrap {
-			overflow-x: auto;
-			max-height: min(70vh, 520px);
+			flex: 1 1 auto;
+			overflow: auto;
+			min-height: 0;
+			border: 1px solid #e5e7eb;
+			border-radius: 8px;
 		}
 
 		#reportBidsAddedModal table {
@@ -788,6 +841,13 @@
 			top: 0;
 			background: #f8fafc;
 			z-index: 1;
+		}
+
+		#reportBidsAddedModal .report-bids-footer {
+			display: flex;
+			justify-content: flex-end;
+			margin-top: 1rem;
+			flex-shrink: 0;
 		}
 
 		.issue-badge {
@@ -1915,17 +1975,23 @@
 	</section>
 
 	<!-- Reports: bids added drill-down -->
-	<dialog id="reportBidsAddedModal" style="max-width:1100px; width:94%; border:none; border-radius:12px; padding:0; box-shadow:0 8px 30px rgba(0,0,0,0.12);">
-		<article style="margin:0; padding:1.5rem 1.75rem 1.25rem;">
-			<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:0.5rem;">
+	<dialog id="reportBidsAddedModal">
+		<article class="report-bids-shell">
+			<div class="report-bids-header">
 				<div>
 					<h3 id="reportBidsAddedTitle" style="margin:0; font-size:1.2rem; font-weight:600; color:#1f2937;">Bids added</h3>
 					<p id="reportBidsAddedMeta" class="report-bids-meta"></p>
 				</div>
 				<button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280; padding:0; line-height:1;" onclick="document.getElementById('reportBidsAddedModal').close()">&times;</button>
 			</div>
+			<div id="reportBidsAddedToolbar" class="report-bids-toolbar" hidden>
+				<input type="search" id="reportBidsAddedSearch" class="report-bids-search"
+					placeholder="Search title, entity, bid URL, state, or date…" autocomplete="off">
+				<span id="reportBidsAddedFilterMeta" class="report-bids-filter-meta"></span>
+			</div>
 			<p id="reportBidsAddedLoading" class="report-bids-loading" hidden>Loading bids…</p>
 			<p id="reportBidsAddedEmpty" class="report-bids-loading" hidden>No bids found for this range.</p>
+			<p id="reportBidsAddedNoMatches" class="report-bids-loading" hidden>No bids match your search.</p>
 			<div id="reportBidsAddedTableWrap" class="report-bids-table-wrap" hidden>
 				<table role="grid">
 					<thead>
@@ -1940,7 +2006,7 @@
 					<tbody id="reportBidsAddedBody"></tbody>
 				</table>
 			</div>
-			<footer style="display:flex; justify-content:flex-end; margin-top:1.25rem;">
+			<footer class="report-bids-footer">
 				<button type="button" class="secondary" onclick="document.getElementById('reportBidsAddedModal').close()">Close</button>
 			</footer>
 		</article>
@@ -2883,6 +2949,60 @@
 			};
 		}
 
+		let reportBidsAddedAllRows = [];
+
+		function reportBidsAddedSearchHaystack(row) {
+			return [
+				row.title,
+				row.entity,
+				row.bid_url,
+				row.state,
+				row.created_display,
+				row.created,
+			].map(function (v) { return String(v == null ? '' : v).toLowerCase(); }).join(' ');
+		}
+
+		function renderReportBidsAddedRows(rows) {
+			const bodyEl = document.getElementById('reportBidsAddedBody');
+			const tableWrap = document.getElementById('reportBidsAddedTableWrap');
+			const noMatchesEl = document.getElementById('reportBidsAddedNoMatches');
+			const filterMetaEl = document.getElementById('reportBidsAddedFilterMeta');
+			if (!bodyEl || !tableWrap || !noMatchesEl || !filterMetaEl) return;
+
+			if (!rows.length) {
+				bodyEl.innerHTML = '';
+				tableWrap.hidden = true;
+				noMatchesEl.hidden = false;
+				filterMetaEl.textContent = 'Showing 0 of ' + reportBidsAddedAllRows.length.toLocaleString();
+				return;
+			}
+
+			noMatchesEl.hidden = true;
+			bodyEl.innerHTML = rows.map(function (row) {
+				return '<tr>'
+					+ '<td style="white-space:nowrap;">' + escHtml(row.created_display || '—') + '</td>'
+					+ '<td>' + escHtml(row.title || 'Untitled') + '</td>'
+					+ '<td>' + escHtml(row.entity || '—') + '</td>'
+					+ '<td>' + escHtml(row.bid_url || '—') + '</td>'
+					+ '<td>' + escHtml(row.state || '—') + '</td>'
+					+ '</tr>';
+			}).join('');
+			tableWrap.hidden = false;
+			filterMetaEl.textContent = 'Showing ' + rows.length.toLocaleString() + ' of ' + reportBidsAddedAllRows.length.toLocaleString();
+		}
+
+		function filterReportBidsAddedRows() {
+			const query = (document.getElementById('reportBidsAddedSearch')?.value || '').trim().toLowerCase();
+			if (!query) {
+				renderReportBidsAddedRows(reportBidsAddedAllRows);
+				return;
+			}
+			const filtered = reportBidsAddedAllRows.filter(function (row) {
+				return reportBidsAddedSearchHaystack(row).indexOf(query) !== -1;
+			});
+			renderReportBidsAddedRows(filtered);
+		}
+
 		async function openReportBidsAdded(userId, userLabel, count) {
 			const total = parseInt(String(count), 10) || 0;
 			if (total <= 0) return;
@@ -2892,15 +3012,22 @@
 			const metaEl = document.getElementById('reportBidsAddedMeta');
 			const loadingEl = document.getElementById('reportBidsAddedLoading');
 			const emptyEl = document.getElementById('reportBidsAddedEmpty');
+			const noMatchesEl = document.getElementById('reportBidsAddedNoMatches');
+			const toolbarEl = document.getElementById('reportBidsAddedToolbar');
+			const searchEl = document.getElementById('reportBidsAddedSearch');
 			const tableWrap = document.getElementById('reportBidsAddedTableWrap');
 			const bodyEl = document.getElementById('reportBidsAddedBody');
 			if (!modal || !titleEl || !metaEl || !loadingEl || !emptyEl || !tableWrap || !bodyEl) return;
 
 			const range = currentReportRange();
+			reportBidsAddedAllRows = [];
+			if (searchEl) searchEl.value = '';
+			if (toolbarEl) toolbarEl.hidden = true;
 			titleEl.textContent = 'Bids added — ' + (userLabel || 'User');
-			metaEl.textContent = 'Showing ' + total.toLocaleString() + ' bid(s) · ' + range.from + ' to ' + range.to + ' (Asia/Manila)';
+			metaEl.textContent = total.toLocaleString() + ' bid(s) · ' + range.from + ' to ' + range.to + ' (Asia/Manila)';
 			loadingEl.hidden = false;
 			emptyEl.hidden = true;
+			noMatchesEl.hidden = true;
 			tableWrap.hidden = true;
 			bodyEl.innerHTML = '';
 			modal.showModal();
@@ -2917,28 +3044,22 @@
 				});
 				if (!r.ok) throw new Error('HTTP ' + r.status);
 				const data = await r.json();
-				const rows = Array.isArray(data.rows) ? data.rows : [];
+				reportBidsAddedAllRows = Array.isArray(data.rows) ? data.rows : [];
 				loadingEl.hidden = true;
-				if (!rows.length) {
+				if (!reportBidsAddedAllRows.length) {
 					emptyEl.hidden = false;
 					return;
 				}
-				bodyEl.innerHTML = rows.map(function (row) {
-					return '<tr>'
-						+ '<td style="white-space:nowrap;">' + escHtml(row.created_display || '—') + '</td>'
-						+ '<td>' + escHtml(row.title || 'Untitled') + '</td>'
-						+ '<td>' + escHtml(row.entity || '—') + '</td>'
-						+ '<td>' + escHtml(row.bid_url || '—') + '</td>'
-						+ '<td>' + escHtml(row.state || '—') + '</td>'
-						+ '</tr>';
-				}).join('');
-				tableWrap.hidden = false;
+				if (toolbarEl) toolbarEl.hidden = false;
+				renderReportBidsAddedRows(reportBidsAddedAllRows);
 			} catch (err) {
 				loadingEl.hidden = true;
 				emptyEl.textContent = 'Could not load bids. Please try again.';
 				emptyEl.hidden = false;
 			}
 		}
+
+		document.getElementById('reportBidsAddedSearch')?.addEventListener('input', filterReportBidsAddedRows);
 
 		document.getElementById('panelReports')?.addEventListener('click', function (ev) {
 			const btn = ev.target.closest('.report-bids-added-link');
