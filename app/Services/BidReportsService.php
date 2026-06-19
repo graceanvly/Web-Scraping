@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Bid;
 use App\Models\BidUrlHistory;
-use App\Models\TempBid;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -87,6 +86,121 @@ class BidReportsService
 		];
 	}
 
+	/**
+	 * Live bids added in range for one user (or all Manila users when $userId is 0).
+	 *
+	 * @param  list<int>  $manilaUserIds
+	 * @return list<array{
+	 *     title: string,
+	 *     entity: string,
+	 *     bid_url: string,
+	 *     state: string,
+	 *     created: string,
+	 *     created_display: string
+	 * }>
+	 */
+	public function bidsAddedListing(
+		int $userId,
+		Carbon $from,
+		Carbon $to,
+		array $manilaUserIds,
+		BidReferenceLookupService $lookup,
+		BidUrlManualEntryService $bidUrls,
+	): array {
+		$from = $from->copy()->timezone(self::REPORT_TZ)->startOfDay();
+		$to = $to->copy()->timezone(self::REPORT_TZ)->endOfDay();
+
+		$userIds = $userId > 0 ? [$userId] : array_values(array_filter($manilaUserIds, fn (int $id) => $id > 0));
+		if ($userIds === []) {
+			return [];
+		}
+
+		$rows = $this->fetchBidsAddedRaw($userIds, $from, $to);
+		usort($rows, function (array $a, array $b) {
+			return strcmp((string) ($b['created_sort'] ?? ''), (string) ($a['created_sort'] ?? ''));
+		});
+
+		$entityLabels = [];
+		$stateLabels = [];
+		$bidUrlLabels = [];
+
+		$out = [];
+		foreach ($rows as $row) {
+			$entityId = (int) ($row['entityid'] ?? 0);
+			$stateId = (int) ($row['stateid'] ?? 0);
+			$bidUrlId = (int) ($row['bid_url_id'] ?? 0);
+
+			if ($entityId > 0 && !array_key_exists($entityId, $entityLabels)) {
+				$opt = $lookup->getEntityOptionById($entityId);
+				$entityLabels[$entityId] = $opt['label'] ?? ('Entity #' . $entityId);
+			}
+			if ($stateId > 0 && !array_key_exists($stateId, $stateLabels)) {
+				$opt = $lookup->getStateOptionById($stateId);
+				$stateLabels[$stateId] = $opt['label'] ?? ('State #' . $stateId);
+			}
+			if ($bidUrlId > 0 && !array_key_exists($bidUrlId, $bidUrlLabels)) {
+				$opt = $bidUrls->getBidUrlOptionById($bidUrlId);
+				$bidUrlLabels[$bidUrlId] = $opt['label'] ?? ('Bid URL #' . $bidUrlId);
+			}
+
+			$bidUrlLabel = $bidUrlId > 0 ? ($bidUrlLabels[$bidUrlId] ?? '') : '';
+
+			$created = $row['created'] ?? null;
+			$createdCarbon = $created instanceof Carbon ? $created : null;
+			if ($createdCarbon === null && $created !== null && $created !== '') {
+				try {
+					$createdCarbon = Carbon::parse((string) $created, self::REPORT_TZ);
+				} catch (\Throwable $e) {
+					$createdCarbon = null;
+				}
+			}
+
+			$out[] = [
+				'title' => (string) ($row['title'] ?? ''),
+				'entity' => $entityId > 0 ? ($entityLabels[$entityId] ?? '—') : '—',
+				'bid_url' => $bidUrlLabel !== '' ? $bidUrlLabel : '—',
+				'state' => $stateId > 0 ? ($stateLabels[$stateId] ?? '—') : '—',
+				'created' => $createdCarbon?->toIso8601String() ?? '',
+				'created_display' => $createdCarbon?->timezone(self::REPORT_TZ)->format('M j, Y g:i A') ?? '—',
+			];
+		}
+
+		return $out;
+	}
+
+	/**
+	 * @param  list<int>  $userIds
+	 * @return list<array<string, mixed>>
+	 */
+	private function fetchBidsAddedRaw(array $userIds, Carbon $from, Carbon $to): array
+	{
+		$rows = [];
+
+		try {
+			$live = Bid::query()
+				->whereIn('USERID', $userIds)
+				->whereBetween('CREATED', [$from, $to])
+				->orderByDesc('CREATED')
+				->get(['TITLE', 'ENTITYID', 'STATEID', 'BID_URL_ID', 'CREATED']);
+
+			foreach ($live as $bid) {
+				$created = $bid->getAttribute('CREATED');
+				$rows[] = [
+					'title' => (string) ($bid->getAttribute('TITLE') ?? ''),
+					'entityid' => (int) ($bid->getAttribute('ENTITYID') ?? 0),
+					'stateid' => (int) ($bid->getAttribute('STATEID') ?? 0),
+					'bid_url_id' => (int) ($bid->getAttribute('BID_URL_ID') ?? 0),
+					'created' => $created,
+					'created_sort' => $created instanceof Carbon ? $created->toIso8601String() : (string) $created,
+				];
+			}
+		} catch (\Throwable $e) {
+			Log::warning('BidReportsService: could not list live bids for report', ['error' => $e->getMessage()]);
+		}
+
+		return $rows;
+	}
+
 	/** @return array<int, int> user_id => count */
 	private function countBidsGroupedByUser(array $manilaIds, Carbon $from, Carbon $to): array
 	{
@@ -110,26 +224,6 @@ class BidReportsService
 			}
 		} catch (\Throwable $e) {
 			Log::warning('BidReportsService: could not count live bids', ['error' => $e->getMessage()]);
-		}
-
-		if (!Schema::hasTable((new TempBid())->getTable())) {
-			return $counts;
-		}
-
-		try {
-			$pending = TempBid::query()
-				->whereIn('USERID', $manilaIds)
-				->whereBetween('CREATED', [$from, $to])
-				->selectRaw('USERID as user_id, COUNT(*) as aggregate_count')
-				->groupBy('USERID')
-				->pluck('aggregate_count', 'user_id');
-
-			foreach ($pending as $userId => $count) {
-				$uid = (int) $userId;
-				$counts[$uid] = ($counts[$uid] ?? 0) + (int) $count;
-			}
-		} catch (\Throwable $e) {
-			Log::warning('BidReportsService: could not count pending bids', ['error' => $e->getMessage()]);
 		}
 
 		return $counts;

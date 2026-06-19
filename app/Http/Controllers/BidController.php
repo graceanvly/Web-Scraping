@@ -1401,6 +1401,55 @@ class BidController extends Controller
 		]);
 	}
 
+	/** JSON: live bids added for Reports tab drill-down (by CREATED). */
+	public function reportsBidsAdded(
+		Request $request,
+		BidReportsService $reports,
+		BidReferenceLookupService $lookup,
+		BidUrlManualEntryService $bidUrls,
+	) {
+		$userId = (int) $request->query('user_id', 0);
+		[$from, $to] = $this->parseReportRange($request, $reports);
+
+		$manilaUsers = [];
+		try {
+			$manilaUsers = $lookup->getManilaAssignableUsersForSelect();
+		} catch (\Throwable $e) {
+			Log::warning('Reports bids added: Manila users not loaded', ['error' => $e->getMessage()]);
+		}
+
+		$manilaIds = collect($manilaUsers)
+			->map(fn (array $u) => (int) $u['id'])
+			->filter(fn (int $id) => $id > 0)
+			->values()
+			->all();
+
+		if ($userId > 0 && !in_array($userId, $manilaIds, true)) {
+			return response()->json(['error' => 'Invalid user.'], 422);
+		}
+
+		$userLabel = 'All users';
+		if ($userId > 0) {
+			foreach ($manilaUsers as $user) {
+				if ((int) $user['id'] === $userId) {
+					$userLabel = (string) ($user['label'] ?? ('User #' . $userId));
+					break;
+				}
+			}
+		}
+
+		$rows = $reports->bidsAddedListing($userId, $from, $to, $manilaIds, $lookup, $bidUrls);
+
+		return response()->json([
+			'user_id' => $userId,
+			'user_label' => $userLabel,
+			'from' => $from->timezone('Asia/Manila')->toDateString(),
+			'to' => $to->timezone('Asia/Manila')->toDateString(),
+			'count' => count($rows),
+			'rows' => $rows,
+		]);
+	}
+
 	public function update(Request $request, Bid $bid)
 	{
 		$nullableStrings = ['DESCRIPTION', 'EMAIL', 'URL', 'NAICSCODE', 'SOLICIATIONNUMBER', 'THIRD_PARTY_IDENTIFIER', 'NSN', 'INLINEURL', 'COUNTRY_ID', 'raw_html', 'extracted_json'];
@@ -2270,5 +2319,32 @@ class BidController extends Controller
 		}
 
 		return true;
+	}
+
+	/** @return array{0: \Carbon\Carbon, 1: \Carbon\Carbon} */
+	private function parseReportRange(Request $request, BidReportsService $reports): array
+	{
+		$default = $reports->defaultReportRange();
+		$from = $default['from'];
+		$to = $default['to'];
+		$fromInput = trim((string) $request->query('report_from', ''));
+		$toInput = trim((string) $request->query('report_to', ''));
+
+		try {
+			if ($fromInput !== '') {
+				$from = \Carbon\Carbon::parse($fromInput, 'Asia/Manila')->startOfDay();
+			}
+			if ($toInput !== '') {
+				$to = \Carbon\Carbon::parse($toInput, 'Asia/Manila')->endOfDay();
+			}
+			if ($from->gt($to)) {
+				[$from, $to] = [$to->copy()->startOfDay(), $from->copy()->endOfDay()];
+			}
+		} catch (\Throwable $e) {
+			$from = $default['from'];
+			$to = $default['to'];
+		}
+
+		return [$from, $to];
 	}
 }

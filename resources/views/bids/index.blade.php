@@ -738,6 +738,58 @@
 				width: 100%;
 			}
 		}
+
+		.report-bids-added-link {
+			margin: 0;
+			padding: 0;
+			border: none;
+			background: none;
+			color: #2563eb;
+			font: inherit;
+			font-variant-numeric: tabular-nums;
+			text-decoration: underline;
+			cursor: pointer;
+		}
+
+		.report-bids-added-link:hover {
+			color: #1d4ed8;
+		}
+
+		.report-bids-added-link:disabled {
+			color: inherit;
+			text-decoration: none;
+			cursor: default;
+		}
+
+		#reportBidsAddedModal .report-bids-meta {
+			color: #6b7280;
+			font-size: 0.88rem;
+			margin: 0 0 1rem;
+		}
+
+		#reportBidsAddedModal .report-bids-loading {
+			color: #6b7280;
+			font-size: 0.9rem;
+			margin: 0;
+		}
+
+		#reportBidsAddedModal .report-bids-table-wrap {
+			overflow-x: auto;
+			max-height: min(70vh, 520px);
+		}
+
+		#reportBidsAddedModal table {
+			width: 100%;
+			font-size: 0.88rem;
+		}
+
+		#reportBidsAddedModal th {
+			position: sticky;
+			top: 0;
+			background: #f8fafc;
+			z-index: 1;
+		}
+
 		.issue-badge {
 			display: inline-block;
 			padding: 0.15rem 0.55rem;
@@ -1766,7 +1818,7 @@
 	<section id="panelReports" class="card tab-panel{{ ($activeTab ?? 'bids') !== 'reports' ? ' tab-hidden' : '' }}">
 		<p style="color:#6b7280; font-size:0.9rem; margin:0 0 1rem;">
 			Activity for directory users in <strong>Asia/Manila</strong>.
-			<strong>Bids added</strong> counts live and pending bids by assigned user and <code>CREATED</code> date.
+			<strong>Bids added</strong> counts live bids in the <code>bid</code> table by assigned user and <code>CREATED</code> date.
 			<strong>URLs visited</strong> counts scrape/manual visits from <code>bid_url_history</code>.
 			<strong>Today's bids</strong> uses {{ ($userActivityReport['today'] ?? now('Asia/Manila'))->format('M j, Y') }} (Manila).
 		</p>
@@ -1820,7 +1872,16 @@
 					@forelse ($userActivityReport['rows'] ?? [] as $reportRow)
 						<tr>
 							<td>{{ $reportRow['label'] }} <span style="color:#9ca3af; font-size:0.82rem;">(#{{ $reportRow['user_id'] }})</span></td>
-							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($reportRow['bids_added']) }}</td>
+							<td style="text-align:right; font-variant-numeric:tabular-nums;">
+								@if (($reportRow['bids_added'] ?? 0) > 0)
+									<button type="button" class="report-bids-added-link"
+										data-user-id="{{ $reportRow['user_id'] }}"
+										data-user-label="{{ $reportRow['label'] }}"
+										data-count="{{ $reportRow['bids_added'] }}">{{ number_format($reportRow['bids_added']) }}</button>
+								@else
+									0
+								@endif
+							</td>
 							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($reportRow['urls_visited']) }}</td>
 							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($reportRow['bids_today']) }}</td>
 						</tr>
@@ -1834,7 +1895,16 @@
 					<tfoot>
 						<tr style="font-weight:600; background:#f8fafc;">
 							<td>Total</td>
-							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($userActivityReport['totals']['bids_added'] ?? 0) }}</td>
+							<td style="text-align:right; font-variant-numeric:tabular-nums;">
+								@if (($userActivityReport['totals']['bids_added'] ?? 0) > 0)
+									<button type="button" class="report-bids-added-link"
+										data-user-id="0"
+										data-user-label="All users"
+										data-count="{{ $userActivityReport['totals']['bids_added'] }}">{{ number_format($userActivityReport['totals']['bids_added']) }}</button>
+								@else
+									0
+								@endif
+							</td>
 							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($userActivityReport['totals']['urls_visited'] ?? 0) }}</td>
 							<td style="text-align:right; font-variant-numeric:tabular-nums;">{{ number_format($userActivityReport['totals']['bids_today'] ?? 0) }}</td>
 						</tr>
@@ -1843,6 +1913,38 @@
 			</table>
 		</div>
 	</section>
+
+	<!-- Reports: bids added drill-down -->
+	<dialog id="reportBidsAddedModal" style="max-width:1100px; width:94%; border:none; border-radius:12px; padding:0; box-shadow:0 8px 30px rgba(0,0,0,0.12);">
+		<article style="margin:0; padding:1.5rem 1.75rem 1.25rem;">
+			<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:0.5rem;">
+				<div>
+					<h3 id="reportBidsAddedTitle" style="margin:0; font-size:1.2rem; font-weight:600; color:#1f2937;">Bids added</h3>
+					<p id="reportBidsAddedMeta" class="report-bids-meta"></p>
+				</div>
+				<button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280; padding:0; line-height:1;" onclick="document.getElementById('reportBidsAddedModal').close()">&times;</button>
+			</div>
+			<p id="reportBidsAddedLoading" class="report-bids-loading" hidden>Loading bids…</p>
+			<p id="reportBidsAddedEmpty" class="report-bids-loading" hidden>No bids found for this range.</p>
+			<div id="reportBidsAddedTableWrap" class="report-bids-table-wrap" hidden>
+				<table role="grid">
+					<thead>
+						<tr>
+							<th>Created</th>
+							<th>Title</th>
+							<th>Entity</th>
+							<th>Bid URL</th>
+							<th>State</th>
+						</tr>
+					</thead>
+					<tbody id="reportBidsAddedBody"></tbody>
+				</table>
+			</div>
+			<footer style="display:flex; justify-content:flex-end; margin-top:1.25rem;">
+				<button type="button" class="secondary" onclick="document.getElementById('reportBidsAddedModal').close()">Close</button>
+			</footer>
+		</article>
+	</dialog>
 
 	</div>
 	</div>
@@ -2151,6 +2253,9 @@
 		const entitySearchUrl = @json(route('bids.reference.entities'));
 		const stateSearchUrl = @json(route('bids.reference.states'));
 		const bidUrlSearchUrl = @json(route('bids.reference.bidUrls'));
+		const reportBidsAddedUrl = @json(route('bids.reports.bidsAdded'));
+		const reportRangeFrom = @json(($reportFrom ?? now('Asia/Manila')->startOfMonth())->toDateString());
+		const reportRangeTo = @json(($reportTo ?? now('Asia/Manila')->endOfMonth())->toDateString());
 		let entityPickerReq = 0;
 		let entityPickerSelectedLabel = '';
 
@@ -2767,6 +2872,82 @@
 				ncPageInput.remove();
 			}
 			filtersForm.requestSubmit();
+		});
+
+		function currentReportRange() {
+			const fromInput = document.querySelector('input[name="report_from"]');
+			const toInput = document.querySelector('input[name="report_to"]');
+			return {
+				from: (fromInput?.value || reportRangeFrom || '').trim(),
+				to: (toInput?.value || reportRangeTo || '').trim(),
+			};
+		}
+
+		async function openReportBidsAdded(userId, userLabel, count) {
+			const total = parseInt(String(count), 10) || 0;
+			if (total <= 0) return;
+
+			const modal = document.getElementById('reportBidsAddedModal');
+			const titleEl = document.getElementById('reportBidsAddedTitle');
+			const metaEl = document.getElementById('reportBidsAddedMeta');
+			const loadingEl = document.getElementById('reportBidsAddedLoading');
+			const emptyEl = document.getElementById('reportBidsAddedEmpty');
+			const tableWrap = document.getElementById('reportBidsAddedTableWrap');
+			const bodyEl = document.getElementById('reportBidsAddedBody');
+			if (!modal || !titleEl || !metaEl || !loadingEl || !emptyEl || !tableWrap || !bodyEl) return;
+
+			const range = currentReportRange();
+			titleEl.textContent = 'Bids added — ' + (userLabel || 'User');
+			metaEl.textContent = 'Showing ' + total.toLocaleString() + ' bid(s) · ' + range.from + ' to ' + range.to + ' (Asia/Manila)';
+			loadingEl.hidden = false;
+			emptyEl.hidden = true;
+			tableWrap.hidden = true;
+			bodyEl.innerHTML = '';
+			modal.showModal();
+
+			const params = new URLSearchParams({
+				user_id: String(userId || 0),
+				report_from: range.from,
+				report_to: range.to,
+			});
+
+			try {
+				const r = await fetch(reportBidsAddedUrl + '?' + params.toString(), {
+					headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': csrfToken },
+				});
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				const data = await r.json();
+				const rows = Array.isArray(data.rows) ? data.rows : [];
+				loadingEl.hidden = true;
+				if (!rows.length) {
+					emptyEl.hidden = false;
+					return;
+				}
+				bodyEl.innerHTML = rows.map(function (row) {
+					return '<tr>'
+						+ '<td style="white-space:nowrap;">' + escHtml(row.created_display || '—') + '</td>'
+						+ '<td>' + escHtml(row.title || 'Untitled') + '</td>'
+						+ '<td>' + escHtml(row.entity || '—') + '</td>'
+						+ '<td>' + escHtml(row.bid_url || '—') + '</td>'
+						+ '<td>' + escHtml(row.state || '—') + '</td>'
+						+ '</tr>';
+				}).join('');
+				tableWrap.hidden = false;
+			} catch (err) {
+				loadingEl.hidden = true;
+				emptyEl.textContent = 'Could not load bids. Please try again.';
+				emptyEl.hidden = false;
+			}
+		}
+
+		document.getElementById('panelReports')?.addEventListener('click', function (ev) {
+			const btn = ev.target.closest('.report-bids-added-link');
+			if (!btn) return;
+			openReportBidsAdded(
+				btn.dataset.userId || '0',
+				btn.dataset.userLabel || '',
+				btn.dataset.count || '0',
+			);
 		});
 
 		function tabDomSuffix(name) {
