@@ -96,7 +96,8 @@ class BidReportsService
 	 *     bid_url: string,
 	 *     state: string,
 	 *     created: string,
-	 *     created_display: string
+	 *     created_display: string,
+	 *     id: int
 	 * }>
 	 */
 	public function bidsAddedListing(
@@ -156,6 +157,7 @@ class BidReportsService
 			}
 
 			$out[] = [
+				'id' => (int) ($row['id'] ?? 0),
 				'title' => (string) ($row['title'] ?? ''),
 				'entity' => $entityId > 0 ? ($entityLabels[$entityId] ?? '—') : '—',
 				'bid_url' => $bidUrlLabel !== '' ? $bidUrlLabel : '—',
@@ -181,11 +183,12 @@ class BidReportsService
 				->whereIn('USERID', $userIds)
 				->whereBetween('CREATED', [$from, $to])
 				->orderByDesc('CREATED')
-				->get(['TITLE', 'ENTITYID', 'STATEID', 'BID_URL_ID', 'CREATED']);
+				->get(['ID', 'TITLE', 'ENTITYID', 'STATEID', 'BID_URL_ID', 'CREATED']);
 
 			foreach ($live as $bid) {
 				$created = $bid->getAttribute('CREATED');
 				$rows[] = [
+					'id' => (int) ($bid->getAttribute('ID') ?? $bid->getAttribute('id') ?? 0),
 					'title' => (string) ($bid->getAttribute('TITLE') ?? ''),
 					'entityid' => (int) ($bid->getAttribute('ENTITYID') ?? 0),
 					'stateid' => (int) ($bid->getAttribute('STATEID') ?? 0),

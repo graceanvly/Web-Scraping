@@ -16,6 +16,7 @@ use App\Services\BidUrlManualEntryService;
 use App\Services\ScraperService;
 use App\Support\BidDetailPayload;
 use App\Support\BidLiveColumnFilter;
+use App\Support\BidRecordPayload;
 use App\Support\ThirdPartyProcurementPortalUrl;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
@@ -590,6 +591,12 @@ class BidController extends Controller
 	public function showJson(Bid $bid, BidReferenceLookupService $lookup)
 	{
 		return response()->json(BidDetailPayload::fromLive($bid, $lookup));
+	}
+
+	/** JSON: all stored columns for a live bid (Reports drill-down raw record). */
+	public function showRecordJson(Bid $bid)
+	{
+		return response()->json(BidRecordPayload::fromLive($bid));
 	}
 
 	public function scrapeAll(Request $request, ScraperService $scraper, AIExtractor $ai, BidUrlManualEntryService $visitTracking)

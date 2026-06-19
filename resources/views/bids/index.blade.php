@@ -911,6 +911,110 @@
 			flex-shrink: 0;
 		}
 
+		dialog#reportBidsAddedModal table.report-bids-table tbody tr.report-bids-row {
+			cursor: pointer;
+		}
+
+		dialog#reportBidsAddedModal table.report-bids-table tbody tr.report-bids-row:hover {
+			background: #f1f5f9;
+		}
+
+		dialog#reportBidRecordModal {
+			width: min(1100px, 96vw) !important;
+			max-width: min(1100px, 96vw) !important;
+			max-height: 92dvh !important;
+			margin: auto;
+			border: none;
+			border-radius: 12px;
+			padding: 0 !important;
+			box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+			overflow: hidden;
+		}
+
+		dialog#reportBidRecordModal[open] {
+			display: flex !important;
+			flex-direction: column;
+		}
+
+		dialog#reportBidRecordModal::backdrop {
+			background: rgba(15, 23, 42, 0.45);
+		}
+
+		dialog#reportBidRecordModal .report-bid-record-shell {
+			display: flex;
+			flex-direction: column;
+			max-height: 92dvh;
+			margin: 0;
+			padding: 1.5rem 1.75rem 1.25rem;
+			box-sizing: border-box;
+			background: #fff;
+		}
+
+		dialog#reportBidRecordModal .report-bid-record-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: flex-start;
+			gap: 1rem;
+			flex-shrink: 0;
+		}
+
+		dialog#reportBidRecordModal .report-bid-record-loading,
+		dialog#reportBidRecordModal .report-bid-record-error {
+			color: #6b7280;
+			font-size: 0.9rem;
+			margin: 0.75rem 0 0;
+		}
+
+		dialog#reportBidRecordModal .report-bid-record-error {
+			color: #b91c1c;
+		}
+
+		dialog#reportBidRecordModal .report-bid-record-body-wrap {
+			flex: 1 1 auto;
+			overflow: auto;
+			min-height: 0;
+			margin-top: 1rem;
+			border: 1px solid #e5e7eb;
+			border-radius: 8px;
+		}
+
+		dialog#reportBidRecordModal table.report-bid-record-table {
+			width: 100%;
+			table-layout: fixed;
+			font-size: 0.85rem;
+		}
+
+		dialog#reportBidRecordModal table.report-bid-record-table th {
+			width: 220px;
+			vertical-align: top;
+			text-align: left;
+			background: #f8fafc;
+			font-weight: 600;
+			padding: 0.55rem 0.75rem;
+		}
+
+		dialog#reportBidRecordModal table.report-bid-record-table td {
+			vertical-align: top;
+			padding: 0.55rem 0.75rem;
+			overflow-wrap: anywhere;
+			word-break: break-word;
+		}
+
+		dialog#reportBidRecordModal .report-bid-record-value {
+			margin: 0;
+			white-space: pre-wrap;
+			font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+			font-size: 0.82rem;
+			line-height: 1.45;
+		}
+
+		dialog#reportBidRecordModal .report-bid-record-footer {
+			display: flex;
+			justify-content: flex-end;
+			margin-top: 1rem;
+			flex-shrink: 0;
+		}
+
 		.issue-badge {
 			display: inline-block;
 			padding: 0.15rem 0.55rem;
@@ -2073,6 +2177,26 @@
 		</article>
 	</dialog>
 
+	<!-- Reports: raw bid record drill-down -->
+	<dialog id="reportBidRecordModal">
+		<article class="report-bid-record-shell">
+			<div class="report-bid-record-header">
+				<h3 id="reportBidRecordTitle" style="margin:0; font-size:1.15rem; font-weight:600; color:#1f2937;">Bid record</h3>
+				<button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280; padding:0; line-height:1;" onclick="document.getElementById('reportBidRecordModal').close()">&times;</button>
+			</div>
+			<p id="reportBidRecordLoading" class="report-bid-record-loading" hidden>Loading record…</p>
+			<p id="reportBidRecordError" class="report-bid-record-error" hidden></p>
+			<div id="reportBidRecordBodyWrap" class="report-bid-record-body-wrap" hidden>
+				<table class="report-bid-record-table">
+					<tbody id="reportBidRecordBody"></tbody>
+				</table>
+			</div>
+			<footer class="report-bid-record-footer">
+				<button type="button" class="secondary" onclick="document.getElementById('reportBidRecordModal').close()">Close</button>
+			</footer>
+		</article>
+	</dialog>
+
 	</div>
 	</div>
 
@@ -2381,6 +2505,7 @@
 		const stateSearchUrl = @json(route('bids.reference.states'));
 		const bidUrlSearchUrl = @json(route('bids.reference.bidUrls'));
 		const reportBidsAddedUrl = @json(route('bids.reports.bidsAdded'));
+		const bidRecordUrlTpl = @json(route('bids.record', ['bid' => '__ID__']));
 		const reportRangeFrom = @json(($reportFrom ?? now('Asia/Manila')->startOfMonth())->toDateString());
 		const reportRangeTo = @json(($reportTo ?? now('Asia/Manila')->endOfMonth())->toDateString());
 		let entityPickerReq = 0;
@@ -3031,6 +3156,58 @@
 			return '<span class="report-bids-url"' + titleAttr + '>' + escHtml(display) + '</span>';
 		}
 
+		function formatReportBidRecordValue(value) {
+			if (value === null || value === undefined) return '';
+			if (typeof value === 'object') return JSON.stringify(value, null, 2);
+			return String(value);
+		}
+
+		function renderReportBidRecordTable(record) {
+			return Object.keys(record).sort().map(function (key) {
+				const value = formatReportBidRecordValue(record[key]);
+				return '<tr>'
+					+ '<th scope="row">' + escHtml(key) + '</th>'
+					+ '<td><pre class="report-bid-record-value">' + escHtml(value) + '</pre></td>'
+					+ '</tr>';
+			}).join('');
+		}
+
+		async function openReportBidRecord(bidId) {
+			const modal = document.getElementById('reportBidRecordModal');
+			const titleEl = document.getElementById('reportBidRecordTitle');
+			const loadingEl = document.getElementById('reportBidRecordLoading');
+			const errorEl = document.getElementById('reportBidRecordError');
+			const bodyWrap = document.getElementById('reportBidRecordBodyWrap');
+			const bodyEl = document.getElementById('reportBidRecordBody');
+			if (!modal || !titleEl || !loadingEl || !errorEl || !bodyWrap || !bodyEl) return;
+
+			titleEl.textContent = 'Bid record #' + bidId;
+			loadingEl.hidden = false;
+			errorEl.hidden = true;
+			bodyWrap.hidden = true;
+			bodyEl.innerHTML = '';
+			modal.showModal();
+
+			try {
+				const url = bidRecordUrlTpl.replace('__ID__', encodeURIComponent(String(bidId)));
+				const r = await fetch(url, {
+					headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+				});
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				const record = await r.json();
+				const recordId = record.ID != null ? record.ID : bidId;
+				const recordTitle = record.TITLE ? String(record.TITLE) : 'Bid record';
+				titleEl.textContent = recordTitle + ' (#' + recordId + ')';
+				bodyEl.innerHTML = renderReportBidRecordTable(record);
+				loadingEl.hidden = true;
+				bodyWrap.hidden = false;
+			} catch (err) {
+				loadingEl.hidden = true;
+				errorEl.textContent = 'Could not load bid record. Please try again.';
+				errorEl.hidden = false;
+			}
+		}
+
 		function renderReportBidsAddedRows(rows) {
 			const bodyEl = document.getElementById('reportBidsAddedBody');
 			const tableWrap = document.getElementById('reportBidsAddedTableWrap');
@@ -3048,7 +3225,11 @@
 
 			noMatchesEl.hidden = true;
 			bodyEl.innerHTML = rows.map(function (row) {
-				return '<tr>'
+				const bidId = parseInt(String(row.id), 10) || 0;
+				const rowAttrs = bidId > 0
+					? ' class="report-bids-row" data-bid-id="' + bidId + '" title="View raw record"'
+					: '';
+				return '<tr' + rowAttrs + '>'
 					+ '<td>' + escHtml(row.created_display || '—') + '</td>'
 					+ '<td>' + escHtml(row.title || 'Untitled') + '</td>'
 					+ '<td>' + escHtml(row.entity || '—') + '</td>'
@@ -3129,6 +3310,13 @@
 		}
 
 		document.getElementById('reportBidsAddedSearch')?.addEventListener('input', filterReportBidsAddedRows);
+
+		document.getElementById('reportBidsAddedBody')?.addEventListener('click', function (ev) {
+			const row = ev.target.closest('tr.report-bids-row');
+			if (!row) return;
+			const bidId = parseInt(row.dataset.bidId || '0', 10);
+			if (bidId > 0) openReportBidRecord(bidId);
+		});
 
 		document.getElementById('panelReports')?.addEventListener('click', function (ev) {
 			const btn = ev.target.closest('.report-bids-added-link');
