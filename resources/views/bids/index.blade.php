@@ -761,27 +761,44 @@
 			cursor: default;
 		}
 
-		#reportBidsAddedModal {
-			max-width: none;
-			width: 100vw;
-			height: 100vh;
-			max-height: 100vh;
-			margin: 0;
-			padding: 0;
+		/* Pico constrains dialog > article width and centers it — override for full-viewport modal */
+		dialog#reportBidsAddedModal {
+			width: 100vw !important;
+			max-width: 100vw !important;
+			height: 100dvh !important;
+			max-height: 100dvh !important;
+			margin: 0 !important;
+			padding: 0 !important;
 			border: none;
 			border-radius: 0;
+			box-shadow: none;
+			overflow: hidden;
 		}
 
-		#reportBidsAddedModal .report-bids-shell {
+		dialog#reportBidsAddedModal[open] {
+			display: flex !important;
+			flex-direction: column;
+			align-items: stretch !important;
+			justify-content: stretch;
+		}
+
+		dialog#reportBidsAddedModal::backdrop {
+			background: rgba(15, 23, 42, 0.45);
+		}
+
+		dialog#reportBidsAddedModal .report-bids-shell {
+			width: 100% !important;
+			max-width: none !important;
+			margin: 0 !important;
 			display: flex;
 			flex-direction: column;
-			height: 100vh;
-			margin: 0;
+			height: 100dvh;
 			padding: 1.25rem 1.5rem 1rem;
 			box-sizing: border-box;
+			background: var(--pico-background-color, #fff);
 		}
 
-		#reportBidsAddedModal .report-bids-header {
+		dialog#reportBidsAddedModal .report-bids-header {
 			display: flex;
 			justify-content: space-between;
 			align-items: flex-start;
@@ -789,13 +806,13 @@
 			flex-shrink: 0;
 		}
 
-		#reportBidsAddedModal .report-bids-meta {
+		dialog#reportBidsAddedModal .report-bids-meta {
 			color: #6b7280;
 			font-size: 0.88rem;
 			margin: 0.25rem 0 0;
 		}
 
-		#reportBidsAddedModal .report-bids-toolbar {
+		dialog#reportBidsAddedModal .report-bids-toolbar {
 			display: flex;
 			flex-wrap: wrap;
 			align-items: center;
@@ -804,26 +821,26 @@
 			flex-shrink: 0;
 		}
 
-		#reportBidsAddedModal .report-bids-search {
+		dialog#reportBidsAddedModal .report-bids-search {
 			flex: 1 1 280px;
 			max-width: 420px;
 			margin: 0;
 		}
 
-		#reportBidsAddedModal .report-bids-filter-meta {
+		dialog#reportBidsAddedModal .report-bids-filter-meta {
 			font-size: 0.85rem;
 			color: #6b7280;
 			white-space: nowrap;
 		}
 
-		#reportBidsAddedModal .report-bids-loading {
+		dialog#reportBidsAddedModal .report-bids-loading {
 			color: #6b7280;
 			font-size: 0.9rem;
 			margin: 0;
 			flex-shrink: 0;
 		}
 
-		#reportBidsAddedModal .report-bids-table-wrap {
+		dialog#reportBidsAddedModal .report-bids-table-wrap {
 			flex: 1 1 auto;
 			overflow: auto;
 			min-height: 0;
@@ -831,19 +848,19 @@
 			border-radius: 8px;
 		}
 
-		#reportBidsAddedModal table {
+		dialog#reportBidsAddedModal table {
 			width: 100%;
 			font-size: 0.88rem;
 		}
 
-		#reportBidsAddedModal th {
+		dialog#reportBidsAddedModal th {
 			position: sticky;
 			top: 0;
 			background: #f8fafc;
 			z-index: 1;
 		}
 
-		#reportBidsAddedModal .report-bids-footer {
+		dialog#reportBidsAddedModal .report-bids-footer {
 			display: flex;
 			justify-content: flex-end;
 			margin-top: 1rem;
