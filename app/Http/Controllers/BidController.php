@@ -10,11 +10,15 @@ use App\Models\ScrapeLog;
 use App\Models\TempBid;
 use Illuminate\Database\Eloquent\Model;
 use App\Services\AIExtractor;
+use App\Services\BidDuplicateMatcher;
+use App\Services\BidDuplicateRunTracker;
 use App\Services\BidReferenceLookupService;
 use App\Services\BidReportsService;
 use App\Services\BidUrlManualEntryService;
 use App\Services\ScraperService;
 use App\Support\BidDetailPayload;
+use App\Support\BidDuplicateMatch;
+use App\Support\BidIdentity;
 use App\Support\BidLiveColumnFilter;
 use App\Support\BidRecordPayload;
 use App\Support\BidUrlScrapeMarker;
@@ -287,6 +291,7 @@ class BidController extends Controller
 			$saved = [];
 			$duplicates = [];
 			$nonBids = [];
+			$possibleDuplicates = [];
 
 			$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
 			$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $validated['URL'], null);
@@ -294,24 +299,30 @@ class BidController extends Controller
 
 			$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $validated['URL']);
 
+			$duplicateMatcher = app(BidDuplicateMatcher::class);
+			$runTracker = new BidDuplicateRunTracker();
+
 			foreach ($filteredBids as $bidData) {
 				$rawTitle = $bidData['TITLE'] ?? null;
 				if (!$rawTitle) {
 					continue;
 				}
-				$title = $titleMap[$rawTitle] ?? $rawTitle;
-				$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
 				$savedUrl = $this->resolveScrapedBidUrl($validated['URL'], $bidData, $result['bid_pages'] ?? [], $rawTitle);
-
 				$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
-				$exists = $this->scrapeBidAlreadyExists($title, $savedUrl, $endDate);
-
-				if ($exists) {
-					$duplicates[] = $title;
+				$dup = $this->evaluateScrapedBidDuplicate($bidData, $savedUrl, null, $duplicateMatcher, $runTracker);
+				if ($dup !== null && $dup->shouldSkipSave()) {
+					$duplicates[] = $rawTitle;
 					continue;
 				}
+				if ($dup !== null && $dup->isPossibleDuplicate()) {
+					$possibleDuplicates[] = $rawTitle;
+				}
+
+				$title = $titleMap[$rawTitle] ?? $rawTitle;
+				$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
+				$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, null, $title);
 
 				$description = $bidData['DESCRIPTION'] ?? '';
 				if (is_array($description)) {
@@ -325,7 +336,7 @@ class BidController extends Controller
 					$description = $result['pdf_bids'][0]['PDF_LINK'];
 				}
 
-				if (!$this->looksLikeBid($title, $description, $validated['URL'], $endDate)) {
+				if (!$this->looksLikeBid($title, $description, $validated['URL'], $endDate, $identity)) {
 					$nonBids[] = $title;
 					continue;
 				}
@@ -349,6 +360,7 @@ class BidController extends Controller
 				$this->applyScrapeCreatedBidDefaults($bid);
 				$bid->save();
 
+				$runTracker->remember($identity);
 				$saved[] = $bid->id;
 			}
 
@@ -371,6 +383,9 @@ class BidController extends Controller
 			}
 			if ($duplicates) {
 				$msg .= count($duplicates) . ' duplicate bid(s) skipped.';
+			}
+			if ($possibleDuplicates) {
+				$msg .= ' ' . count($possibleDuplicates) . ' possible duplicate(s) saved for review.';
 			}
 			if ($nonBids) {
 				$msg .= ' No Bids Found. Please check the URL.';
@@ -522,17 +537,25 @@ class BidController extends Controller
 				$send(['type' => 'status', 'step' => 'Saving bids...']);
 				$savedCount = 0;
 				$duplicateCount = 0;
+				$possibleDuplicateCount = 0;
+				$rejectedCount = 0;
+				$duplicateMatcher = app(BidDuplicateMatcher::class);
+				$runTracker = new BidDuplicateRunTracker();
 
 				foreach ($filteredBids as $bidData) {
 					$rawTitle = $bidData['TITLE'] ?? null;
 					if (!$rawTitle) continue;
-					$title = $titleMap[$rawTitle] ?? $rawTitle;
-					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
 					$savedUrl = $this->resolveScrapedBidUrl($url, $bidData, $result['bid_pages'] ?? [], $rawTitle);
 					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
-					if ($this->scrapeBidAlreadyExists($title, $savedUrl, $endDate)) { $duplicateCount++; continue; }
+					$dup = $this->evaluateScrapedBidDuplicate($bidData, $savedUrl, null, $duplicateMatcher, $runTracker);
+					if ($dup !== null && $dup->shouldSkipSave()) { $duplicateCount++; continue; }
+					if ($dup !== null && $dup->isPossibleDuplicate()) { $possibleDuplicateCount++; }
+
+					$title = $titleMap[$rawTitle] ?? $rawTitle;
+					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
+					$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, null, $title);
 
 					$description = $bidData['DESCRIPTION'] ?? '';
 					if (is_array($description)) $description = $this->formatDescriptionArray($description);
@@ -540,7 +563,7 @@ class BidController extends Controller
 					if (empty($description) && !empty($result['pdf_text'])) $description = $result['pdf_text'];
 					if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) $description = $result['pdf_bids'][0]['PDF_LINK'];
 
-					if (!$this->looksLikeBid($title, $description, $url, $endDate)) continue;
+					if (!$this->looksLikeBid($title, $description, $url, $endDate, $identity)) { $rejectedCount++; continue; }
 
 					$bid = new TempBid();
 					$bid->URL = $savedUrl;
@@ -556,12 +579,13 @@ class BidController extends Controller
 					$this->applyScrapeAssignUserId($bid, $assignUserId);
 					$this->applyScrapeCreatedBidDefaults($bid);
 					$bid->save();
+					$runTracker->remember($identity);
 					$savedCount++;
 
 					$send(['type' => 'saved_bid', 'title' => $title]);
 				}
 
-				$send(['type' => 'complete', 'saved' => $savedCount, 'duplicates' => $duplicateCount]);
+				$send(['type' => 'complete', 'saved' => $savedCount, 'duplicates' => $duplicateCount, 'possible_duplicates' => $possibleDuplicateCount, 'rejected' => $rejectedCount]);
 			} catch (\Throwable $e) {
 				Log::error('Single URL scrape failed', ['url' => $url, 'error' => $e->getMessage()]);
 				$this->logIssue(null, $url, 'error', $this->friendlyExceptionMessage($e));
@@ -625,7 +649,7 @@ class BidController extends Controller
 					continue;
 				}
 
-				if ($bidUrl->last_scraped_at && $bidUrl->last_scraped_at->isToday()) {
+				if ($this->shouldSkipBidUrlScrapedToday($bidUrl)) {
 					$totalSkipped++;
 					continue;
 				}
@@ -705,6 +729,7 @@ class BidController extends Controller
 				$savedThisUrl = 0;
 				$duplicatesThisUrl = 0;
 				$nonBidsThisUrl = 0;
+				$possibleDuplicatesThisUrl = 0;
 
 				$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
 				$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $url, null);
@@ -712,22 +737,30 @@ class BidController extends Controller
 
 				$this->guardUrlBudget($urlStartedAt, $this->scrapeUrlMaxSeconds(), $url);
 
+				$duplicateMatcher = app(BidDuplicateMatcher::class);
+				$runTracker = new BidDuplicateRunTracker();
+
 				foreach ($filteredBids as $bidData) {
 					$rawTitle = $bidData['TITLE'] ?? null;
 					if (!$rawTitle) {
 						continue;
 					}
-					$title = $titleMap[$rawTitle] ?? $rawTitle;
-					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
 					$savedUrl = $this->resolveScrapedBidUrl($url, $bidData, $result['bid_pages'] ?? [], $rawTitle);
-
 					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
-					if ($this->scrapeBidAlreadyExists($title, $savedUrl, $endDate)) {
+					$dup = $this->evaluateScrapedBidDuplicate($bidData, $savedUrl, (int) $bidUrl->id, $duplicateMatcher, $runTracker);
+					if ($dup !== null && $dup->shouldSkipSave()) {
 						$duplicatesThisUrl++;
 						continue;
 					}
+					if ($dup !== null && $dup->isPossibleDuplicate()) {
+						$possibleDuplicatesThisUrl++;
+					}
+
+					$title = $titleMap[$rawTitle] ?? $rawTitle;
+					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
+					$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, (int) $bidUrl->id, $title);
 
 					$description = $bidData['DESCRIPTION'] ?? '';
 					if (is_array($description)) {
@@ -741,7 +774,7 @@ class BidController extends Controller
 						$description = $result['pdf_bids'][0]['PDF_LINK'];
 					}
 
-					if (!$this->looksLikeBid($title, $description, $url, $endDate)) {
+					if (!$this->looksLikeBid($title, $description, $url, $endDate, $identity)) {
 						$nonBidsThisUrl++;
 						continue;
 					}
@@ -774,6 +807,7 @@ class BidController extends Controller
 					$this->applyScrapeAssignUserId($bid, $assignUserId);
 					$this->applyScrapeCreatedBidDefaults($bid);
 					$bid->save();
+					$runTracker->remember($identity);
 
 					$savedThisUrl++;
 				}
@@ -784,6 +818,7 @@ class BidController extends Controller
 				Log::info('Scrape summary for ' . $url, [
 					'saved' => $savedThisUrl,
 					'duplicates' => $duplicatesThisUrl,
+					'possible_duplicates' => $possibleDuplicatesThisUrl,
 					'non_bids' => $nonBidsThisUrl,
 				]);
 
@@ -882,6 +917,8 @@ class BidController extends Controller
 			$total = $bidUrls->count();
 			$totalSaved = 0;
 			$totalDuplicates = 0;
+			$totalPossibleDuplicates = 0;
+			$totalRejected = 0;
 			$totalSkipped = 0;
 			$totalIssues = 0;
 
@@ -928,7 +965,7 @@ class BidController extends Controller
 					continue;
 				}
 
-				if ($bidUrl->last_scraped_at && $bidUrl->last_scraped_at->isToday()) {
+				if ($this->shouldSkipBidUrlScrapedToday($bidUrl)) {
 					$totalSkipped++;
 					$send(['type' => 'skip', 'index' => $idx + 1, 'url' => $url, 'reason' => 'Already scraped today']);
 					continue;
@@ -1051,6 +1088,7 @@ class BidController extends Controller
 					$savedThisUrl = 0;
 					$duplicatesThisUrl = 0;
 					$nonBidsThisUrl = 0;
+					$possibleDuplicatesThisUrl = 0;
 
 					$rawTitles = $filteredBids->pluck('TITLE')->filter()->values()->all();
 					$rewrittenTitles = $this->maybeRewriteScrapeTitles($ai, $rawTitles, $urlStartedAt, $url, function (string $ev, array $ctx) use ($send, $idx) {
@@ -1083,21 +1121,30 @@ class BidController extends Controller
 					$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
 					$send(['type' => 'status', 'index' => $idx + 1, 'step' => 'Saving bids...']);
 
+					$duplicateMatcher = app(BidDuplicateMatcher::class);
+					$runTracker = new BidDuplicateRunTracker();
+
 					foreach ($filteredBids as $bidData) {
 						$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
 						$rawTitle = $bidData['TITLE'] ?? null;
 						if (!$rawTitle)
 							continue;
-						$title = $titleMap[$rawTitle] ?? $rawTitle;
-						$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
 						$savedUrl = $this->resolveScrapedBidUrl($url, $bidData, $result['bid_pages'] ?? [], $rawTitle);
 						$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
 
-						if ($this->scrapeBidAlreadyExists($title, $savedUrl, $endDate)) {
+						$dup = $this->evaluateScrapedBidDuplicate($bidData, $savedUrl, (int) $bidUrl->id, $duplicateMatcher, $runTracker);
+						if ($dup !== null && $dup->shouldSkipSave()) {
 							$duplicatesThisUrl++;
 							continue;
 						}
+						if ($dup !== null && $dup->isPossibleDuplicate()) {
+							$possibleDuplicatesThisUrl++;
+						}
+
+						$title = $titleMap[$rawTitle] ?? $rawTitle;
+						$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
+						$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, (int) $bidUrl->id, $title);
 
 						$description = $bidData['DESCRIPTION'] ?? '';
 						if (is_array($description))
@@ -1108,7 +1155,7 @@ class BidController extends Controller
 						if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? ''))
 							$description = $result['pdf_bids'][0]['PDF_LINK'];
 
-						if (!$this->looksLikeBid($title, $description, $url, $endDate)) {
+						if (!$this->looksLikeBid($title, $description, $url, $endDate, $identity)) {
 							$nonBidsThisUrl++;
 							continue;
 						}
@@ -1136,11 +1183,14 @@ class BidController extends Controller
 						$this->applyScrapeAssignUserId($bid, $assignUserId);
 						$this->applyScrapeCreatedBidDefaults($bid);
 						$bid->save();
+						$runTracker->remember($identity);
 						$savedThisUrl++;
 					}
 
 					$totalSaved += $savedThisUrl;
 					$totalDuplicates += $duplicatesThisUrl;
+					$totalPossibleDuplicates += $possibleDuplicatesThisUrl;
+					$totalRejected += $nonBidsThisUrl;
 
 					$expiredFiltered = max(0, $aiBidCount - $filteredBids->count());
 					Log::info('Scrape URL summary', [
@@ -1150,6 +1200,7 @@ class BidController extends Controller
 						'expired_filtered' => $expiredFiltered,
 						'saved' => $savedThisUrl,
 						'duplicates' => $duplicatesThisUrl,
+						'possible_duplicates' => $possibleDuplicatesThisUrl,
 						'rejected_non_bid' => $nonBidsThisUrl,
 					]);
 
@@ -1178,6 +1229,8 @@ class BidController extends Controller
 						'url' => $url,
 						'saved' => $savedThisUrl,
 						'duplicates' => $duplicatesThisUrl,
+						'possible_duplicates' => $possibleDuplicatesThisUrl,
+						'rejected' => $nonBidsThisUrl,
 						'message' => $doneMessage,
 					]);
 
@@ -1213,6 +1266,8 @@ class BidController extends Controller
 				'type' => 'complete',
 				'total_saved' => $totalSaved,
 				'total_duplicates' => $totalDuplicates,
+				'total_possible_duplicates' => $totalPossibleDuplicates,
+				'total_rejected' => $totalRejected,
 				'total_skipped' => $totalSkipped,
 				'total_issues' => $totalIssues,
 			]);
@@ -2233,50 +2288,52 @@ class BidController extends Controller
 		return ThirdPartyProcurementPortalUrl::resolveSavedBidUrl($listingUrl, $detailUrl, $bidPages, $title);
 	}
 
-	private function scrapeBidAlreadyExists(string $title, string $savedUrl, ?string $endDate): bool
+	private function shouldSkipBidUrlScrapedToday(BidUrl $bidUrl): bool
 	{
-		// Same title + (matching URL or end date) already live OR already queued for approval.
-		$matches = function ($q) use ($title, $savedUrl, $endDate) {
-			$q->where('TITLE', $title)
-				->where(function ($q1) use ($savedUrl, $endDate) {
-					if ($savedUrl === '') {
-						$q1->where(function ($q2) {
-							$q2->whereNull('URL')->orWhere('URL', '');
-						});
-					} else {
-						$q1->where('URL', $savedUrl);
-					}
-					if ($endDate) {
-						$q1->orWhere(function ($q2) use ($endDate) {
-							$q2->where('ENDDATE', $endDate);
-						});
-					}
-				});
-		};
-
-		if (Bid::where($matches)->exists()) {
-			return true;
-		}
-
-		try {
-			return TempBid::where($matches)->exists();
-		} catch (\Throwable $e) {
-			Log::warning('Pending-bid duplicate check failed', ['error' => $e->getMessage()]);
-
+		if (!config('scraper.bid_skip_url_if_scraped_today', false)) {
 			return false;
 		}
+
+		return $bidUrl->last_scraped_at && $bidUrl->last_scraped_at->isToday();
 	}
 
-	private function looksLikeBid(?string $title, ?string $description, ?string $url, ?string $endDate): bool
+	/**
+	 * @param  array<string, mixed>  $bidData
+	 */
+	private function evaluateScrapedBidDuplicate(
+		array $bidData,
+		string $savedUrl,
+		?int $bidUrlId,
+		BidDuplicateMatcher $matcher,
+		BidDuplicateRunTracker $runTracker,
+	): ?BidDuplicateMatch {
+		$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, $bidUrlId);
+		if ($runTracker->seen($identity)) {
+			return new BidDuplicateMatch(
+				tier: BidDuplicateMatch::TIER_A,
+				table: 'in_run',
+				recordId: 0,
+				reason: 'in_run_tier_a',
+			);
+		}
+
+		return $matcher->match($identity);
+	}
+
+	private function looksLikeBid(?string $title, ?string $description, ?string $url, ?string $endDate, ?BidIdentity $identity = null): bool
 	{
 		$title = trim((string) $title);
 		$desc = strtolower((string) $description);
 		$url = strtolower((string) $url);
 		$host = strtolower((string) parse_url($url, PHP_URL_HOST));
 
-		// Require an end date to consider this a bid.
+		$requireEndDate = (bool) config('scraper.bid_require_enddate_for_save', true);
 		if (empty($endDate)) {
-			return false;
+			if (!$requireEndDate && $identity !== null && $identity->hasTierAKey()) {
+				// Allow stable-key bids without a parsed end date.
+			} else {
+				return false;
+			}
 		}
 
 		// Titles that are too short or generic are unlikely to be bids.

@@ -73,6 +73,12 @@
 	/** Empty = auto-detect last_scraped_at then END_TIME. Oracle BIDURL uses END_TIME. */
 	'bid_url_last_scraped_column' => env('SCRAPER_BID_URL_LAST_SCRAPED_COLUMN', ''),
 
+	/** When false, allow saving bids without ENDDATE if URL/solicitation/third-party id is present. */
+	'bid_require_enddate_for_save' => filter_var(env('SCRAPER_REQUIRE_ENDDATE_FOR_SAVE', true), FILTER_VALIDATE_BOOL),
+
+	/** When true, skip entire Bid URL rows already scraped today (legacy). Default false — per-bid dedup is safer. */
+	'bid_skip_url_if_scraped_today' => filter_var(env('SCRAPER_BID_SKIP_URL_IF_SCRAPED_TODAY', false), FILTER_VALIDATE_BOOL),
+
 	/*
 	|--------------------------------------------------------------------------
 	| ENTITY reference (ENTITYID on bid)

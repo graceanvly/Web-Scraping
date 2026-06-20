@@ -7,6 +7,8 @@ use App\Models\BidUrl;
 use App\Models\BidUrlHistory;
 use App\Models\FailedBidUrl;
 use App\Models\TempBid;
+use App\Services\BidDuplicateMatcher;
+use App\Support\BidIdentity;
 use App\Support\BidLiveWriter;
 use App\Support\BidUrlScrapeMarker;
 use App\Support\PendingBidLiveMapper;
@@ -319,6 +321,12 @@ class BidUrlManualEntryService
 			$temp->LAST_MODIFIED = now();
 			$temp->SUBSCRIPTIONTYPEID = 10;
 			$temp->SETASIDECODEID = 1;
+
+			$dup = app(BidDuplicateMatcher::class)->match(BidIdentity::fromTempBid($temp));
+			if ($dup !== null && $dup->shouldSkipSave()) {
+				return 'duplicate';
+			}
+
 			$temp->save();
 
 			$result = 'pending';
@@ -353,6 +361,12 @@ class BidUrlManualEntryService
 			$temp->LAST_MODIFIED = now();
 			$temp->SUBSCRIPTIONTYPEID = 10;
 			$temp->SETASIDECODEID = 1;
+
+			$dup = app(BidDuplicateMatcher::class)->match(BidIdentity::fromTempBid($temp));
+			if ($dup !== null && $dup->shouldSkipSave()) {
+				return 'duplicate';
+			}
+
 			$temp->save();
 
 			$result = 'pending';
@@ -403,7 +417,16 @@ class BidUrlManualEntryService
 	/** @return 'approved'|'duplicate' */
 	private function promoteTempBid(TempBid $temp): string
 	{
-		if ($this->liveBidExists($temp)) {
+		$matcher = app(BidDuplicateMatcher::class);
+		$existing = $matcher->findMatchingLiveBid($temp);
+		if ($existing !== null) {
+			if ($matcher->shouldPatchLiveOnDuplicate($temp, $existing)) {
+				$attrs = PendingBidLiveMapper::attributesForInsert($temp);
+				BidLiveWriter::applyAttributes($existing, PendingBidLiveMapper::withoutPrimaryKey($attrs));
+				$existing->LAST_MODIFIED = now();
+				$existing->save();
+				BidLiveWriter::patchReferenceIds($existing, $attrs);
+			}
 			$temp->delete();
 
 			return 'duplicate';
@@ -418,31 +441,5 @@ class BidUrlManualEntryService
 		$temp->delete();
 
 		return 'approved';
-	}
-
-	private function liveBidExists(TempBid $pendingBid): bool
-	{
-		$title = (string) ($pendingBid->TITLE ?? '');
-		if ($title === '') {
-			return false;
-		}
-
-		$url = (string) ($pendingBid->URL ?? '');
-		$endDate = $pendingBid->ENDDATE ? (string) $pendingBid->ENDDATE : null;
-
-		return Bid::where('TITLE', $title)
-			->where(function ($q) use ($url, $endDate) {
-				if ($url === '') {
-					$q->where(function ($q2) {
-						$q2->whereNull('URL')->orWhere('URL', '');
-					});
-				} else {
-					$q->where('URL', $url);
-				}
-				if ($endDate) {
-					$q->orWhere('ENDDATE', $endDate);
-				}
-			})
-			->exists();
 	}
 }

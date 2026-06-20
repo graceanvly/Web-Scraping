@@ -3684,7 +3684,13 @@
 
 					case 'done_url':
 						stopBulkStepElapsed();
-						addLogLine(ev.url + ' — ' + ev.saved + ' saved, ' + ev.duplicates + ' duplicates' + (ev.message ? ' (' + ev.message + ')' : ''), ev.saved > 0 ? '#16a34a' : '#6b7280');
+						{
+							let line = ev.url + ' — ' + ev.saved + ' saved, ' + ev.duplicates + ' duplicates';
+							if (ev.possible_duplicates > 0) line += ', ' + ev.possible_duplicates + ' possible duplicate(s)';
+							if (ev.rejected > 0) line += ', ' + ev.rejected + ' rejected';
+							if (ev.message) line += ' (' + ev.message + ')';
+							addLogLine(line, ev.saved > 0 ? '#16a34a' : '#6b7280');
+						}
 						break;
 
 					case 'error':
@@ -3720,6 +3726,8 @@
 						if (stopBtn) stopBtn.style.display = 'none';
 						let msg = ev.total_saved + ' new bid(s) saved.';
 						if (ev.total_duplicates > 0) msg += ' ' + ev.total_duplicates + ' duplicate(s).';
+						if (ev.total_possible_duplicates > 0) msg += ' ' + ev.total_possible_duplicates + ' possible duplicate(s) saved.';
+						if (ev.total_rejected > 0) msg += ' ' + ev.total_rejected + ' rejected.';
 						if (ev.total_skipped > 0) msg += ' ' + ev.total_skipped + ' already scraped today.';
 						if (ev.total_issues > 0) msg += ' ' + ev.total_issues + ' issue(s).';
 						progressTitle.textContent = 'Complete! ' + msg;
@@ -3872,6 +3880,8 @@
 						progressBar.style.width = '100%';
 						let msg = ev.saved + ' bid(s) saved.';
 						if (ev.duplicates > 0) msg += ' ' + ev.duplicates + ' duplicate(s).';
+						if (ev.possible_duplicates > 0) msg += ' ' + ev.possible_duplicates + ' possible duplicate(s).';
+						if (ev.rejected > 0) msg += ' ' + ev.rejected + ' rejected.';
 						if (ev.saved > 0) {
 							progressBar.style.background = '#16a34a';
 							progressTitle.textContent = 'Done! ' + msg;

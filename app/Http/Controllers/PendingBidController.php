@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Bid;
 use App\Models\TempBid;
+use App\Services\BidDuplicateMatcher;
 use App\Services\BidReferenceLookupService;
 use App\Services\PendingSimilarEntriesService;
 use App\Support\BidDetailPayload;
@@ -334,19 +335,13 @@ class PendingBidController extends Controller
 	private function promoteToLive(TempBid $pendingBid, bool $fromEditModal = false, array $referenceIds = []): string
 	{
 		return DB::transaction(function () use ($pendingBid, $fromEditModal, $referenceIds) {
-			$existing = $this->findMatchingLiveBid($pendingBid);
+			$matcher = app(BidDuplicateMatcher::class);
+			$existing = $matcher->findMatchingLiveBid($pendingBid);
 			if ($existing !== null) {
 				$liveId = $existing->getKey();
-				if ($fromEditModal) {
+				if ($fromEditModal || $matcher->shouldPatchLiveOnDuplicate($pendingBid, $existing)) {
 					PendingBidApproveLogger::duplicateMatched((int) $pendingBid->id, $liveId ?? 0, true);
 					$this->applyPendingAttrsToLiveBid($pendingBid, $existing, $referenceIds);
-					// Log::info('Pending approve: updated existing live bid from edit modal', [
-					// 	'temp_id' => $pendingBid->id,
-					// 	'live_id' => $liveId,
-					// 	'entityid' => $existing->getAttribute('ENTITYID'),
-					// 	'stateid' => $existing->getAttribute('STATEID'),
-					// 	'bid_url_id' => $existing->getAttribute('BID_URL_ID'),
-					// ]);
 				} else {
 					PendingBidApproveLogger::duplicateMatched((int) $pendingBid->id, $liveId ?? 0, false);
 					PendingBidApproveLogger::duplicateSkipped((int) $pendingBid->id, $liveId ?? 0);
@@ -391,33 +386,8 @@ class PendingBidController extends Controller
 		});
 	}
 
-	private function findMatchingLiveBid(TempBid $pendingBid): ?Bid
-	{
-		$title = (string) ($pendingBid->TITLE ?? '');
-		if ($title === '') {
-			return null;
-		}
-		$url = (string) ($pendingBid->URL ?? '');
-		$endDate = $pendingBid->ENDDATE ? (string) $pendingBid->ENDDATE : null;
-
-		return Bid::where('TITLE', $title)
-			->where(function ($q) use ($url, $endDate) {
-				if ($url === '') {
-					$q->where(function ($q2) {
-						$q2->whereNull('URL')->orWhere('URL', '');
-					});
-				} else {
-					$q->where('URL', $url);
-				}
-				if ($endDate) {
-					$q->orWhere('ENDDATE', $endDate);
-				}
-			})
-			->first();
-	}
-
 	private function liveBidExists(TempBid $pendingBid): bool
 	{
-		return $this->findMatchingLiveBid($pendingBid) !== null;
+		return app(BidDuplicateMatcher::class)->liveBidExists($pendingBid);
 	}
 }
