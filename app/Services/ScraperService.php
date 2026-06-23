@@ -494,7 +494,7 @@ class ScraperService
 			return false;
 		}
 
-		$suffixes = ['bonfirehub.com', 'bidnetdirect.com'];
+		$suffixes = ['bonfirehub.com', 'bidnetdirect.com', 'pr-webs-customer.des.wa.gov'];
 		foreach (array_filter(array_map('trim', explode(',', (string) env('SCRAPER_HEAVY_PORTAL_HOST_SUFFIXES', '')))) as $s) {
 			if ($s !== '') {
 				$suffixes[] = strtolower($s);
@@ -2119,6 +2119,7 @@ class ScraperService
 			'vendorregistry.com',
 			'demandstar.com',
 			'publicpurchase.com',
+			'pr-webs-customer.des.wa.gov',
 		];
 		foreach (array_filter(array_map('trim', explode(',', (string) env('SCRAPER_JS_LISTING_HOST_SUFFIXES', '')))) as $s) {
 			if ($s !== '') {

@@ -55,4 +55,14 @@ class BidUrlManualEntryServiceTest extends TestCase
 			'url' => 'https://example.gov/list',
 		], $opt);
 	}
+
+	public function test_is_missing_history_table_error_detects_oracle_942(): void
+	{
+		$service = new BidUrlManualEntryService();
+		$method = new ReflectionMethod(BidUrlManualEntryService::class, 'isMissingHistoryTableError');
+		$method->setAccessible(true);
+
+		$this->assertTrue($method->invoke($service, new \Exception('ORA-00942: table or view does not exist')));
+		$this->assertFalse($method->invoke($service, new \Exception('ORA-00001: unique constraint violated')));
+	}
 }

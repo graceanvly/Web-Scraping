@@ -15,10 +15,14 @@ use App\Support\PendingBidLiveMapper;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class BidUrlManualEntryService
 {
 	public const DEFAULT_BID_URL_USER_ID = 120482;
+
+	/** Cached result of whether bid_url_history exists (Oracle prod often omits it). */
+	private static ?bool $historyTableAvailable = null;
 
 	private function cfg(string $key, mixed $default = null): mixed
 	{
@@ -406,12 +410,57 @@ class BidUrlManualEntryService
 
 	private function recordHistory(int $bidUrlId, Carbon $startTime, Carbon $endTime, ?int $userId): void
 	{
-		BidUrlHistory::create([
-			'bid_url_id' => $bidUrlId,
-			'start_time' => $startTime,
-			'end_time' => $endTime,
-			'user_id' => $userId,
-		]);
+		if (!$this->historyTableEnabled()) {
+			return;
+		}
+
+		try {
+			BidUrlHistory::create([
+				'bid_url_id' => $bidUrlId,
+				'start_time' => $startTime,
+				'end_time' => $endTime,
+				'user_id' => $userId,
+			]);
+		} catch (\Throwable $e) {
+			if ($this->isMissingHistoryTableError($e)) {
+				self::$historyTableAvailable = false;
+				Log::warning('bid_url_history unavailable — skipping visit history', [
+					'bid_url_id' => $bidUrlId,
+					'error' => $e->getMessage(),
+				]);
+
+				return;
+			}
+
+			throw $e;
+		}
+	}
+
+	private function historyTableEnabled(): bool
+	{
+		if (self::$historyTableAvailable !== null) {
+			return self::$historyTableAvailable;
+		}
+
+		try {
+			self::$historyTableAvailable = Schema::hasTable((new BidUrlHistory())->getTable());
+		} catch (\Throwable $e) {
+			self::$historyTableAvailable = false;
+			Log::warning('bid_url_history table check failed — visit history disabled', [
+				'error' => $e->getMessage(),
+			]);
+		}
+
+		return self::$historyTableAvailable;
+	}
+
+	private function isMissingHistoryTableError(\Throwable $e): bool
+	{
+		$msg = $e->getMessage();
+
+		return str_contains($msg, 'ORA-00942')
+			|| str_contains($msg, 'does not exist')
+			|| str_contains($msg, 'Base table or view not found');
 	}
 
 	/** @return 'approved'|'duplicate' */

@@ -1222,7 +1222,7 @@ class BidController extends Controller
 					if ($savedThisUrl === 0 && $duplicatesThisUrl > 0) {
 						$doneMessage = $duplicatesThisUrl . ' already pending or live — check Pending Approval';
 					} elseif ($savedThisUrl === 0 && $nonBidsThisUrl > 0) {
-						$doneMessage = $nonBidsThisUrl . ' rejected (missing end date or weak bid signals)';
+						$doneMessage = 'missing end date or weak bid signals';
 					} elseif ($savedThisUrl === 0 && $aiBidCount === 0) {
 						$doneMessage = 'AI returned no bids';
 					} elseif ($savedThisUrl === 0 && $expiredFiltered > 0 && $filteredBids->count() === 0) {
@@ -1311,7 +1311,14 @@ class BidController extends Controller
 			return;
 		}
 
-		$visitTracking->finishScrapeVisit((int) $bidUrl->id, $visitStart, auth()->id(), $bidUrl);
+		try {
+			$visitTracking->finishScrapeVisit((int) $bidUrl->id, $visitStart, auth()->id(), $bidUrl);
+		} catch (\Throwable $e) {
+			Log::warning('finishScrapeVisit failed (scrape result preserved)', [
+				'bid_url_id' => $bidUrl->id,
+				'error' => $e->getMessage(),
+			]);
+		}
 	}
 
 	private function moveBidUrlToFailed(BidUrl $bidUrl, string $message): void
