@@ -1156,6 +1156,12 @@ class BidController extends Controller
 							$description = $result['pdf_bids'][0]['PDF_LINK'];
 
 						if (!$this->looksLikeBid($title, $description, $url, $endDate, $identity)) {
+							Log::info('Scraped bid rejected (looksLikeBid)', [
+								'url' => $url,
+								'title' => $title,
+								'has_end_date' => $endDate !== null && $endDate !== '',
+								'has_tier_a_key' => $identity->hasTierAKey(),
+							]);
 							$nonBidsThisUrl++;
 							continue;
 						}
@@ -2317,7 +2323,20 @@ class BidController extends Controller
 			);
 		}
 
-		return $matcher->match($identity);
+		$match = $matcher->match($identity);
+		if ($match !== null) {
+			Log::info('Scraped bid duplicate match', [
+				'tier' => $match->tier,
+				'table' => $match->table,
+				'reason' => $match->reason,
+				'record_id' => $match->recordId,
+				'url' => $identity->normalizedDetailUrl,
+				'bid_url_id' => $identity->bidUrlId,
+				'title' => $bidData['TITLE'] ?? null,
+			]);
+		}
+
+		return $match;
 	}
 
 	private function looksLikeBid(?string $title, ?string $description, ?string $url, ?string $endDate, ?BidIdentity $identity = null): bool
@@ -2329,9 +2348,8 @@ class BidController extends Controller
 
 		$requireEndDate = (bool) config('scraper.bid_require_enddate_for_save', true);
 		if (empty($endDate)) {
-			if (!$requireEndDate && $identity !== null && $identity->hasTierAKey()) {
-				// Allow stable-key bids without a parsed end date.
-			} else {
+			$hasStableKey = $identity !== null && $identity->hasTierAKey();
+			if (!$hasStableKey && $requireEndDate) {
 				return false;
 			}
 		}

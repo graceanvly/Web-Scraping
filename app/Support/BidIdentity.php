@@ -23,9 +23,20 @@ final class BidIdentity
 
 	public function hasTierAKey(): bool
 	{
-		return $this->normalizedDetailUrl !== ''
+		return $this->hasStrongUrlForTierA()
 			|| $this->solicitationNumber !== ''
 			|| $this->thirdPartyId !== '';
+	}
+
+	/** Domain-only / portal listing URLs are not stable bid identity keys. */
+	public function hasStrongUrlForTierA(): bool
+	{
+		$url = $this->normalizedDetailUrl;
+		if ($url === '') {
+			return false;
+		}
+
+		return str_contains($url, '/');
 	}
 
 	/** @return list<string> */

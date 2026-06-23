@@ -90,4 +90,35 @@ class BidIdentityTest extends TestCase
 		$this->assertContains('example.gov/bid/1', $variants);
 		$this->assertContains('https://example.gov/bid/1', $variants);
 	}
+
+	public function test_has_strong_url_for_tier_a_requires_path_beyond_domain(): void
+	{
+		$listing = BidIdentity::fromScrapeExtract(
+			['TITLE' => 'Portal'],
+			'https://pr-webs-customer.des.wa.gov/',
+			10,
+		);
+		$detail = BidIdentity::fromScrapeExtract(
+			['TITLE' => 'Bid'],
+			'https://example.gov/bids/123',
+			10,
+		);
+
+		$this->assertFalse($listing->hasStrongUrlForTierA());
+		$this->assertFalse($listing->hasTierAKey());
+		$this->assertTrue($detail->hasStrongUrlForTierA());
+		$this->assertTrue($detail->hasTierAKey());
+	}
+
+	public function test_solicitation_number_is_tier_a_key_without_detail_path(): void
+	{
+		$identity = BidIdentity::fromScrapeExtract(
+			['TITLE' => 'Test', 'SOLICITATIONNUMBER' => 'SOL-1'],
+			'https://pr-webs-customer.des.wa.gov/',
+			10,
+		);
+
+		$this->assertFalse($identity->hasStrongUrlForTierA());
+		$this->assertTrue($identity->hasTierAKey());
+	}
 }

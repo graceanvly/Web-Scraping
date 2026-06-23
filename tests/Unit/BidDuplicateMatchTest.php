@@ -24,11 +24,4 @@ class BidDuplicateMatchTest extends TestCase
 		$this->assertFalse($c->shouldSkipSave());
 		$this->assertTrue($c->isPossibleDuplicate());
 	}
-
-	public function test_lookup_failed_match_is_treated_as_duplicate(): void
-	{
-		$failed = new BidDuplicateMatch(BidDuplicateMatch::TIER_A, 'lookup_failed', 0, 'duplicate_lookup_failed');
-
-		$this->assertTrue($failed->shouldSkipSave());
-	}
 }

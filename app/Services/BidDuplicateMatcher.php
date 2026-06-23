@@ -6,6 +6,7 @@ use App\Models\Bid;
 use App\Models\TempBid;
 use App\Support\BidDuplicateMatch;
 use App\Support\BidIdentity;
+use App\Support\BidLiveColumnFilter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
@@ -22,25 +23,22 @@ final class BidDuplicateMatcher
 		int|string|null $excludeLiveId = null,
 	): ?BidDuplicateMatch {
 		try {
-			$live = $this->findBestMatchOnQuery(Bid::query(), $identity, 'bid', $excludeLiveId);
-			if ($live !== null) {
-				return $live;
+			// Pending table is small; live Oracle bid can be huge — check pending first.
+			$pending = $this->findBestMatchOnQuery(TempBid::query(), $identity, 'bids_temp', $excludeTempId);
+			if ($pending !== null) {
+				return $pending;
 			}
 
-			return $this->findBestMatchOnQuery(TempBid::query(), $identity, 'bids_temp', $excludeTempId);
+			return $this->findBestMatchOnQuery(Bid::query(), $identity, 'bid', $excludeLiveId);
 		} catch (\Throwable $e) {
-			Log::warning('Bid duplicate lookup failed (fail-closed)', [
+			Log::warning('Bid duplicate lookup failed (fail-open — allowing save)', [
 				'error' => $e->getMessage(),
 				'url' => $identity->normalizedDetailUrl,
 				'solicitation' => $identity->solicitationNumber,
+				'bid_url_id' => $identity->bidUrlId,
 			]);
 
-			return new BidDuplicateMatch(
-				tier: BidDuplicateMatch::TIER_A,
-				table: 'lookup_failed',
-				recordId: 0,
-				reason: 'duplicate_lookup_failed',
-			);
+			return null;
 		}
 	}
 
@@ -113,27 +111,24 @@ final class BidDuplicateMatcher
 	 */
 	private function findTierA(Builder $query, BidIdentity $identity, string $tableLabel): ?BidDuplicateMatch
 	{
-		$variants = $identity->urlLookupVariants();
-		if ($variants !== []) {
-			$row = $query->clone()->whereIn('URL', $variants)->first();
+		if ($identity->hasStrongUrlForTierA()) {
+			$row = $this->findRowByUrl($query->clone(), $identity);
 			if ($row instanceof Model) {
 				return $this->buildMatch(BidDuplicateMatch::TIER_A, $tableLabel, $row, 'normalized_url');
 			}
 		}
 
 		if ($identity->solicitationNumber !== '') {
-			$row = $query->clone()->where(function (Builder $q) use ($identity) {
-				$q->whereRaw('LOWER(TRIM(SOLICIATIONNUMBER)) = ?', [$identity->solicitationNumber])
-					->orWhereRaw('LOWER(TRIM(SOLICITATIONNUMBER)) = ?', [$identity->solicitationNumber]);
-			})->first();
+			$row = $this->findRowBySolicitation($query->clone(), $identity->solicitationNumber);
 			if ($row instanceof Model) {
 				return $this->buildMatch(BidDuplicateMatch::TIER_A, $tableLabel, $row, 'solicitation_number');
 			}
 		}
 
-		if ($identity->thirdPartyId !== '') {
+		if ($identity->thirdPartyId !== '' && BidLiveColumnFilter::hasColumn('THIRD_PARTY_IDENTIFIER')) {
 			$row = $query->clone()
 				->whereRaw('LOWER(TRIM(THIRD_PARTY_IDENTIFIER)) = ?', [$identity->thirdPartyId])
+				->limit(1)
 				->first();
 			if ($row instanceof Model) {
 				return $this->buildMatch(BidDuplicateMatch::TIER_A, $tableLabel, $row, 'third_party_identifier');
@@ -141,6 +136,47 @@ final class BidDuplicateMatcher
 		}
 
 		return null;
+	}
+
+	/**
+	 * @param  Builder<Bid|TempBid>  $query
+	 */
+	private function findRowByUrl(Builder $query, BidIdentity $identity): ?Model
+	{
+		$normalized = $identity->normalizedDetailUrl;
+		if ($normalized === '') {
+			return null;
+		}
+
+		if ($identity->bidUrlId > 0) {
+			$query->where('BID_URL_ID', $identity->bidUrlId);
+		}
+
+		$raw = strtolower(trim($identity->rawSavedUrl));
+
+		return $query->where(function (Builder $w) use ($normalized, $raw): void {
+			$w->whereRaw('LOWER(TRIM(URL)) = ?', [$normalized]);
+			if ($raw !== '' && $raw !== $normalized) {
+				$w->orWhereRaw('LOWER(TRIM(URL)) = ?', [$raw]);
+			}
+		})->limit(1)->first();
+	}
+
+	/**
+	 * @param  Builder<Bid|TempBid>  $query
+	 */
+	private function findRowBySolicitation(Builder $query, string $solicitationNumber): ?Model
+	{
+		$column = BidLiveColumnFilter::resolveColumnName('SOLICITATIONNUMBER')
+			?? BidLiveColumnFilter::resolveColumnName('SOLICIATIONNUMBER');
+		if ($column === null) {
+			return null;
+		}
+
+		return $query
+			->whereRaw('LOWER(TRIM(' . $column . ')) = ?', [$solicitationNumber])
+			->limit(1)
+			->first();
 	}
 
 	/**
@@ -179,10 +215,12 @@ final class BidDuplicateMatcher
 			return null;
 		}
 
-		$candidates = $query->clone()
-			->whereDate('ENDDATE', $identity->endDateYmd)
-			->limit(60)
-			->get();
+		$candidateQuery = $query->clone()->whereDate('ENDDATE', $identity->endDateYmd);
+		if ($identity->bidUrlId > 0) {
+			$candidateQuery->where('BID_URL_ID', $identity->bidUrlId);
+		}
+
+		$candidates = $candidateQuery->limit(60)->get();
 
 		foreach ($candidates as $row) {
 			$candidate = $row instanceof Bid
