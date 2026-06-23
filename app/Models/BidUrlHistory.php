@@ -14,14 +14,27 @@ class BidUrlHistory extends Model
 
 	public $timestamps = false;
 
+	protected $primaryKey = 'id';
+
 	protected $sequence = 'BIDURLHISTORY_SEQ';
+
+	public function getTable(): string
+	{
+		return (string) config('scraper.bid_url_history_table', $this->table);
+	}
+
+	public function getKeyName(): string
+	{
+		return (string) config('scraper.bid_url_history_id_column', $this->primaryKey);
+	}
 
 	protected static function booted(): void
 	{
 		static::creating(function (BidUrlHistory $model) {
 			if (empty($model->id) && empty($model->ID)) {
+				$sequence = (string) config('scraper.bid_url_history_sequence', 'BIDURLHISTORY_SEQ');
 				try {
-					$result = DB::select('SELECT BIDURLHISTORY_SEQ.NEXTVAL AS NEXT_ID FROM DUAL');
+					$result = DB::select("SELECT {$sequence}.NEXTVAL AS NEXT_ID FROM DUAL");
 					$model->ID = $result[0]->next_id ?? $result[0]->NEXT_ID;
 				} catch (\Throwable $e) {
 					// MySQL / environments without Oracle sequence: use auto-increment id.

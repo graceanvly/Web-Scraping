@@ -73,6 +73,24 @@
 	/** Empty = auto-detect last_scraped_at then END_TIME. Oracle BIDURL uses END_TIME. */
 	'bid_url_last_scraped_column' => env('SCRAPER_BID_URL_LAST_SCRAPED_COLUMN', ''),
 
+	/*
+	|--------------------------------------------------------------------------
+	| BIDURLHISTORY (scrape / manual visit log)
+	|--------------------------------------------------------------------------
+	| Oracle ODS: BIDURLHISTORY (ID, BID_URL_ID, START_TIME, END_TIME, USER_ID).
+	| MySQL dev: bid_url_history. When SCRAPER_BID_URL_TABLE=BIDURL and history table
+	| is unset, defaults to BIDURLHISTORY automatically.
+	*/
+	'bid_url_history_table' => env(
+		'SCRAPER_BID_URL_HISTORY_TABLE',
+		env('SCRAPER_BID_URL_TABLE', 'bid_url') === 'BIDURL' ? 'BIDURLHISTORY' : 'bid_url_history'
+	),
+	'bid_url_history_id_column' => env(
+		'SCRAPER_BID_URL_HISTORY_ID_COLUMN',
+		env('SCRAPER_BID_URL_TABLE', 'bid_url') === 'BIDURL' ? 'ID' : 'id'
+	),
+	'bid_url_history_sequence' => env('SCRAPER_BID_URL_HISTORY_SEQUENCE', 'BIDURLHISTORY_SEQ'),
+
 	/** When false, allow saving bids without ENDDATE if URL/solicitation/third-party id is present. */
 	'bid_require_enddate_for_save' => filter_var(env('SCRAPER_REQUIRE_ENDDATE_FOR_SAVE', true), FILTER_VALIDATE_BOOL),
 

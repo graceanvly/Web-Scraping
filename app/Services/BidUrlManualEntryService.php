@@ -21,7 +21,7 @@ class BidUrlManualEntryService
 {
 	public const DEFAULT_BID_URL_USER_ID = 120482;
 
-	/** Cached result of whether bid_url_history exists (Oracle prod often omits it). */
+	/** Cached result of whether the configured visit-history table exists. */
 	private static ?bool $historyTableAvailable = null;
 
 	private function cfg(string $key, mixed $default = null): mixed
