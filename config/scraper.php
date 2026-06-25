@@ -97,6 +97,12 @@
 	/** When true, skip entire Bid URL rows already scraped today (legacy). Default false — per-bid dedup is safer. */
 	'bid_skip_url_if_scraped_today' => filter_var(env('SCRAPER_BID_SKIP_URL_IF_SCRAPED_TODAY', false), FILTER_VALIDATE_BOOL),
 
+	/**
+	 * When true, scrape failures (blocked site, unreadable page, exceptions) move the row from BIDURL
+	 * into failed_bid_urls. Default false — keeps user assignments on BIDURL; failures go to scrape logs only.
+	 */
+	'bid_url_quarantine_on_scrape_error' => filter_var(env('SCRAPER_QUARANTINE_URL_ON_SCRAPE_ERROR', false), FILTER_VALIDATE_BOOL),
+
 	/*
 	|--------------------------------------------------------------------------
 	| ENTITY reference (ENTITYID on bid)

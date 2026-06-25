@@ -662,7 +662,7 @@ class BidController extends Controller
 				if (!empty($result['blocked'])) {
 					$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
 					$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by site protection/firewall.' . $reason);
-					$this->moveBidUrlToFailed($bidUrl, 'Blocked by site protection/firewall.' . $reason);
+					$this->maybeQuarantineBidUrlAfterScrapeFailure($bidUrl, 'Blocked by site protection/firewall.' . $reason);
 					$scrapeIssues[] = "{$url} - blocked by site protection/firewall." . $reason;
 					continue;
 				}
@@ -673,7 +673,7 @@ class BidController extends Controller
 				}
 				if (empty($result['html']) && empty($result['pdf_bids']) && empty($result['bid_pages'])) {
 					$this->logIssue($bidUrl->id, $url, 'error', 'Page content could not be read.');
-					$this->moveBidUrlToFailed($bidUrl, 'Page content could not be read.');
+					$this->maybeQuarantineBidUrlAfterScrapeFailure($bidUrl, 'Page content could not be read.');
 					$scrapeIssues[] = "{$url} - page content could not be read.";
 					continue;
 				}
@@ -836,7 +836,7 @@ class BidController extends Controller
 				]);
 				$this->logIssue($bidUrl->id ?? null, $url ?? 'unknown', 'error', $this->friendlyExceptionMessage($e));
 				if (isset($bidUrl) && $bidUrl instanceof BidUrl) {
-					$this->moveBidUrlToFailed($bidUrl, $this->friendlyExceptionMessage($e));
+					$this->maybeQuarantineBidUrlAfterScrapeFailure($bidUrl, $this->friendlyExceptionMessage($e));
 				}
 				$failedUrls[] = $url;
 				$scrapeIssues[] = "{$url} - " . $this->friendlyExceptionMessage($e);
@@ -995,7 +995,7 @@ class BidController extends Controller
 					if (!empty($result['blocked'])) {
 						$reason = $result['blocked_reason'] ? (' Reason: ' . $result['blocked_reason']) : '';
 						$this->logIssue($bidUrl->id, $url, 'error', 'Blocked by site protection/firewall.' . $reason);
-						$this->moveBidUrlToFailed($bidUrl, 'Blocked by site protection/firewall.' . $reason);
+						$this->maybeQuarantineBidUrlAfterScrapeFailure($bidUrl, 'Blocked by site protection/firewall.' . $reason);
 						$totalIssues++;
 						$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => 'Blocked by site protection']);
 						continue;
@@ -1008,7 +1008,7 @@ class BidController extends Controller
 					}
 					if (empty($result['html']) && empty($result['pdf_bids']) && empty($result['bid_pages'])) {
 						$this->logIssue($bidUrl->id, $url, 'error', 'Page content could not be read.');
-						$this->moveBidUrlToFailed($bidUrl, 'Page content could not be read.');
+						$this->maybeQuarantineBidUrlAfterScrapeFailure($bidUrl, 'Page content could not be read.');
 						$totalIssues++;
 						$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => 'Could not read content']);
 						continue;
@@ -1256,7 +1256,7 @@ class BidController extends Controller
 					}
 					Log::error('Scrape failed for URL: ' . $url, ['error' => $e->getMessage()]);
 					$this->logIssue($bidUrl->id, $url, 'error', $this->friendlyExceptionMessage($e));
-					$this->moveBidUrlToFailed($bidUrl, $this->friendlyExceptionMessage($e));
+					$this->maybeQuarantineBidUrlAfterScrapeFailure($bidUrl, $this->friendlyExceptionMessage($e));
 					$totalIssues++;
 					$send(['type' => 'error', 'index' => $idx + 1, 'url' => $url, 'message' => $this->friendlyExceptionMessage($e)]);
 				} finally {
@@ -1321,20 +1321,73 @@ class BidController extends Controller
 		}
 	}
 
+	private function maybeQuarantineBidUrlAfterScrapeFailure(BidUrl $bidUrl, string $message): void
+	{
+		if (!config('scraper.bid_url_quarantine_on_scrape_error', false)) {
+			Log::info('Scrape failure recorded; BIDURL row kept', [
+				'bid_url_id' => $bidUrl->getKey(),
+				'user_id' => $this->readBidUrlAssigneeId($bidUrl),
+				'url' => $this->readBidUrlColumn($bidUrl, 'url'),
+				'reason' => $message,
+			]);
+
+			return;
+		}
+
+		$this->moveBidUrlToFailed($bidUrl, $message);
+	}
+
+	private function readBidUrlColumn(BidUrl $bidUrl, string $logicalColumn): mixed
+	{
+		$configKey = match (strtolower($logicalColumn)) {
+			'id' => 'scraper.bid_url_id_column',
+			'url' => 'scraper.bid_url_url_column',
+			'name' => 'scraper.bid_url_name_column',
+			'user_id' => 'scraper.bid_url_user_id_column',
+			default => null,
+		};
+		$candidates = array_values(array_filter(array_unique([
+			$configKey !== null ? (string) config($configKey, $logicalColumn) : null,
+			$logicalColumn,
+			strtoupper($logicalColumn),
+			strtolower($logicalColumn),
+		])));
+
+		foreach ($candidates as $column) {
+			$value = $bidUrl->getAttribute($column);
+			if ($value !== null && $value !== '') {
+				return $value;
+			}
+		}
+
+		return $bidUrl->getAttribute($logicalColumn);
+	}
+
+	private function readBidUrlAssigneeId(BidUrl $bidUrl): ?int
+	{
+		$raw = $this->readBidUrlColumn($bidUrl, 'user_id');
+		if ($raw === null || $raw === '') {
+			return null;
+		}
+
+		return (int) $raw;
+	}
+
 	private function moveBidUrlToFailed(BidUrl $bidUrl, string $message): void
 	{
+		$url = trim((string) ($this->readBidUrlColumn($bidUrl, 'url') ?? ''));
 		$failedBidUrl = FailedBidUrl::firstOrNew([
-			'url' => $bidUrl->url,
+			'url' => $url !== '' ? $url : $bidUrl->url,
 		]);
 
 		$failedBidUrl->fill([
-			'original_bid_url_id' => $bidUrl->id,
-			'url' => $bidUrl->url,
-			'name' => $bidUrl->name,
+			'original_bid_url_id' => $bidUrl->getKey(),
+			'url' => $url !== '' ? $url : $bidUrl->url,
+			'name' => $this->readBidUrlColumn($bidUrl, 'name'),
 			'start_time' => $bidUrl->start_time,
 			'end_time' => $bidUrl->end_time,
 			'weight' => $bidUrl->weight,
-			'user_id' => $bidUrl->user_id,
+			'user_id' => $this->readBidUrlAssigneeId($bidUrl),
 			'check_changes' => $bidUrl->check_changes,
 			'visit_required' => $bidUrl->visit_required,
 			'checksum' => $bidUrl->checksum,
@@ -1347,6 +1400,13 @@ class BidController extends Controller
 			'failed_at' => now(),
 		]);
 		$failedBidUrl->save();
+
+		Log::warning('BIDURL quarantined to failed_bid_urls after scrape failure', [
+			'bid_url_id' => $bidUrl->getKey(),
+			'user_id' => $failedBidUrl->user_id,
+			'url' => $failedBidUrl->url,
+			'reason' => $message,
+		]);
 
 		$bidUrl->delete();
 	}
