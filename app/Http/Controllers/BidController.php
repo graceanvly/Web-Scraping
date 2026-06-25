@@ -303,65 +303,25 @@ class BidController extends Controller
 			$runTracker = new BidDuplicateRunTracker();
 
 			foreach ($filteredBids as $bidData) {
-				$rawTitle = $bidData['TITLE'] ?? null;
-				if (!$rawTitle) {
-					continue;
-				}
-
-				$savedUrl = $this->resolveScrapedBidUrl($validated['URL'], $bidData, $result['bid_pages'] ?? [], $rawTitle);
-				$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
-
-				$dup = $this->evaluateScrapedBidDuplicate($bidData, $savedUrl, null, $duplicateMatcher, $runTracker);
-				if ($dup !== null && $dup->shouldSkipSave()) {
-					$duplicates[] = $rawTitle;
-					continue;
-				}
-				if ($dup !== null && $dup->isPossibleDuplicate()) {
-					$possibleDuplicates[] = $rawTitle;
-				}
-
-				$title = $titleMap[$rawTitle] ?? $rawTitle;
-				$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
-				$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, null, $title);
-
-				$description = $bidData['DESCRIPTION'] ?? '';
-				if (is_array($description)) {
-					$description = $this->formatDescriptionArray($description);
-				}
-				$description = $this->stripNotProvidedLines($description);
-				if (empty($description) && !empty($result['pdf_text'])) {
-					$description = $result['pdf_text'];
-				}
-				if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
-					$description = $result['pdf_bids'][0]['PDF_LINK'];
-				}
-
-				if (!$this->looksLikeBid($title, $description, $validated['URL'], $endDate, $identity)) {
-					$nonBids[] = $title;
-					continue;
-				}
-
-				$bid = new TempBid();
-				$bid->URL = $savedUrl;
-				$bid->TITLE = $title;
-				$bid->ENDDATE = $endDate;
-				$bid->NAICSCODE = $this->normalizeNaicsCode(
-					$bidData['NAICSCODE'] ?? null,
-					$description,
-					$title,
-					$validated['URL']
+				$outcome = $this->persistScrapedExtractedBid(
+					$bidData,
+					$validated['URL'],
+					$result['bid_pages'] ?? [],
+					$titleMap,
+					$result,
+					null,
+					null,
+					null,
+					$duplicateMatcher,
+					$runTracker
 				);
-				$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
-				$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
-				$bid->CREATED = now();
-				$bid->LAST_MODIFIED = now();
-				$bid->source_listing_url = $validated['URL'];
-				$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description, $validated['URL']);
-				$this->applyScrapeCreatedBidDefaults($bid);
-				$bid->save();
-
-				$runTracker->remember($identity);
-				$saved[] = $bid->id;
+				if ($outcome === 'saved') {
+					$saved[] = $bidData['TITLE'] ?? 'bid';
+				} elseif ($outcome === 'duplicate') {
+					$duplicates[] = $bidData['TITLE'] ?? 'bid';
+				} else {
+					$nonBids[] = $bidData['TITLE'] ?? 'bid';
+				}
 			}
 
 			// 4) Response
@@ -543,46 +503,27 @@ class BidController extends Controller
 				$runTracker = new BidDuplicateRunTracker();
 
 				foreach ($filteredBids as $bidData) {
-					$rawTitle = $bidData['TITLE'] ?? null;
-					if (!$rawTitle) continue;
-
-					$savedUrl = $this->resolveScrapedBidUrl($url, $bidData, $result['bid_pages'] ?? [], $rawTitle);
-					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
-
-					$dup = $this->evaluateScrapedBidDuplicate($bidData, $savedUrl, null, $duplicateMatcher, $runTracker);
-					if ($dup !== null && $dup->shouldSkipSave()) { $duplicateCount++; continue; }
-					if ($dup !== null && $dup->isPossibleDuplicate()) { $possibleDuplicateCount++; }
-
-					$title = $titleMap[$rawTitle] ?? $rawTitle;
-					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
-					$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, null, $title);
-
-					$description = $bidData['DESCRIPTION'] ?? '';
-					if (is_array($description)) $description = $this->formatDescriptionArray($description);
-					$description = $this->stripNotProvidedLines($description);
-					if (empty($description) && !empty($result['pdf_text'])) $description = $result['pdf_text'];
-					if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) $description = $result['pdf_bids'][0]['PDF_LINK'];
-
-					if (!$this->looksLikeBid($title, $description, $url, $endDate, $identity)) { $rejectedCount++; continue; }
-
-					$bid = new TempBid();
-					$bid->URL = $savedUrl;
-					$bid->TITLE = $title;
-					$bid->ENDDATE = $endDate;
-					$bid->NAICSCODE = $this->normalizeNaicsCode($bidData['NAICSCODE'] ?? null, $description, $title, $url);
-					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
-					$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
-					$bid->CREATED = now();
-					$bid->LAST_MODIFIED = now();
-					$bid->source_listing_url = $url;
-					$this->applyBidReferenceFieldsFromScrape($bid, $bidData, $title, $description, $url);
-					$this->applyScrapeAssignUserId($bid, $assignUserId);
-					$this->applyScrapeCreatedBidDefaults($bid);
-					$bid->save();
-					$runTracker->remember($identity);
-					$savedCount++;
-
-					$send(['type' => 'saved_bid', 'title' => $title]);
+					$outcome = $this->persistScrapedExtractedBid(
+						$bidData,
+						$url,
+						$result['bid_pages'] ?? [],
+						$titleMap,
+						$result,
+						null,
+						null,
+						$assignUserId,
+						$duplicateMatcher,
+						$runTracker
+					);
+					if ($outcome === 'saved') {
+						$savedCount++;
+						$title = $titleMap[$bidData['TITLE'] ?? ''] ?? ($bidData['TITLE'] ?? '');
+						$send(['type' => 'saved_bid', 'title' => $title]);
+					} elseif ($outcome === 'duplicate') {
+						$duplicateCount++;
+					} else {
+						$rejectedCount++;
+					}
 				}
 
 				$send(['type' => 'complete', 'saved' => $savedCount, 'duplicates' => $duplicateCount, 'possible_duplicates' => $possibleDuplicateCount, 'rejected' => $rejectedCount]);
@@ -741,75 +682,25 @@ class BidController extends Controller
 				$runTracker = new BidDuplicateRunTracker();
 
 				foreach ($filteredBids as $bidData) {
-					$rawTitle = $bidData['TITLE'] ?? null;
-					if (!$rawTitle) {
-						continue;
-					}
-
-					$savedUrl = $this->resolveScrapedBidUrl($url, $bidData, $result['bid_pages'] ?? [], $rawTitle);
-					$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
-
-					$dup = $this->evaluateScrapedBidDuplicate($bidData, $savedUrl, (int) $bidUrl->id, $duplicateMatcher, $runTracker);
-					if ($dup !== null && $dup->shouldSkipSave()) {
-						$duplicatesThisUrl++;
-						continue;
-					}
-					if ($dup !== null && $dup->isPossibleDuplicate()) {
-						$possibleDuplicatesThisUrl++;
-					}
-
-					$title = $titleMap[$rawTitle] ?? $rawTitle;
-					$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
-					$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, (int) $bidUrl->id, $title);
-
-					$description = $bidData['DESCRIPTION'] ?? '';
-					if (is_array($description)) {
-						$description = $this->formatDescriptionArray($description);
-					}
-					$description = $this->stripNotProvidedLines($description);
-					if (empty($description) && !empty($result['pdf_text'])) {
-						$description = $result['pdf_text'];
-					}
-					if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? '')) {
-						$description = $result['pdf_bids'][0]['PDF_LINK'];
-					}
-
-					if (!$this->looksLikeBid($title, $description, $url, $endDate, $identity)) {
-						$nonBidsThisUrl++;
-						continue;
-					}
-
-					$bid = new TempBid();
-					$bid->URL = $savedUrl;
-					$bid->TITLE = $title;
-					$bid->ENDDATE = $endDate;
-					$bid->NAICSCODE = $this->normalizeNaicsCode(
-						$bidData['NAICSCODE'] ?? null,
-						$description,
-						$title,
-						$url
-					);
-					$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
-					$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
-					$bid->CREATED = now();
-					$bid->LAST_MODIFIED = now();
-					$bid->BID_URL_ID = $bidUrl->id;
-					$bid->source_listing_url = $url;
-					$bid->bid_url_name = $bidUrl->name ?? null;
-					$this->applyBidReferenceFieldsFromScrape(
-						$bid,
+					$outcome = $this->persistScrapedExtractedBid(
 						$bidData,
-						$title,
-						$description,
 						$url,
-						$bidUrl->name ?? null
+						$result['bid_pages'] ?? [],
+						$titleMap,
+						$result,
+						(int) $bidUrl->id,
+						$bidUrl,
+						$assignUserId,
+						$duplicateMatcher,
+						$runTracker
 					);
-					$this->applyScrapeAssignUserId($bid, $assignUserId);
-					$this->applyScrapeCreatedBidDefaults($bid);
-					$bid->save();
-					$runTracker->remember($identity);
-
-					$savedThisUrl++;
+					if ($outcome === 'saved') {
+						$savedThisUrl++;
+					} elseif ($outcome === 'duplicate') {
+						$duplicatesThisUrl++;
+					} else {
+						$nonBidsThisUrl++;
+					}
 				}
 
 				$totalSaved += $savedThisUrl;
@@ -1126,71 +1017,25 @@ class BidController extends Controller
 
 					foreach ($filteredBids as $bidData) {
 						$this->guardUrlBudget($urlStartedAt, $urlMaxBudget, $url);
-						$rawTitle = $bidData['TITLE'] ?? null;
-						if (!$rawTitle)
-							continue;
-
-						$savedUrl = $this->resolveScrapedBidUrl($url, $bidData, $result['bid_pages'] ?? [], $rawTitle);
-						$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
-
-						$dup = $this->evaluateScrapedBidDuplicate($bidData, $savedUrl, (int) $bidUrl->id, $duplicateMatcher, $runTracker);
-						if ($dup !== null && $dup->shouldSkipSave()) {
-							$duplicatesThisUrl++;
-							continue;
-						}
-						if ($dup !== null && $dup->isPossibleDuplicate()) {
-							$possibleDuplicatesThisUrl++;
-						}
-
-						$title = $titleMap[$rawTitle] ?? $rawTitle;
-						$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
-						$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, (int) $bidUrl->id, $title);
-
-						$description = $bidData['DESCRIPTION'] ?? '';
-						if (is_array($description))
-							$description = $this->formatDescriptionArray($description);
-						$description = $this->stripNotProvidedLines($description);
-						if (empty($description) && !empty($result['pdf_text']))
-							$description = $result['pdf_text'];
-						if (empty($description) && !empty($result['pdf_bids'][0]['PDF_LINK'] ?? ''))
-							$description = $result['pdf_bids'][0]['PDF_LINK'];
-
-						if (!$this->looksLikeBid($title, $description, $url, $endDate, $identity)) {
-							Log::info('Scraped bid rejected (looksLikeBid)', [
-								'url' => $url,
-								'title' => $title,
-								'has_end_date' => $endDate !== null && $endDate !== '',
-								'has_tier_a_key' => $identity->hasTierAKey(),
-							]);
-							$nonBidsThisUrl++;
-							continue;
-						}
-
-						$bid = new TempBid();
-						$bid->URL = $savedUrl;
-						$bid->TITLE = $title;
-						$bid->ENDDATE = $endDate;
-						$bid->NAICSCODE = $this->normalizeNaicsCode($bidData['NAICSCODE'] ?? null, $description, $title, $url);
-						$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
-						$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
-						$bid->CREATED = now();
-						$bid->LAST_MODIFIED = now();
-						$bid->BID_URL_ID = $bidUrl->id;
-						$bid->source_listing_url = $url;
-						$bid->bid_url_name = $bidUrl->name ?? null;
-						$this->applyBidReferenceFieldsFromScrape(
-							$bid,
+						$outcome = $this->persistScrapedExtractedBid(
 							$bidData,
-							$title,
-							$description,
 							$url,
-							$bidUrl->name ?? null
+							$result['bid_pages'] ?? [],
+							$titleMap,
+							$result,
+							(int) $bidUrl->id,
+							$bidUrl,
+							$assignUserId,
+							$duplicateMatcher,
+							$runTracker
 						);
-						$this->applyScrapeAssignUserId($bid, $assignUserId);
-						$this->applyScrapeCreatedBidDefaults($bid);
-						$bid->save();
-						$runTracker->remember($identity);
-						$savedThisUrl++;
+						if ($outcome === 'saved') {
+							$savedThisUrl++;
+						} elseif ($outcome === 'duplicate') {
+							$duplicatesThisUrl++;
+						} else {
+							$nonBidsThisUrl++;
+						}
 					}
 
 					$totalSaved += $savedThisUrl;
@@ -2372,6 +2217,141 @@ class BidController extends Controller
 
 	/**
 	 * @param  array<string, mixed>  $bidData
+	 * @param  array<string, mixed>  $scrapeResult
+	 * @return 'saved'|'duplicate'|'rejected'
+	 */
+	private function persistScrapedExtractedBid(
+		array $bidData,
+		string $listingUrl,
+		array $bidPages,
+		array $titleMap,
+		array $scrapeResult,
+		?int $bidUrlId,
+		?BidUrl $bidUrl,
+		?int $assignUserId,
+		BidDuplicateMatcher $duplicateMatcher,
+		BidDuplicateRunTracker $runTracker,
+	): string {
+		$rawTitle = $bidData['TITLE'] ?? null;
+		if (!$rawTitle) {
+			return 'rejected';
+		}
+
+		$savedUrl = $this->resolveScrapedBidUrl($listingUrl, $bidData, $bidPages, $rawTitle);
+		$endDate = $this->sanitizeDate($bidData['ENDDATE'] ?? null);
+		$title = $titleMap[$rawTitle] ?? $rawTitle;
+		$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
+
+		$description = $bidData['DESCRIPTION'] ?? '';
+		if (is_array($description)) {
+			$description = $this->formatDescriptionArray($description);
+		}
+		$description = $this->stripNotProvidedLines($description);
+		if (empty($description) && !empty($scrapeResult['pdf_text'])) {
+			$description = $scrapeResult['pdf_text'];
+		}
+		if (empty($description) && !empty($scrapeResult['pdf_bids'][0]['PDF_LINK'] ?? '')) {
+			$description = $scrapeResult['pdf_bids'][0]['PDF_LINK'];
+		}
+
+		$naics = $this->normalizeNaicsCode(
+			$bidData['NAICSCODE'] ?? null,
+			$description,
+			$title,
+			$listingUrl
+		);
+
+		$dup = $this->evaluateScrapedBidDuplicate(
+			$bidData,
+			$savedUrl,
+			$bidUrlId,
+			$duplicateMatcher,
+			$runTracker,
+			$title,
+			$naics
+		);
+		if ($dup !== null && $dup->shouldSkipSave()) {
+			return 'duplicate';
+		}
+
+		$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, $bidUrlId, $title, $naics);
+		if (!$this->looksLikeBid($title, $description, $listingUrl, $endDate, $identity)) {
+			Log::info('Scraped bid rejected (looksLikeBid)', [
+				'url' => $listingUrl,
+				'title' => $title,
+				'has_end_date' => $endDate !== null && $endDate !== '',
+				'has_tier_a_key' => $identity->hasTierAKey(),
+			]);
+
+			return 'rejected';
+		}
+
+		$recheck = $duplicateMatcher->match($identity);
+		if ($recheck !== null && $recheck->shouldSkipSave()) {
+			Log::info('Scraped bid duplicate on pre-save recheck', [
+				'url' => $listingUrl,
+				'title' => $title,
+				'tier' => $recheck->tier,
+				'reason' => $recheck->reason,
+			]);
+
+			return 'duplicate';
+		}
+
+		$bid = new TempBid();
+		$bid->URL = $savedUrl;
+		$bid->TITLE = $title;
+		$bid->ENDDATE = $endDate;
+		$bid->NAICSCODE = $naics;
+		$this->applyScrapeSolicitationFields($bid, $bidData);
+		$bid->DESCRIPTION = $description ?: 'No description or PDF link found.';
+		$bid->EMAIL = $this->resolveBidContactEmail($bidData, $description);
+		$bid->CREATED = now();
+		$bid->LAST_MODIFIED = now();
+		if ($bidUrl !== null) {
+			$bid->BID_URL_ID = $bidUrl->id;
+			$bid->source_listing_url = $listingUrl;
+			$bid->bid_url_name = $bidUrl->name ?? null;
+		} else {
+			$bid->source_listing_url = $listingUrl;
+		}
+		$this->applyBidReferenceFieldsFromScrape(
+			$bid,
+			$bidData,
+			$title,
+			$description,
+			$listingUrl,
+			$bidUrl?->name
+		);
+		$this->applyScrapeAssignUserId($bid, $assignUserId);
+		$this->applyScrapeCreatedBidDefaults($bid);
+		$bid->save();
+		$runTracker->remember($identity);
+
+		return 'saved';
+	}
+
+	/**
+	 * @param  array<string, mixed>  $bidData
+	 */
+	private function applyScrapeSolicitationFields(Model $bid, array $bidData): void
+	{
+		$sol = trim((string) ($bidData['SOLICIATIONNUMBER'] ?? $bidData['SOLICITATIONNUMBER'] ?? ''));
+		if ($sol === '' || strcasecmp($sol, 'not provided') === 0) {
+			$sol = '';
+		}
+		if ($sol !== '') {
+			$bid->SOLICIATIONNUMBER = $sol;
+		}
+
+		$thirdParty = trim((string) ($bidData['THIRD_PARTY_IDENTIFIER'] ?? ''));
+		if ($thirdParty !== '' && strcasecmp($thirdParty, 'not provided') !== 0) {
+			$bid->THIRD_PARTY_IDENTIFIER = $thirdParty;
+		}
+	}
+
+	/**
+	 * @param  array<string, mixed>  $bidData
 	 */
 	private function evaluateScrapedBidDuplicate(
 		array $bidData,
@@ -2379,8 +2359,10 @@ class BidController extends Controller
 		?int $bidUrlId,
 		BidDuplicateMatcher $matcher,
 		BidDuplicateRunTracker $runTracker,
+		?string $displayTitle = null,
+		?string $normalizedNaics = null,
 	): ?BidDuplicateMatch {
-		$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, $bidUrlId);
+		$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, $bidUrlId, $displayTitle, $normalizedNaics);
 		if ($runTracker->seen($identity)) {
 			return new BidDuplicateMatch(
 				tier: BidDuplicateMatch::TIER_A,

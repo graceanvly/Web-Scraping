@@ -121,4 +121,19 @@ class BidIdentityTest extends TestCase
 		$this->assertFalse($identity->hasStrongUrlForTierA());
 		$this->assertTrue($identity->hasTierAKey());
 	}
+
+	public function test_portal_project_naics_key_is_tier_a_when_bid_url_set(): void
+	{
+		$identity = BidIdentity::fromScrapeExtract(
+			['TITLE' => 'Lalo Street Baseyard Renovation', 'NAICSCODE' => '236220'],
+			'https://example.gov/list',
+			942,
+			'Lalo Street Baseyard Renovation',
+			'236220'
+		);
+
+		$this->assertSame('236220', $identity->naicsCodeKey);
+		$this->assertTrue($identity->hasPortalProjectNaicsKey());
+		$this->assertTrue($identity->hasTierAKey());
+	}
 }

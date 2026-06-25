@@ -135,6 +135,17 @@ final class BidDuplicateMatcher
 			}
 		}
 
+		if ($identity->hasPortalProjectNaicsKey()) {
+			$row = $query->clone()
+				->where('BID_URL_ID', $identity->bidUrlId)
+				->whereRaw('LOWER(TRIM(NAICSCODE)) = ?', [$identity->naicsCodeKey])
+				->limit(1)
+				->first();
+			if ($row instanceof Model) {
+				return $this->buildMatch(BidDuplicateMatch::TIER_A, $tableLabel, $row, 'bid_url_project_naics');
+			}
+		}
+
 		return null;
 	}
 

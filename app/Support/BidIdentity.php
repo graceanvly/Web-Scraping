@@ -18,6 +18,7 @@ final class BidIdentity
 		public readonly string $titleNormalized,
 		public readonly string $rawTitleNormalized,
 		public readonly string $rawSavedUrl = '',
+		public readonly string $naicsCodeKey = '',
 	) {
 	}
 
@@ -25,7 +26,13 @@ final class BidIdentity
 	{
 		return $this->hasStrongUrlForTierA()
 			|| $this->solicitationNumber !== ''
-			|| $this->thirdPartyId !== '';
+			|| $this->thirdPartyId !== ''
+			|| $this->hasPortalProjectNaicsKey();
+	}
+
+	public function hasPortalProjectNaicsKey(): bool
+	{
+		return $this->naicsCodeKey !== '' && $this->bidUrlId > 0;
 	}
 
 	/** Domain-only / portal listing URLs are not stable bid identity keys. */
@@ -56,6 +63,24 @@ final class BidIdentity
 		return $keys;
 	}
 
+	/** @return list<string> */
+	public function tierBCFingerprintKeys(): array
+	{
+		$keys = [];
+		if ($this->bidUrlId > 0 && $this->endDateYmd !== null) {
+			foreach ([$this->titleNormalized, $this->rawTitleNormalized] as $title) {
+				if ($title !== '') {
+					$keys[] = 'bc:' . $this->bidUrlId . ':' . $this->endDateYmd . ':' . $title;
+				}
+			}
+		}
+		if ($this->hasPortalProjectNaicsKey()) {
+			$keys[] = 'naics:' . $this->bidUrlId . ':' . $this->naicsCodeKey;
+		}
+
+		return $keys;
+	}
+
 	/**
 	 * @param  array<string, mixed>  $bidData
 	 */
@@ -64,6 +89,7 @@ final class BidIdentity
 		string $savedUrl,
 		?int $bidUrlId = null,
 		?string $displayTitle = null,
+		?string $normalizedNaics = null,
 	): self {
 		$rawTitle = trim((string) ($bidData['TITLE'] ?? ''));
 		$display = trim((string) ($displayTitle ?? $rawTitle));
@@ -72,6 +98,7 @@ final class BidIdentity
 		);
 		$thirdParty = self::normalizeToken($bidData['THIRD_PARTY_IDENTIFIER'] ?? null);
 		$endDate = self::normalizeEndDateYmd($bidData['ENDDATE'] ?? null);
+		$naicsKey = self::normalizePortalProjectNaicsKey($normalizedNaics ?? $bidData['NAICSCODE'] ?? null);
 
 		return new self(
 			normalizedDetailUrl: self::normalizeUrlForMatch($savedUrl),
@@ -82,6 +109,7 @@ final class BidIdentity
 			titleNormalized: self::normalizeTitle($display),
 			rawTitleNormalized: self::normalizeTitle($rawTitle),
 			rawSavedUrl: trim($savedUrl),
+			naicsCodeKey: $naicsKey,
 		);
 	}
 
@@ -99,6 +127,7 @@ final class BidIdentity
 			titleNormalized: self::normalizeTitle($title),
 			rawTitleNormalized: self::normalizeTitle($title),
 			rawSavedUrl: $url,
+			naicsCodeKey: self::normalizePortalProjectNaicsKey($bid->NAICSCODE ?? null),
 		);
 	}
 
@@ -116,6 +145,7 @@ final class BidIdentity
 			titleNormalized: self::normalizeTitle($title),
 			rawTitleNormalized: self::normalizeTitle($title),
 			rawSavedUrl: $url,
+			naicsCodeKey: self::normalizePortalProjectNaicsKey($bid->NAICSCODE ?? null),
 		);
 	}
 
@@ -207,6 +237,20 @@ final class BidIdentity
 		$s = trim((string) ($value ?? ''));
 
 		return $s === '' ? '' : mb_strtolower($s);
+	}
+
+	/** Portal project numbers (e.g. Maui 236220) often land in NAICSCODE during scrape. */
+	public static function normalizePortalProjectNaicsKey(mixed $value): string
+	{
+		if (is_array($value)) {
+			$value = implode(' ', $value);
+		}
+		$s = trim((string) ($value ?? ''));
+		if ($s === '' || !preg_match('/^\d{5,8}$/', $s)) {
+			return '';
+		}
+
+		return mb_strtolower($s);
 	}
 
 	public static function normalizeEndDateYmd(mixed $value): ?string

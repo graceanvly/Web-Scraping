@@ -21,7 +21,7 @@ class BidDuplicateMatchTest extends TestCase
 	{
 		$c = new BidDuplicateMatch(BidDuplicateMatch::TIER_C, 'bids_temp', 3, 'title_enddate');
 
-		$this->assertFalse($c->shouldSkipSave());
-		$this->assertTrue($c->isPossibleDuplicate());
+		$this->assertTrue($c->shouldSkipSave());
+		$this->assertFalse($c->isPossibleDuplicate());
 	}
 }

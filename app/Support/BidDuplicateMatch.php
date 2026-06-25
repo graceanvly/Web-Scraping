@@ -22,11 +22,13 @@ final class BidDuplicateMatch
 
 	public function shouldSkipSave(): bool
 	{
-		return $this->tier === self::TIER_A || $this->tier === self::TIER_B;
+		return $this->tier === self::TIER_A
+			|| $this->tier === self::TIER_B
+			|| $this->tier === self::TIER_C;
 	}
 
 	public function isPossibleDuplicate(): bool
 	{
-		return $this->tier === self::TIER_C;
+		return false;
 	}
 }

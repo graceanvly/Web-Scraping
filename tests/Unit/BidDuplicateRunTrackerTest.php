@@ -22,4 +22,20 @@ class BidDuplicateRunTrackerTest extends TestCase
 		$tracker->remember($identity);
 		$this->assertTrue($tracker->seen($identity));
 	}
+
+	public function test_remembers_and_detects_tier_bc_fingerprints_in_run(): void
+	{
+		$tracker = new BidDuplicateRunTracker();
+		$identity = BidIdentity::fromScrapeExtract(
+			['TITLE' => 'Main Street Water Main', 'ENDDATE' => '2026-06-24', 'NAICSCODE' => '237110'],
+			'https://example.gov/bid/1',
+			42,
+			'Main Street Water Main',
+			'237110'
+		);
+
+		$this->assertFalse($tracker->seen($identity));
+		$tracker->remember($identity);
+		$this->assertTrue($tracker->seen($identity));
+	}
 }
