@@ -1169,7 +1169,7 @@ class BidController extends Controller
 	private function maybeQuarantineBidUrlAfterScrapeFailure(BidUrl $bidUrl, string $message): void
 	{
 		if (!config('scraper.bid_url_quarantine_on_scrape_error', false)) {
-			Log::info('Scrape failure recorded; BIDURL row kept', [
+			Log::info('Scrape failure recorded; bid URL row kept', [
 				'bid_url_id' => $bidUrl->getKey(),
 				'user_id' => $this->readBidUrlAssigneeId($bidUrl),
 				'url' => $this->readBidUrlColumn($bidUrl, 'url'),
@@ -1246,7 +1246,7 @@ class BidController extends Controller
 		]);
 		$failedBidUrl->save();
 
-		Log::warning('BIDURL quarantined to failed_bid_urls after scrape failure', [
+		Log::warning('Bid URL quarantined to failed_bid_urls after scrape failure', [
 			'bid_url_id' => $bidUrl->getKey(),
 			'user_id' => $failedBidUrl->user_id,
 			'url' => $failedBidUrl->url,

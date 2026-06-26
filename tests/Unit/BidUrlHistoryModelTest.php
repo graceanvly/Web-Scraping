@@ -23,13 +23,13 @@ class BidUrlHistoryModelTest extends TestCase
 	public function test_oracle_history_table_from_config(): void
 	{
 		config([
-			'scraper.bid_url_history_table' => 'BIDURLHISTORY',
+			'scraper.bid_url_history_table' => 'BID_URL_HISTORY',
 			'scraper.bid_url_history_id_column' => 'ID',
 		]);
 
 		$model = new BidUrlHistory();
 
-		$this->assertSame('BIDURLHISTORY', $model->getTable());
+		$this->assertSame('BID_URL_HISTORY', $model->getTable());
 		$this->assertSame('ID', $model->getKeyName());
 	}
 

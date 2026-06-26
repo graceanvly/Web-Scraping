@@ -4,9 +4,11 @@ namespace App\Models;
 
 use App\Models\Concerns\CaseInsensitiveAttributes;
 use App\Support\BidUrlScrapeMarker;
+use App\Support\BidUrlTableConfig;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 class BidUrl extends Model
 {
@@ -18,7 +20,7 @@ class BidUrl extends Model
 
     public function getTable(): string
     {
-        return (string) config('scraper.bid_url_table', $this->table);
+        return BidUrlTableConfig::table();
     }
 
     public function getKeyName(): string
@@ -27,7 +29,29 @@ class BidUrl extends Model
     }
 
     public $timestamps = false;
-    protected $sequence = 'BIDURL_SEQ';
+
+    protected $sequence = 'BID_URL_SEQ';
+
+    protected static function booted(): void
+    {
+        static::creating(function (BidUrl $model) {
+            $key = $model->getKeyName();
+            if (!empty($model->getAttribute($key)) || !empty($model->getAttribute(strtoupper($key)))) {
+                return;
+            }
+
+            $sequence = BidUrlTableConfig::sequence();
+            try {
+                $result = DB::select("SELECT {$sequence}.NEXTVAL AS NEXT_ID FROM DUAL");
+                $nextId = $result[0]->next_id ?? $result[0]->NEXT_ID ?? null;
+                if ($nextId !== null) {
+                    $model->setAttribute($key, $nextId);
+                }
+            } catch (\Throwable) {
+                // MySQL / environments without Oracle sequence: use auto-increment id.
+            }
+        });
+    }
 
 	protected $fillable = [
 		'url',

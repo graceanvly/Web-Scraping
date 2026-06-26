@@ -16,7 +16,7 @@ class BidUrlHistory extends Model
 
 	protected $primaryKey = 'id';
 
-	protected $sequence = 'BIDURLHISTORY_SEQ';
+	protected $sequence = 'BID_URL_HISTORY_SEQ';
 
 	public function getTable(): string
 	{
@@ -32,7 +32,7 @@ class BidUrlHistory extends Model
 	{
 		static::creating(function (BidUrlHistory $model) {
 			if (empty($model->id) && empty($model->ID)) {
-				$sequence = (string) config('scraper.bid_url_history_sequence', 'BIDURLHISTORY_SEQ');
+				$sequence = (string) config('scraper.bid_url_history_sequence', 'BID_URL_HISTORY_SEQ');
 				try {
 					$result = DB::select("SELECT {$sequence}.NEXTVAL AS NEXT_ID FROM DUAL");
 					$model->ID = $result[0]->next_id ?? $result[0]->NEXT_ID;

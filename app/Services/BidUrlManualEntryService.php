@@ -11,6 +11,7 @@ use App\Services\BidDuplicateMatcher;
 use App\Support\BidIdentity;
 use App\Support\BidLiveWriter;
 use App\Support\BidUrlScrapeMarker;
+use App\Support\BidUrlTableConfig;
 use App\Support\PendingBidLiveMapper;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -44,7 +45,7 @@ class BidUrlManualEntryService
 	private function bidUrlTableSpec(): array
 	{
 		return [
-			'table' => (string) $this->cfg('bid_url_table', 'bid_url'),
+			'table' => BidUrlTableConfig::table(),
 			'id_col' => (string) $this->cfg('bid_url_id_column', 'id'),
 			'url_col' => (string) $this->cfg('bid_url_url_column', 'url'),
 			'name_col' => (string) $this->cfg('bid_url_name_column', 'name'),

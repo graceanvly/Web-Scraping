@@ -60,36 +60,30 @@
 
 	/*
 	|--------------------------------------------------------------------------
-	| BIDURL reference (BID_URL_ID on bid → BIDURL.ID)
+	| Scraper bid URL list (manage URLs, Scrape All, failed restore)
 	|--------------------------------------------------------------------------
-	| Oracle ODS uses table BIDURL with columns ID, URL, NAME, USER_ID, etc.
-	| Local MySQL dev uses bid_url with lowercase columns.
+	| Use the scraper-managed BID_URL table (MySQL: bid_url). Do NOT point this at
+	| legacy Oracle ODS BIDURL — that table is read-only for production bid linkage.
+	| BID_URL_ID on bid / bids_temp references BID_URL.ID.
 	*/
 	'bid_url_table' => env('SCRAPER_BID_URL_TABLE', 'bid_url'),
 	'bid_url_id_column' => env('SCRAPER_BID_URL_ID_COLUMN', 'id'),
 	'bid_url_url_column' => env('SCRAPER_BID_URL_URL_COLUMN', 'url'),
 	'bid_url_name_column' => env('SCRAPER_BID_URL_NAME_COLUMN', 'name'),
 	'bid_url_user_id_column' => env('SCRAPER_BID_URL_USER_ID_COLUMN', 'user_id'),
-	/** Empty = auto-detect last_scraped_at then END_TIME. Oracle BIDURL uses END_TIME. */
+	'bid_url_sequence' => env('SCRAPER_BID_URL_SEQUENCE', 'BID_URL_SEQ'),
+	/** Empty = auto-detect last_scraped_at then END_TIME on older schemas. */
 	'bid_url_last_scraped_column' => env('SCRAPER_BID_URL_LAST_SCRAPED_COLUMN', ''),
 
 	/*
 	|--------------------------------------------------------------------------
-	| BIDURLHISTORY (scrape / manual visit log)
+	| Bid URL visit history (scrape / manual visit log)
 	|--------------------------------------------------------------------------
-	| Oracle ODS: BIDURLHISTORY (ID, BID_URL_ID, START_TIME, END_TIME, USER_ID).
-	| MySQL dev: bid_url_history. When SCRAPER_BID_URL_TABLE=BIDURL and history table
-	| is unset, defaults to BIDURLHISTORY automatically.
+	| MySQL dev: bid_url_history. Oracle scraper DB: BID_URL_HISTORY.
 	*/
-	'bid_url_history_table' => env(
-		'SCRAPER_BID_URL_HISTORY_TABLE',
-		env('SCRAPER_BID_URL_TABLE', 'bid_url') === 'BIDURL' ? 'BIDURLHISTORY' : 'bid_url_history'
-	),
-	'bid_url_history_id_column' => env(
-		'SCRAPER_BID_URL_HISTORY_ID_COLUMN',
-		env('SCRAPER_BID_URL_TABLE', 'bid_url') === 'BIDURL' ? 'ID' : 'id'
-	),
-	'bid_url_history_sequence' => env('SCRAPER_BID_URL_HISTORY_SEQUENCE', 'BIDURLHISTORY_SEQ'),
+	'bid_url_history_table' => env('SCRAPER_BID_URL_HISTORY_TABLE', 'bid_url_history'),
+	'bid_url_history_id_column' => env('SCRAPER_BID_URL_HISTORY_ID_COLUMN', 'id'),
+	'bid_url_history_sequence' => env('SCRAPER_BID_URL_HISTORY_SEQUENCE', 'BID_URL_HISTORY_SEQ'),
 
 	/** When false, allow saving bids without ENDDATE if URL/solicitation/third-party id is present. */
 	'bid_require_enddate_for_save' => filter_var(env('SCRAPER_REQUIRE_ENDDATE_FOR_SAVE', true), FILTER_VALIDATE_BOOL),
@@ -98,8 +92,8 @@
 	'bid_skip_url_if_scraped_today' => filter_var(env('SCRAPER_BID_SKIP_URL_IF_SCRAPED_TODAY', false), FILTER_VALIDATE_BOOL),
 
 	/**
-	 * When true, scrape failures (blocked site, unreadable page, exceptions) move the row from BIDURL
-	 * into failed_bid_urls. Default false — keeps user assignments on BIDURL; failures go to scrape logs only.
+	 * When true, scrape failures move the row from BID_URL into failed_bid_urls.
+	 * Default false — keeps assignments on BID_URL; failures go to scrape logs only.
 	 */
 	'bid_url_quarantine_on_scrape_error' => filter_var(env('SCRAPER_QUARANTINE_URL_ON_SCRAPE_ERROR', false), FILTER_VALIDATE_BOOL),
 
