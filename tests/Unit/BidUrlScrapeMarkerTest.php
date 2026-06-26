@@ -41,4 +41,29 @@ class BidUrlScrapeMarkerTest extends TestCase
 		$this->assertArrayHasKey('end_time', $attrs);
 		$this->assertArrayNotHasKey('last_scraped_at', $attrs);
 	}
+
+	public function test_restore_last_scraped_attributes_omits_last_scraped_on_oracle_marker(): void
+	{
+		config(['scraper.bid_url_last_scraped_column' => 'END_TIME']);
+		BidUrlScrapeMarker::resetCache();
+
+		$scraped = Carbon::parse('2026-06-10 14:30:00');
+		$end = Carbon::parse('2026-06-10 15:00:00');
+		$attrs = BidUrlScrapeMarker::restoreLastScrapedAttributes($scraped, $end);
+
+		$this->assertSame([], $attrs);
+	}
+
+	public function test_restore_last_scraped_attributes_maps_to_end_time_when_missing(): void
+	{
+		config(['scraper.bid_url_last_scraped_column' => 'END_TIME']);
+		BidUrlScrapeMarker::resetCache();
+
+		$scraped = Carbon::parse('2026-06-10 14:30:00');
+		$attrs = BidUrlScrapeMarker::restoreLastScrapedAttributes($scraped, null);
+
+		$this->assertArrayNotHasKey('last_scraped_at', $attrs);
+		$this->assertArrayHasKey('end_time', $attrs);
+		$this->assertSame('2026-06-10 14:30:00', $attrs['end_time']->format('Y-m-d H:i:s'));
+	}
 }

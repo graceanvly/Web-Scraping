@@ -168,4 +168,33 @@ final class BidUrlScrapeMarker
 
 		$bidUrl->setAttribute($col, null);
 	}
+
+	/**
+	 * Map failed-URL last_scraped_at onto BIDURL columns (END_TIME on Oracle).
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function restoreLastScrapedAttributes(?Carbon $lastScraped, ?Carbon $endTime = null): array
+	{
+		if ($lastScraped === null) {
+			return [];
+		}
+
+		if (self::hasDedicatedLastScrapedColumn()) {
+			return ['last_scraped_at' => $lastScraped];
+		}
+
+		if ($endTime !== null) {
+			return [];
+		}
+
+		$col = self::lastScrapedColumn();
+		if ($col !== null && strcasecmp($col, 'last_scraped_at') !== 0) {
+			$key = strcasecmp($col, 'END_TIME') === 0 ? 'end_time' : $col;
+
+			return [$key => $lastScraped];
+		}
+
+		return ['end_time' => $lastScraped];
+	}
 }

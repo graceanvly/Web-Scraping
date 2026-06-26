@@ -331,7 +331,7 @@ class BidUrlController extends Controller
 
     private function persistRestoredBidUrl(FailedBidUrl $failedBidUrl): void
     {
-        BidUrl::create([
+        $attrs = [
             'url' => $failedBidUrl->url,
             'name' => $failedBidUrl->name,
             'start_time' => $failedBidUrl->start_time,
@@ -345,8 +345,15 @@ class BidUrlController extends Controller
             'third_party_url_id' => $failedBidUrl->third_party_url_id,
             'username' => $failedBidUrl->username,
             'password' => $failedBidUrl->password,
-            'last_scraped_at' => $failedBidUrl->last_scraped_at,
-        ]);
+        ];
+
+        BidUrl::create(array_merge(
+            $attrs,
+            BidUrlScrapeMarker::restoreLastScrapedAttributes(
+                $failedBidUrl->last_scraped_at,
+                $failedBidUrl->end_time
+            )
+        ));
 
         $failedBidUrl->delete();
     }
