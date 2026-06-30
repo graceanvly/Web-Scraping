@@ -477,7 +477,7 @@ class BidUrlController extends Controller
     ): void {
         if ($this->urlExists($url, $ignoreBidUrlId, $ignoreFailedBidUrlId, $scrapeGroup)) {
             $message = BidUrlScrapeGroup::hasColumn() && trim((string) ($scrapeGroup ?? '')) !== ''
-                ? 'This URL already exists in the active or failed URL list for scrape group "' . trim((string) $scrapeGroup) . '".'
+                ? 'This URL already exists in scrape group "' . trim((string) $scrapeGroup) . '".'
                 : 'This URL already exists in the active or failed URL list.';
 
             throw \Illuminate\Validation\ValidationException::withMessages([
@@ -488,7 +488,7 @@ class BidUrlController extends Controller
         if ($name !== null && $name !== '') {
             if ($this->nameExists($name, $ignoreBidUrlId, $ignoreFailedBidUrlId, $scrapeGroup)) {
                 $message = BidUrlScrapeGroup::hasColumn() && trim((string) ($scrapeGroup ?? '')) !== ''
-                    ? 'This name already exists in the active or failed URL list for scrape group "' . trim((string) $scrapeGroup) . '".'
+                    ? 'This name already exists in scrape group "' . trim((string) $scrapeGroup) . '".'
                     : 'This name already exists in the active or failed URL list.';
 
                 throw \Illuminate\Validation\ValidationException::withMessages([
@@ -529,12 +529,20 @@ class BidUrlController extends Controller
             BidUrlScrapeGroup::applyFilter($activeUrlQuery, $this->resolveScrapeGroupForSave($scrapeGroup));
         }
 
+        if ($activeUrlQuery->exists()) {
+            return true;
+        }
+
+        if (! $this->shouldCheckFailedUrlList()) {
+            return false;
+        }
+
         $failedUrlQuery = FailedBidUrl::where('url', $url);
         if ($ignoreFailedBidUrlId) {
             $failedUrlQuery->where('id', '!=', $ignoreFailedBidUrlId);
         }
 
-        return $activeUrlQuery->exists() || $failedUrlQuery->exists();
+        return $failedUrlQuery->exists();
     }
 
     private function nameExists(
@@ -551,11 +559,25 @@ class BidUrlController extends Controller
             BidUrlScrapeGroup::applyFilter($activeNameQuery, $this->resolveScrapeGroupForSave($scrapeGroup));
         }
 
+        if ($activeNameQuery->exists()) {
+            return true;
+        }
+
+        if (! $this->shouldCheckFailedUrlList()) {
+            return false;
+        }
+
         $failedNameQuery = FailedBidUrl::where('name', $name);
         if ($ignoreFailedBidUrlId) {
             $failedNameQuery->where('id', '!=', $ignoreFailedBidUrlId);
         }
 
-        return $activeNameQuery->exists() || $failedNameQuery->exists();
+        return $failedNameQuery->exists();
+    }
+
+    /** Failed URLs are global; when scrape groups are enabled, only block duplicates within the same group. */
+    private function shouldCheckFailedUrlList(): bool
+    {
+        return ! BidUrlScrapeGroup::hasColumn();
     }
 }
