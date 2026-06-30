@@ -894,14 +894,18 @@
 						Auto Assign uses the most recent <code>BIDURLHISTORY</code> visit user per URL.
 					</p>
 				</div>
-				@if ($odsBidUrlAutoAssignAvailable)
-					<div class="header-actions">
+				@if ($odsBidUrlAvailable)
+					<div class="header-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+						<a href="{{ route('bidurl.unassigned.download', array_filter(['search' => $search !== '' ? $search : null])) }}"
+							class="btn btn-secondary">Download Excel</a>
+						@if ($odsBidUrlAutoAssignAvailable)
 						<form method="POST" action="{{ route('bidurl.unassigned.autoAssign') }}"
 							onsubmit="return confirm('Assign all unassigned BIDURL rows using the latest BIDURLHISTORY user for each URL?')"
 							style="margin:0;">
 							@csrf
 							<button class="btn btn-primary" type="submit">Auto Assign</button>
 						</form>
+						@endif
 					</div>
 				@endif
 			</div>

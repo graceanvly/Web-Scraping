@@ -63,6 +63,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/bidurl/upload', [BidUrlController::class, 'store'])->name('bidurl.store');
     Route::post('/bidurl', [BidUrlController::class, 'storeSingle'])->name('bidurl.storeSingle');
     Route::post('/bidurl/set-last-scraped', [BidUrlController::class, 'setLastScraped'])->name('bidurl.setLastScraped');
+    Route::get('/bidurl/unassigned/download', [BidUrlController::class, 'downloadUnassigned'])->name('bidurl.unassigned.download');
     Route::post('/bidurl/unassigned/auto-assign', [BidUrlController::class, 'autoAssignUnassigned'])->name('bidurl.unassigned.autoAssign');
     Route::get('/bidurl', [BidUrlController::class, 'index'])->name('bidurl.index');
     Route::get('/bidurl/{bidUrl}', [BidUrlController::class, 'show'])->name('bidurl.show');

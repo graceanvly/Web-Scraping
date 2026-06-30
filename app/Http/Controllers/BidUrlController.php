@@ -162,6 +162,19 @@ class BidUrlController extends Controller
             ->with('success', $message);
     }
 
+    public function downloadUnassigned(Request $request, OdsBidUrlListingService $odsBidUrls)
+    {
+        if (!$odsBidUrls->isAvailable()) {
+            return redirect()
+                ->route('bidurl.index', ['tab' => 'unassigned'])
+                ->withErrors(['download' => 'ODS BIDURL table is not available.']);
+        }
+
+        $search = trim((string) $request->query('search', ''));
+
+        return $odsBidUrls->downloadUnassignedExcel($search);
+    }
+
     /**
      * Store a single BidUrl from the inline form.
      */
