@@ -45,7 +45,7 @@ class BidUrlController extends Controller
             $urlValue = trim($fields[0]);
             $nameValue = trim($fields[1]);
 
-            if ($this->urlOrNameExists($urlValue, $nameValue)) {
+            if ($this->urlOrNameExists($urlValue, $nameValue, BidUrlScrapeGroup::default())) {
                 continue; // skip duplicates by url or name
             }
 
@@ -214,11 +214,12 @@ class BidUrlController extends Controller
             'name.unique' => 'This name is already in the list.',
         ]);
 
-        $this->ensureUrlAndNameAreAvailable($data['url'], $data['name'] ?? null);
+        $scrapeGroup = $this->resolveScrapeGroupForSave($data['scrape_group'] ?? null);
+
+        $this->ensureUrlAndNameAreAvailable($data['url'], $data['name'] ?? null, null, null, $scrapeGroup);
 
         if (BidUrlScrapeGroup::hasColumn()) {
-            $group = trim((string) ($data['scrape_group'] ?? ''));
-            $data['scrape_group'] = $group !== '' ? $group : BidUrlScrapeGroup::default();
+            $data['scrape_group'] = $scrapeGroup;
         } else {
             unset($data['scrape_group']);
         }
@@ -256,11 +257,14 @@ class BidUrlController extends Controller
             'name.unique' => 'This name is already in the list.',
         ]);
 
-        $this->ensureUrlAndNameAreAvailable($data['url'], $data['name'] ?? null, $bidUrl->id);
+        $scrapeGroup = $this->resolveScrapeGroupForSave(
+            $data['scrape_group'] ?? $bidUrl->scrape_group ?? null
+        );
+
+        $this->ensureUrlAndNameAreAvailable($data['url'], $data['name'] ?? null, $bidUrl->id, null, $scrapeGroup);
 
         if (BidUrlScrapeGroup::hasColumn()) {
-            $group = trim((string) ($data['scrape_group'] ?? ''));
-            $data['scrape_group'] = $group !== '' ? $group : BidUrlScrapeGroup::default();
+            $data['scrape_group'] = $scrapeGroup;
         } else {
             unset($data['scrape_group']);
         }
@@ -347,7 +351,13 @@ class BidUrlController extends Controller
 
     public function restoreFailed(FailedBidUrl $failedBidUrl)
     {
-        $this->ensureUrlAndNameAreAvailable($failedBidUrl->url, $failedBidUrl->name, null, $failedBidUrl->id);
+        $this->ensureUrlAndNameAreAvailable(
+            $failedBidUrl->url,
+            $failedBidUrl->name,
+            null,
+            $failedBidUrl->id,
+            BidUrlScrapeGroup::default(),
+        );
         $this->persistRestoredBidUrl($failedBidUrl);
 
         return redirect()->route('bidurl.index', ['tab' => 'failed'])->with('success', 'Failed URL restored to Bid URLs.');
@@ -405,14 +415,20 @@ class BidUrlController extends Controller
      */
     private function restoreFailedRow(FailedBidUrl $failedBidUrl): string
     {
-        if ($this->urlExists($failedBidUrl->url, null, $failedBidUrl->id)) {
+        if ($this->urlExists($failedBidUrl->url, null, $failedBidUrl->id, BidUrlScrapeGroup::default())) {
             $failedBidUrl->delete();
 
             return 'already_active';
         }
 
         try {
-            $this->ensureUrlAndNameAreAvailable($failedBidUrl->url, $failedBidUrl->name, null, $failedBidUrl->id);
+            $this->ensureUrlAndNameAreAvailable(
+                $failedBidUrl->url,
+                $failedBidUrl->name,
+                null,
+                $failedBidUrl->id,
+                BidUrlScrapeGroup::default(),
+            );
         } catch (\Illuminate\Validation\ValidationException $e) {
             return 'skipped';
         }
@@ -452,33 +468,65 @@ class BidUrlController extends Controller
         $failedBidUrl->delete();
     }
 
-    private function ensureUrlAndNameAreAvailable(string $url, ?string $name = null, ?int $ignoreBidUrlId = null, ?int $ignoreFailedBidUrlId = null): void
-    {
-        if ($this->urlExists($url, $ignoreBidUrlId, $ignoreFailedBidUrlId)) {
+    private function ensureUrlAndNameAreAvailable(
+        string $url,
+        ?string $name = null,
+        ?int $ignoreBidUrlId = null,
+        ?int $ignoreFailedBidUrlId = null,
+        ?string $scrapeGroup = null,
+    ): void {
+        if ($this->urlExists($url, $ignoreBidUrlId, $ignoreFailedBidUrlId, $scrapeGroup)) {
+            $message = BidUrlScrapeGroup::hasColumn() && trim((string) ($scrapeGroup ?? '')) !== ''
+                ? 'This URL already exists in the active or failed URL list for scrape group "' . trim((string) $scrapeGroup) . '".'
+                : 'This URL already exists in the active or failed URL list.';
+
             throw \Illuminate\Validation\ValidationException::withMessages([
-                'url' => 'This URL already exists in the active or failed URL list.',
+                'url' => $message,
             ]);
         }
 
         if ($name !== null && $name !== '') {
-            if ($this->nameExists($name, $ignoreBidUrlId, $ignoreFailedBidUrlId)) {
+            if ($this->nameExists($name, $ignoreBidUrlId, $ignoreFailedBidUrlId, $scrapeGroup)) {
+                $message = BidUrlScrapeGroup::hasColumn() && trim((string) ($scrapeGroup ?? '')) !== ''
+                    ? 'This name already exists in the active or failed URL list for scrape group "' . trim((string) $scrapeGroup) . '".'
+                    : 'This name already exists in the active or failed URL list.';
+
                 throw \Illuminate\Validation\ValidationException::withMessages([
-                    'name' => 'This name already exists in the active or failed URL list.',
+                    'name' => $message,
                 ]);
             }
         }
     }
 
-    private function urlOrNameExists(string $url, ?string $name = null): bool
+    private function resolveScrapeGroupForSave(mixed $value): string
     {
-        return $this->urlExists($url) || ($name !== null && $name !== '' && $this->nameExists($name));
+        if (!BidUrlScrapeGroup::hasColumn()) {
+            return '';
+        }
+
+        $group = trim((string) ($value ?? ''));
+
+        return $group !== '' ? $group : BidUrlScrapeGroup::default();
     }
 
-    private function urlExists(string $url, ?int $ignoreBidUrlId = null, ?int $ignoreFailedBidUrlId = null): bool
+    private function urlOrNameExists(string $url, ?string $name = null, ?string $scrapeGroup = null): bool
     {
+        return $this->urlExists($url, null, null, $scrapeGroup)
+            || ($name !== null && $name !== '' && $this->nameExists($name, null, null, $scrapeGroup));
+    }
+
+    private function urlExists(
+        string $url,
+        ?int $ignoreBidUrlId = null,
+        ?int $ignoreFailedBidUrlId = null,
+        ?string $scrapeGroup = null,
+    ): bool {
         $activeUrlQuery = BidUrl::where('url', $url);
         if ($ignoreBidUrlId) {
             $activeUrlQuery->where('id', '!=', $ignoreBidUrlId);
+        }
+        if (BidUrlScrapeGroup::hasColumn()) {
+            BidUrlScrapeGroup::applyFilter($activeUrlQuery, $this->resolveScrapeGroupForSave($scrapeGroup));
         }
 
         $failedUrlQuery = FailedBidUrl::where('url', $url);
@@ -489,11 +537,18 @@ class BidUrlController extends Controller
         return $activeUrlQuery->exists() || $failedUrlQuery->exists();
     }
 
-    private function nameExists(string $name, ?int $ignoreBidUrlId = null, ?int $ignoreFailedBidUrlId = null): bool
-    {
+    private function nameExists(
+        string $name,
+        ?int $ignoreBidUrlId = null,
+        ?int $ignoreFailedBidUrlId = null,
+        ?string $scrapeGroup = null,
+    ): bool {
         $activeNameQuery = BidUrl::where('name', $name);
         if ($ignoreBidUrlId) {
             $activeNameQuery->where('id', '!=', $ignoreBidUrlId);
+        }
+        if (BidUrlScrapeGroup::hasColumn()) {
+            BidUrlScrapeGroup::applyFilter($activeNameQuery, $this->resolveScrapeGroupForSave($scrapeGroup));
         }
 
         $failedNameQuery = FailedBidUrl::where('name', $name);
