@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\CaseInsensitiveAttributes;
 use App\Support\BidUrlScrapeMarker;
+use App\Support\BidUrlScrapeGroup;
 use App\Support\BidUrlTableConfig;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -50,12 +51,21 @@ class BidUrl extends Model
             } catch (\Throwable) {
                 // MySQL / environments without Oracle sequence: use auto-increment id.
             }
+
+            if (BidUrlScrapeGroup::hasColumn()) {
+                $col = BidUrlScrapeGroup::column();
+                $current = $model->getAttribute($col) ?? $model->getAttribute('scrape_group');
+                if ($current === null || trim((string) $current) === '') {
+                    $model->setAttribute($col, BidUrlScrapeGroup::default());
+                }
+            }
         });
     }
 
 	protected $fillable = [
 		'url',
         'name',
+        'scrape_group',
         'start_time',
         'end_time',
         'weight',

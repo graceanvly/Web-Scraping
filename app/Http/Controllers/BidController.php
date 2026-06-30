@@ -21,6 +21,7 @@ use App\Support\BidDuplicateMatch;
 use App\Support\BidIdentity;
 use App\Support\BidLiveColumnFilter;
 use App\Support\BidRecordPayload;
+use App\Support\BidUrlScrapeGroup;
 use App\Support\BidUrlScrapeMarker;
 use App\Support\ThirdPartyProcurementPortalUrl;
 use GuzzleHttp\Exception\RequestException;
@@ -198,7 +199,10 @@ class BidController extends Controller
 			'reportFrom',
 			'reportTo',
 			'activeTab',
-		));
+		) + [
+			'scrapeGroups' => BidUrlScrapeGroup::distinctGroups(),
+			'defaultScrapeGroup' => BidUrlScrapeGroup::default(),
+		]);
 	}
 
 	public function store(Request $request, ScraperService $scraper, AIExtractor $ai, BidUrlManualEntryService $visitTracking)
@@ -568,7 +572,9 @@ class BidController extends Controller
 		$assignUserId = $this->resolveOptionalManilaAssignUserId($request->input('assign_user_id'));
 
 		$today = \Carbon\Carbon::today();
-		$bidUrls = BidUrl::all();
+		$bidUrls = BidUrlScrapeGroup::queryForScrape(
+			trim((string) $request->input('scrape_group', ''))
+		)->get();
 		$totalSaved = 0;
 		$totalDuplicates = 0;
 		$totalSkipped = 0;
@@ -781,8 +787,9 @@ class BidController extends Controller
 		$assignUserId = $this->resolveOptionalManilaAssignUserId($request->query('assign_user_id'));
 		$singlePerUrlFiveMin = $request->boolean('single_url_max');
 		$urlMaxBudget = $singlePerUrlFiveMin ? 300 : $this->scrapeUrlMaxSeconds();
+		$scrapeGroup = trim((string) $request->query('scrape_group', ''));
 
-		return new StreamedResponse(function () use ($scraper, $ai, $assignUserId, $urlMaxBudget, $singlePerUrlFiveMin, $visitTracking) {
+		return new StreamedResponse(function () use ($scraper, $ai, $assignUserId, $urlMaxBudget, $singlePerUrlFiveMin, $visitTracking, $scrapeGroup) {
 			// "Latest run wins": claim ownership so an older run (e.g. user refreshed the page and re-clicked
 			// Scrape All) self-terminates instead of running to completion in the background and overlapping.
 			$runKey = 'scrape:stream:active_run';
@@ -804,7 +811,7 @@ class BidController extends Controller
 				flush();
 			};
 
-			$bidUrls = BidUrl::all();
+			$bidUrls = BidUrlScrapeGroup::queryForScrape($scrapeGroup)->get();
 			$total = $bidUrls->count();
 			$totalSaved = 0;
 			$totalDuplicates = 0;
@@ -822,6 +829,7 @@ class BidController extends Controller
 				'total' => $total,
 				'url_max_budget_sec' => $urlMaxBudget,
 				'single_per_url_cap' => $singlePerUrlFiveMin,
+				'scrape_group' => $scrapeGroup !== '' ? $scrapeGroup : null,
 			]);
 
 			foreach ($bidUrls as $idx => $bidUrl) {

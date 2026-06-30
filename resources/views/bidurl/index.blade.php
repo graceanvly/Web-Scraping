@@ -761,6 +761,9 @@
 
 		@php
 			$activeTab = $activeTab ?? 'configured';
+			$scrapeGroup = $scrapeGroup ?? '';
+			$scrapeGroups = $scrapeGroups ?? [];
+			$defaultScrapeGroup = $defaultScrapeGroup ?? 'Test';
 		@endphp
 
 		<div class="main-tabs">
@@ -777,6 +780,17 @@
 							<option value="100" {{ request('per_page') == 100 ? 'selected' : '' }}>100</option>
 						</select>
 						entries
+					</label>
+				</div>
+				<div class="controls">
+					<label style="display:flex; align-items:center; gap:0.35rem; margin:0;">
+						Group
+						<select id="scrapeGroupFilter" name="scrape_group">
+							<option value="" {{ $scrapeGroup === '' ? 'selected' : '' }}>All groups</option>
+							@foreach ($scrapeGroups as $groupName)
+								<option value="{{ $groupName }}" {{ $scrapeGroup === $groupName ? 'selected' : '' }}>{{ $groupName }}</option>
+							@endforeach
+						</select>
 					</label>
 				</div>
 				<div class="controls">
@@ -811,6 +825,9 @@
 			<div class="section-header">
 				<div class="section-title">
 					<h2 style="margin:0;">Configured URLs</h2>
+					@if ($scrapeGroup !== '')
+						<p style="margin:0.35rem 0 0; color:#6b7280; font-size:0.9rem;">Group: <strong>{{ $scrapeGroup }}</strong></p>
+					@endif
 				</div>
 				<div class="header-actions">
 					<button class="btn btn-secondary" type="button" onclick="openSetLastScraped()">Set Last Scraped</button>
@@ -823,6 +840,7 @@
 						<tr>
 							<th>URL</th>
 							<th>Name</th>
+							<th>Group</th>
 							<th class="col-date">Last Scraped</th>
 							<th class="col-actions">Actions</th>
 						</tr>
@@ -832,6 +850,7 @@
 							<tr>
 								<td><a href="{{ $bidUrl->url }}" target="_blank" rel="noreferrer">{{ $bidUrl->url }}</a></td>
 								<td>{{ $bidUrl->name ?? '-' }}</td>
+								<td>{{ $bidUrl->scrape_group ?? $defaultScrapeGroup }}</td>
 								<td class="col-date">
 									@if ($bidUrl->last_scraped_at)
 										<span style="color: {{ $bidUrl->last_scraped_at->isToday() ? '#16a34a' : '#6b7280' }};"
@@ -872,7 +891,7 @@
 							</tr>
 						@empty
 							<tr>
-								<td colspan="4" style="text-align:center; color:#6b7280;">No Bid URLs found.</td>
+								<td colspan="5" style="text-align:center; color:#6b7280;">No Bid URLs found.</td>
 							</tr>
 						@endforelse
 					</tbody>
@@ -881,7 +900,7 @@
 
 			<div class="footer-bar">
 				<div>Showing <span id="showingCount">{{ $bidUrls->count() }}</span> of <span id="totalCount">{{ $bidUrls->total() }}</span> entries</div>
-				{{ $bidUrls->appends(['tab' => 'configured'])->links('pagination.bidurl') }}
+				{{ $bidUrls->appends(['tab' => 'configured', 'scrape_group' => $scrapeGroup !== '' ? $scrapeGroup : null])->links('pagination.bidurl') }}
 			</div>
 				</section>
 
@@ -1080,6 +1099,9 @@
 				<label for="add_name">Name (optional)</label>
 				<input type="text" id="add_name" name="name" placeholder="Optional name">
 
+				<label for="add_scrape_group">Scrape group</label>
+				<input type="text" id="add_scrape_group" name="scrape_group" list="scrapeGroupOptions" value="{{ $defaultScrapeGroup }}" maxlength="64">
+
 				<label for="add_username">Username (optional)</label>
 				<input type="text" id="add_username" name="username" placeholder="Optional username">
 
@@ -1098,11 +1120,12 @@
 		<article>
 			<h3>Set Last Scraped</h3>
 			<p style="margin:0 0 1rem; color:#6b7280; font-size:0.9rem;">
-				Applies to <strong>all</strong> configured Bid URLs. Use this to reset scrape eligibility (e.g. clear so Scrape All retries every URL).
+				Applies to configured Bid URLs in the selected scrape group (or all groups when none is selected on the list).
 			</p>
 			<form id="setLastScrapedForm" method="POST" action="{{ route('bidurl.setLastScraped') }}"
-				onsubmit="return confirm('Apply this last scraped date to ALL Bid URLs?')">
+				onsubmit="return confirm('Apply this last scraped date to the selected group?')">
 				@csrf
+				<input type="hidden" name="scrape_group" value="{{ $scrapeGroup }}">
 
 				<label for="set_last_scraped_at">Last Scraped</label>
 				<input type="datetime-local" id="set_last_scraped_at" name="last_scraped_at">
@@ -1132,6 +1155,9 @@
 				<label for="edit_name">Name</label>
 				<input type="text" id="edit_name" name="name">
 
+				<label for="edit_scrape_group">Scrape group</label>
+				<input type="text" id="edit_scrape_group" name="scrape_group" list="scrapeGroupOptions" maxlength="64">
+
 				<label for="edit_username">Username (optional)</label>
 				<input type="text" id="edit_username" name="username">
 
@@ -1145,6 +1171,12 @@
 			</form>
 		</article>
 	</dialog>
+
+	<datalist id="scrapeGroupOptions">
+		@foreach ($scrapeGroups as $groupName)
+			<option value="{{ $groupName }}"></option>
+		@endforeach
+	</datalist>
 
 	@include('bidurl.partials.manual-bid-modal')
 
@@ -1162,6 +1194,7 @@
 		const rows = table ? Array.from(table.querySelectorAll('tbody tr')) : [];
 		const searchInput = document.getElementById('searchInput');
 		const showEntries = document.getElementById('showEntries');
+		const scrapeGroupFilter = document.getElementById('scrapeGroupFilter');
 		const showingCount = document.getElementById('showingCount');
 
 		function switchTab(tab) {
@@ -1182,6 +1215,7 @@
 		function openAdd() {
 			document.getElementById('add_url').value = '';
 			document.getElementById('add_name').value = '';
+			document.getElementById('add_scrape_group').value = scrapeGroupFilter?.value || @json($defaultScrapeGroup);
 			document.getElementById('add_username').value = '';
 			document.getElementById('add_password').value = '';
 			addModal.showModal();
@@ -1220,6 +1254,7 @@
         <ul>
           <li><strong>URL:</strong> <a href="${bidUrl.url}" target="_blank" rel="noreferrer">${bidUrl.url}</a></li>
           <li><strong>Name:</strong> ${bidUrl.name ? bidUrl.name : '&mdash;'}</li>
+          <li><strong>Scrape Group:</strong> ${bidUrl.scrape_group ? bidUrl.scrape_group : '&mdash;'}</li>
           <li><strong>Valid:</strong> ${bidUrl.valid ? 'Yes' : 'No'}</li>
           <li><strong>Start Time:</strong> ${bidUrl.start_time ? bidUrl.start_time : '&mdash;'}</li>
           <li><strong>End Time:</strong> ${bidUrl.end_time ? bidUrl.end_time : '&mdash;'}</li>
@@ -1239,6 +1274,7 @@
 			editForm.action = "{{ url('/bidurl') }}/" + bidUrl.id;
 			document.getElementById('edit_url').value = bidUrl.url ? bidUrl.url : '';
 			document.getElementById('edit_name').value = bidUrl.name ? bidUrl.name : '';
+			document.getElementById('edit_scrape_group').value = bidUrl.scrape_group ? bidUrl.scrape_group : '';
 			document.getElementById('edit_username').value = bidUrl.username ? bidUrl.username : '';
 			document.getElementById('edit_password').value = bidUrl.password ? bidUrl.password : '';
 			editModal.showModal();
@@ -1260,6 +1296,11 @@
 			});
 
 			showEntries?.addEventListener('change', () => {
+				clearPaginationParams(filtersForm);
+				filtersForm.requestSubmit();
+			});
+
+			scrapeGroupFilter?.addEventListener('change', () => {
 				clearPaginationParams(filtersForm);
 				filtersForm.requestSubmit();
 			});

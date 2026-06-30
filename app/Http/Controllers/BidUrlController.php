@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
 use App\Support\BidUrlScrapeMarker;
+use App\Support\BidUrlScrapeGroup;
 use App\Services\BidReferenceLookupService;
 use App\Services\OdsBidUrlAutoAssignService;
 use App\Services\OdsBidUrlListingService;
@@ -80,6 +81,12 @@ class BidUrlController extends Controller
         }
 
         $search = trim((string) $request->query('search', ''));
+        $scrapeGroupRaw = $request->query('scrape_group');
+        if ($scrapeGroupRaw === null) {
+            $scrapeGroup = BidUrlScrapeGroup::default();
+        } else {
+            $scrapeGroup = trim((string) $scrapeGroupRaw);
+        }
 
         $activeTab = $request->query('tab', 'configured');
         if (!in_array($activeTab, ['configured', 'failed', 'unassigned'], true)) {
@@ -87,6 +94,7 @@ class BidUrlController extends Controller
         }
 
         $query = BidUrl::query()->orderBy('id');
+        BidUrlScrapeGroup::applyFilter($query, $scrapeGroup);
         $failedQuery = FailedBidUrl::query()->orderByDesc('failed_at')->orderByDesc('id');
 
         if ($search !== '') {
@@ -125,6 +133,9 @@ class BidUrlController extends Controller
             'odsBidUrlAvailable' => $odsBidUrls->isAvailable(),
             'odsBidUrlAutoAssignAvailable' => $odsAutoAssign->canAutoAssign(),
             'activeTab' => $activeTab,
+            'scrapeGroup' => $scrapeGroup,
+            'scrapeGroups' => BidUrlScrapeGroup::distinctGroups(),
+            'defaultScrapeGroup' => BidUrlScrapeGroup::default(),
             'manilaDirectoryUsers' => $manilaDirectoryUsers,
         ]);
     }
@@ -194,6 +205,7 @@ class BidUrlController extends Controller
             ],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:255'],
+            'scrape_group' => ['nullable', 'string', 'max:64'],
         ], [
             'url.required' => 'Please provide a URL.',
             'url.url' => 'Enter a valid URL (http or https).',
@@ -203,6 +215,13 @@ class BidUrlController extends Controller
         ]);
 
         $this->ensureUrlAndNameAreAvailable($data['url'], $data['name'] ?? null);
+
+        if (BidUrlScrapeGroup::hasColumn()) {
+            $group = trim((string) ($data['scrape_group'] ?? ''));
+            $data['scrape_group'] = $group !== '' ? $group : BidUrlScrapeGroup::default();
+        } else {
+            unset($data['scrape_group']);
+        }
 
         BidUrl::create($data);
 
@@ -228,6 +247,7 @@ class BidUrlController extends Controller
             ],
             'username' => ['nullable', 'string', 'max:255'],
             'password' => ['nullable', 'string', 'max:255'],
+            'scrape_group' => ['nullable', 'string', 'max:64'],
         ], [
             'url.required' => 'Please provide a URL.',
             'url.url' => 'Enter a valid URL (http or https).',
@@ -237,6 +257,13 @@ class BidUrlController extends Controller
         ]);
 
         $this->ensureUrlAndNameAreAvailable($data['url'], $data['name'] ?? null, $bidUrl->id);
+
+        if (BidUrlScrapeGroup::hasColumn()) {
+            $group = trim((string) ($data['scrape_group'] ?? ''));
+            $data['scrape_group'] = $group !== '' ? $group : BidUrlScrapeGroup::default();
+        } else {
+            unset($data['scrape_group']);
+        }
 
         $bidUrl->update($data);
 
@@ -251,16 +278,20 @@ class BidUrlController extends Controller
         $data = $request->validate([
             'last_scraped_at' => ['nullable', 'date', 'required_unless:clear_last_scraped,1'],
             'clear_last_scraped' => ['sometimes', 'boolean'],
+            'scrape_group' => ['nullable', 'string', 'max:64'],
         ], [
             'last_scraped_at.required_unless' => 'Choose a date or select Clear last scraped.',
         ]);
 
         $clear = $request->boolean('clear_last_scraped');
+        $scrapeGroup = trim((string) ($data['scrape_group'] ?? ''));
+
+        $chunkQuery = BidUrlScrapeGroup::applyFilter(BidUrl::query(), $scrapeGroup);
 
         if ($clear) {
             $updated = 0;
             $urlPk = (new BidUrl())->getKeyName();
-            BidUrl::query()->orderBy($urlPk)->chunkById(200, function ($rows) use (&$updated) {
+            $chunkQuery->clone()->orderBy($urlPk)->chunkById(200, function ($rows) use (&$updated) {
                 foreach ($rows as $bidUrl) {
                     BidUrlScrapeMarker::clearManualLastScraped($bidUrl);
                     $bidUrl->save();
@@ -274,7 +305,7 @@ class BidUrlController extends Controller
             $at = Carbon::parse($data['last_scraped_at']);
             $updated = 0;
             $urlPk = (new BidUrl())->getKeyName();
-            BidUrl::query()->orderBy($urlPk)->chunkById(200, function ($rows) use ($at, &$updated) {
+            $chunkQuery->clone()->orderBy($urlPk)->chunkById(200, function ($rows) use ($at, &$updated) {
                 foreach ($rows as $bidUrl) {
                     BidUrlScrapeMarker::applyManualLastScraped($bidUrl, $at);
                     $bidUrl->save();
@@ -286,8 +317,14 @@ class BidUrlController extends Controller
         $message = $clear
             ? "Last scraped cleared for {$updated} Bid URL(s)."
             : "Last scraped updated for {$updated} Bid URL(s).";
+        if ($scrapeGroup !== '') {
+            $message .= " (group: {$scrapeGroup})";
+        }
 
-        return redirect()->route('bidurl.index')->with('success', $message);
+        return redirect()->route('bidurl.index', array_filter([
+            'tab' => 'configured',
+            'scrape_group' => $scrapeGroup !== '' ? $scrapeGroup : null,
+        ]))->with('success', $message);
     }
 
     /**
@@ -408,7 +445,8 @@ class BidUrlController extends Controller
             BidUrlScrapeMarker::restoreLastScrapedAttributes(
                 $failedBidUrl->last_scraped_at,
                 $failedBidUrl->end_time
-            )
+            ),
+            BidUrlScrapeGroup::hasColumn() ? ['scrape_group' => BidUrlScrapeGroup::default()] : [],
         ));
 
         $failedBidUrl->delete();

@@ -1514,7 +1514,7 @@
 	<section class="card">
 		<header class="scrape-actions-head">
 			<h2>Run scraper</h2>
-			<p>Bulk scraping uses every URL saved under Bid URLs. Single URL is for pasting one listing page link when you need a targeted run.</p>
+			<p>Bulk scraping uses URLs from the selected scrape group under Bid URLs. Single URL is for pasting one listing page link when you need a targeted run.</p>
 		</header>
 
 		<div class="scrape-actions-grid" role="presentation">
@@ -1523,8 +1523,18 @@
 					<h3 id="scrape-all-heading">Scrape all saved URLs</h3>
 					<span class="scrape-panel-badge">Bulk</span>
 				</div>
-				<p class="scrape-panel-desc">Processes each configured bid source. Optionally assign extracted bids to someone in the Manila directory before starting.</p>
+				<p class="scrape-panel-desc">Processes bid sources in the selected scrape group. Optionally assign extracted bids to someone in the Manila directory before starting.</p>
 				<div class="scrape-field-stack">
+					@php
+						$scrapeGroups = $scrapeGroups ?? ['Test'];
+						$defaultScrapeGroup = $defaultScrapeGroup ?? 'Test';
+					@endphp
+					<label class="field-label" for="scrapeGroupSelect">Scrape group</label>
+					<select id="scrapeGroupSelect" name="scrape_group">
+						@foreach ($scrapeGroups as $groupName)
+							<option value="{{ $groupName }}" {{ $groupName === $defaultScrapeGroup ? 'selected' : '' }}>{{ $groupName }}</option>
+						@endforeach
+					</select>
 					@php
 						$uidsInDirectory = collect($manilaDirectoryUsers ?? [])->map(fn ($u) => (string) $u['id'])->all();
 						$userSelectedInDirectory = ($filterUserIdRaw ?? '') === '' || in_array((string) ($filterUserIdRaw ?? ''), $uidsInDirectory, true);
@@ -3554,6 +3564,10 @@
 			}
 
 			let streamUrl = "{{ route('bidurl.scrapeStream') }}";
+			const scrapeGroup = document.getElementById('scrapeGroupSelect')?.value?.trim();
+			if (scrapeGroup) {
+				streamUrl += (streamUrl.indexOf('?') === -1 ? '?' : '&') + 'scrape_group=' + encodeURIComponent(scrapeGroup);
+			}
 			const au = document.getElementById('scrapeAssignUserId')?.value?.trim();
 			if (au) {
 				streamUrl += (streamUrl.indexOf('?') === -1 ? '?' : '&') + 'assign_user_id=' + encodeURIComponent(au);

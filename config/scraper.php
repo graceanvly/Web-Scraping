@@ -71,6 +71,8 @@
 	'bid_url_url_column' => env('SCRAPER_BID_URL_URL_COLUMN', 'url'),
 	'bid_url_name_column' => env('SCRAPER_BID_URL_NAME_COLUMN', 'name'),
 	'bid_url_user_id_column' => env('SCRAPER_BID_URL_USER_ID_COLUMN', 'user_id'),
+	'bid_url_scrape_group_column' => env('SCRAPER_BID_URL_SCRAPE_GROUP_COLUMN', 'scrape_group'),
+	'bid_url_scrape_group_default' => env('SCRAPER_BID_URL_SCRAPE_GROUP_DEFAULT', 'Test'),
 	'bid_url_sequence' => env('SCRAPER_BID_URL_SEQUENCE', 'BID_URL_SEQ'),
 	/** Empty = auto-detect last_scraped_at then END_TIME on older schemas. */
 	'bid_url_last_scraped_column' => env('SCRAPER_BID_URL_LAST_SCRAPED_COLUMN', ''),
