@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\CaseInsensitiveAttributes;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -59,6 +60,14 @@ class TempBid extends Model
 		'ENDDATE' => 'datetime',
 		'LAST_MODIFIED' => 'datetime',
 	];
+
+	/** Oldest queue entries first; newest scraped bids appear at the bottom. */
+	public function scopeListingOrder(Builder $query): Builder
+	{
+		return $query
+			->orderBy($this->getKeyName())
+			->orderBy($this->getCreatedAtColumn());
+	}
 
 	/** Business columns that map 1:1 onto the live `bid` table. */
 	public const BID_COLUMNS = [

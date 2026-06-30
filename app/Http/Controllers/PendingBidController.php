@@ -40,7 +40,7 @@ class PendingBidController extends Controller
 			});
 		}
 
-		$pending = $query->orderByDesc('created_at')->paginate($perPage)->withQueryString();
+		$pending = $query->listingOrder()->paginate($perPage)->withQueryString();
 
 		// Resolve a display label for each distinct ENTITYID on this page.
 		$entityLabels = [];
