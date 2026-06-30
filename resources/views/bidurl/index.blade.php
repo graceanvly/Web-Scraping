@@ -891,8 +891,19 @@
 					<h2 style="margin:0;">Unassigned URLs</h2>
 					<p style="margin:0.35rem 0 0; color:#6b7280; font-size:0.9rem;">
 						Read-only list from Oracle <code>BIDURL</code> where no user is assigned.
+						Auto Assign uses the most recent <code>BIDURLHISTORY</code> visit user per URL.
 					</p>
 				</div>
+				@if ($odsBidUrlAutoAssignAvailable)
+					<div class="header-actions">
+						<form method="POST" action="{{ route('bidurl.unassigned.autoAssign') }}"
+							onsubmit="return confirm('Assign all unassigned BIDURL rows using the latest BIDURLHISTORY user for each URL?')"
+							style="margin:0;">
+							@csrf
+							<button class="btn btn-primary" type="submit">Auto Assign</button>
+						</form>
+					</div>
+				@endif
 			</div>
 			@if (!$odsBidUrlAvailable)
 				<p style="padding:1rem 1.25rem; margin:0; color:#6b7280;">

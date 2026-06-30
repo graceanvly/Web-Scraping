@@ -86,6 +86,12 @@
 	'ods_bidurl_url_column' => env('SCRAPER_ODS_BIDURL_URL_COLUMN', 'URL'),
 	'ods_bidurl_name_column' => env('SCRAPER_ODS_BIDURL_NAME_COLUMN', 'NAME'),
 	'ods_bidurl_user_id_column' => env('SCRAPER_ODS_BIDURL_USER_ID_COLUMN', 'USER_ID'),
+	'ods_bidurl_history_table' => env('SCRAPER_ODS_BIDURL_HISTORY_TABLE', 'BIDURLHISTORY'),
+	'ods_bidurl_history_id_column' => env('SCRAPER_ODS_BIDURL_HISTORY_ID_COLUMN', 'ID'),
+	'ods_bidurl_history_bid_url_id_column' => env('SCRAPER_ODS_BIDURL_HISTORY_BID_URL_ID_COLUMN', 'BID_URL_ID'),
+	'ods_bidurl_history_user_id_column' => env('SCRAPER_ODS_BIDURL_HISTORY_USER_ID_COLUMN', 'USER_ID'),
+	'ods_bidurl_history_start_time_column' => env('SCRAPER_ODS_BIDURL_HISTORY_START_TIME_COLUMN', 'START_TIME'),
+	'ods_bidurl_history_end_time_column' => env('SCRAPER_ODS_BIDURL_HISTORY_END_TIME_COLUMN', 'END_TIME'),
 
 	/*
 	|--------------------------------------------------------------------------

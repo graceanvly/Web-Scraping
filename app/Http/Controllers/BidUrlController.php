@@ -6,6 +6,7 @@ use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
 use App\Support\BidUrlScrapeMarker;
 use App\Services\BidReferenceLookupService;
+use App\Services\OdsBidUrlAutoAssignService;
 use App\Services\OdsBidUrlListingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -68,7 +69,7 @@ class BidUrlController extends Controller
     /**
      * Show all BidUrl records.
      */
-    public function index(Request $request, BidReferenceLookupService $lookup, OdsBidUrlListingService $odsBidUrls)
+    public function index(Request $request, BidReferenceLookupService $lookup, OdsBidUrlListingService $odsBidUrls, OdsBidUrlAutoAssignService $odsAutoAssign)
     {
         $perPage = (int) $request->integer('per_page', 50);
         if ($perPage < 5) {
@@ -122,9 +123,43 @@ class BidUrlController extends Controller
             'failedCount' => $failedCount,
             'unassignedCount' => $unassignedCount,
             'odsBidUrlAvailable' => $odsBidUrls->isAvailable(),
+            'odsBidUrlAutoAssignAvailable' => $odsAutoAssign->canAutoAssign(),
             'activeTab' => $activeTab,
             'manilaDirectoryUsers' => $manilaDirectoryUsers,
         ]);
+    }
+
+    public function autoAssignUnassigned(OdsBidUrlAutoAssignService $autoAssign)
+    {
+        if (!$autoAssign->canAutoAssign()) {
+            return redirect()
+                ->route('bidurl.index', ['tab' => 'unassigned'])
+                ->withErrors(['auto_assign' => 'Auto assign requires ODS BIDURL and BIDURLHISTORY tables.']);
+        }
+
+        $stats = $autoAssign->assignAllUnassigned();
+
+        $parts = [];
+        if ($stats['assigned'] > 0) {
+            $parts[] = "{$stats['assigned']} assigned from visit history";
+        }
+        if ($stats['skipped_no_history'] > 0) {
+            $parts[] = "{$stats['skipped_no_history']} skipped (no history user)";
+        }
+        if ($stats['skipped_already'] > 0) {
+            $parts[] = "{$stats['skipped_already']} already assigned";
+        }
+        if ($stats['failed'] > 0) {
+            $parts[] = "{$stats['failed']} failed";
+        }
+
+        $message = $parts !== []
+            ? implode('; ', $parts) . '.'
+            : 'No unassigned URLs to process.';
+
+        return redirect()
+            ->route('bidurl.index', ['tab' => 'unassigned'])
+            ->with('success', $message);
     }
 
     /**
