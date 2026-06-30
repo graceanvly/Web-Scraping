@@ -21,4 +21,14 @@ class BidUrlScrapeGroupTest extends TestCase
 
 		$this->assertSame($before, $query->toSql());
 	}
+
+	public function test_merge_group_names_includes_default_and_sorts(): void
+	{
+		$this->assertSame(['Production', 'Test', 'VE'], BidUrlScrapeGroup::mergeGroupNames(['VE', 'Production']));
+	}
+
+	public function test_merge_group_names_deduplicates_default(): void
+	{
+		$this->assertSame(['Test', 'VE'], BidUrlScrapeGroup::mergeGroupNames(['Test', 'VE', 'Test']));
+	}
 }

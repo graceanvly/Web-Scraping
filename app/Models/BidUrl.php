@@ -53,13 +53,47 @@ class BidUrl extends Model
             }
 
             if (BidUrlScrapeGroup::hasColumn()) {
+                $model->normalizeScrapeGroupForStorage();
                 $col = BidUrlScrapeGroup::column();
-                $current = $model->getAttribute($col) ?? $model->getAttribute('scrape_group');
+                $current = $model->getAttribute($col);
                 if ($current === null || trim((string) $current) === '') {
                     $model->setAttribute($col, BidUrlScrapeGroup::default());
                 }
             }
         });
+
+        static::saving(function (BidUrl $model) {
+            $model->normalizeScrapeGroupForStorage();
+        });
+    }
+
+    /** Map scrape_group form input onto the physical DB column (e.g. SCRAPE_GROUP on Oracle). */
+    public function normalizeScrapeGroupForStorage(): void
+    {
+        if (!BidUrlScrapeGroup::hasColumn()) {
+            return;
+        }
+
+        $col = BidUrlScrapeGroup::column();
+        $value = null;
+        foreach (array_unique([$col, 'scrape_group', 'SCRAPE_GROUP']) as $key) {
+            $candidate = $this->getAttribute($key);
+            if ($candidate !== null && trim((string) $candidate) !== '') {
+                $value = trim((string) $candidate);
+                break;
+            }
+        }
+
+        foreach (array_keys($this->getAttributes()) as $key) {
+            if (strcasecmp((string) $key, 'scrape_group') === 0
+                || strcasecmp((string) $key, $col) === 0) {
+                $this->offsetUnset($key);
+            }
+        }
+
+        if ($value !== null) {
+            $this->setAttribute($col, $value);
+        }
     }
 
 	protected $fillable = [
