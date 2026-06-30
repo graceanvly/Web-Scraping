@@ -77,6 +77,18 @@
 
 	/*
 	|--------------------------------------------------------------------------
+	| Legacy ODS BIDURL (read-only — unassigned URL tab)
+	|--------------------------------------------------------------------------
+	| Production Oracle master list. Not used for scraper writes (see bid_url_table).
+	*/
+	'ods_bidurl_table' => env('SCRAPER_ODS_BIDURL_TABLE', 'BIDURL'),
+	'ods_bidurl_id_column' => env('SCRAPER_ODS_BIDURL_ID_COLUMN', 'ID'),
+	'ods_bidurl_url_column' => env('SCRAPER_ODS_BIDURL_URL_COLUMN', 'URL'),
+	'ods_bidurl_name_column' => env('SCRAPER_ODS_BIDURL_NAME_COLUMN', 'NAME'),
+	'ods_bidurl_user_id_column' => env('SCRAPER_ODS_BIDURL_USER_ID_COLUMN', 'USER_ID'),
+
+	/*
+	|--------------------------------------------------------------------------
 	| Bid URL visit history (scrape / manual visit log)
 	|--------------------------------------------------------------------------
 	| MySQL dev: bid_url_history. Oracle scraper DB: BID_URL_HISTORY.

@@ -792,6 +792,12 @@
 					Configured URLs
 					<span class="tab-badge tab-badge--muted">{{ $bidUrls->total() }}</span>
 				</button>
+				<button id="tabUnassigned" type="button" class="tab-btn {{ $activeTab === 'unassigned' ? 'tab-active' : '' }}" onclick="switchTab('unassigned')">
+					Unassigned URLs
+					@if ($unassignedCount > 0)
+						<span class="tab-badge tab-badge--muted">{{ $unassignedCount }}</span>
+					@endif
+				</button>
 				<button id="tabFailed" type="button" class="tab-btn {{ $activeTab === 'failed' ? 'tab-active' : '' }}" onclick="switchTab('failed')">
 					Scrape Failed URLs
 					@if ($failedCount > 0)
@@ -877,6 +883,71 @@
 				<div>Showing <span id="showingCount">{{ $bidUrls->count() }}</span> of <span id="totalCount">{{ $bidUrls->total() }}</span> entries</div>
 				{{ $bidUrls->appends(['tab' => 'configured'])->links('pagination.bidurl') }}
 			</div>
+				</section>
+
+				<section id="panelUnassigned" class="card tab-panel{{ $activeTab !== 'unassigned' ? ' tab-hidden' : '' }}">
+			<div class="section-header">
+				<div class="section-title">
+					<h2 style="margin:0;">Unassigned URLs</h2>
+					<p style="margin:0.35rem 0 0; color:#6b7280; font-size:0.9rem;">
+						Read-only list from Oracle <code>BIDURL</code> where no user is assigned.
+					</p>
+				</div>
+			</div>
+			@if (!$odsBidUrlAvailable)
+				<p style="padding:1rem 1.25rem; margin:0; color:#6b7280;">
+					ODS <code>BIDURL</code> table is not available in this environment.
+				</p>
+			@else
+			<div class="table-wrapper">
+				<table id="unassignedUrlsTable">
+					<thead>
+						<tr>
+							<th>ID</th>
+							<th>URL</th>
+							<th>Name</th>
+							<th class="col-date">Last Scraped</th>
+							<th class="col-actions">Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						@forelse ($unassignedBidUrls as $bidUrl)
+							<tr>
+								<td>{{ $bidUrl->id }}</td>
+								<td><a href="{{ $bidUrl->url }}" target="_blank" rel="noreferrer">{{ $bidUrl->url }}</a></td>
+								<td>{{ $bidUrl->name ?? '-' }}</td>
+								<td class="col-date">
+									@if ($bidUrl->last_scraped_at)
+										<span style="color: {{ $bidUrl->last_scraped_at->isToday() ? '#16a34a' : '#6b7280' }};"
+											title="{{ $bidUrl->last_scraped_at->format('M j, Y g:i A') }}">
+											{{ $bidUrl->last_scraped_at->format('n/j') }}
+										</span>
+									@else
+										<span style="color:#9ca3af;">Never</span>
+									@endif
+								</td>
+								<td class="col-actions">
+									<div class="row-actions">
+										<button class="icon-action icon-action--view" type="button" onclick='openDetails(@json($bidUrl))' title="View details" aria-label="View details">
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+										</button>
+									</div>
+								</td>
+							</tr>
+						@empty
+							<tr>
+								<td colspan="5" style="text-align:center; color:#6b7280;">No unassigned URLs found.</td>
+							</tr>
+						@endforelse
+					</tbody>
+				</table>
+			</div>
+
+			<div class="footer-bar">
+				<div>Showing {{ $unassignedBidUrls->count() }} of {{ $unassignedBidUrls->total() }} unassigned entries</div>
+				{{ $unassignedBidUrls->appends(['tab' => 'unassigned'])->links('pagination.bidurl') }}
+			</div>
+			@endif
 				</section>
 
 				<section id="panelFailed" class="card tab-panel{{ $activeTab !== 'failed' ? ' tab-hidden' : '' }}">
@@ -1081,16 +1152,14 @@
 		function switchTab(tab) {
 			const params = new URLSearchParams(window.location.search);
 			params.set('tab', tab);
-			if (tab === 'configured') {
-				params.delete('failed_page');
-			} else {
-				params.delete('page');
-			}
+			params.delete('page');
+			params.delete('failed_page');
+			params.delete('unassigned_page');
 			window.location.search = params.toString();
 		}
 
 		function clearPaginationParams(form) {
-			['page', 'failed_page'].forEach(function (name) {
+			['page', 'failed_page', 'unassigned_page'].forEach(function (name) {
 				form?.querySelector('input[name="' + name + '"]')?.remove();
 			});
 		}

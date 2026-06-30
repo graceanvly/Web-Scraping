@@ -6,6 +6,7 @@ use App\Models\BidUrl;
 use App\Models\FailedBidUrl;
 use App\Support\BidUrlScrapeMarker;
 use App\Services\BidReferenceLookupService;
+use App\Services\OdsBidUrlListingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -67,7 +68,7 @@ class BidUrlController extends Controller
     /**
      * Show all BidUrl records.
      */
-    public function index(Request $request, BidReferenceLookupService $lookup)
+    public function index(Request $request, BidReferenceLookupService $lookup, OdsBidUrlListingService $odsBidUrls)
     {
         $perPage = (int) $request->integer('per_page', 50);
         if ($perPage < 5) {
@@ -78,6 +79,11 @@ class BidUrlController extends Controller
         }
 
         $search = trim((string) $request->query('search', ''));
+
+        $activeTab = $request->query('tab', 'configured');
+        if (!in_array($activeTab, ['configured', 'failed', 'unassigned'], true)) {
+            $activeTab = 'configured';
+        }
 
         $query = BidUrl::query()->orderBy('id');
         $failedQuery = FailedBidUrl::query()->orderByDesc('failed_at')->orderByDesc('id');
@@ -96,11 +102,10 @@ class BidUrlController extends Controller
 
         $bidUrls = $query->paginate($perPage, ['*'], 'page')->withQueryString();
         $failedBidUrls = $failedQuery->paginate($perPage, ['*'], 'failed_page')->withQueryString();
+        $unassignedBidUrls = $odsBidUrls->paginateUnassigned($search, $perPage);
 
-        $activeTab = $request->query('tab', 'configured');
-        if (!in_array($activeTab, ['configured', 'failed'], true)) {
-            $activeTab = 'configured';
-        }
+        $failedCount = $failedBidUrls->total();
+        $unassignedCount = $unassignedBidUrls->total();
 
         $manilaDirectoryUsers = [];
         try {
@@ -112,8 +117,11 @@ class BidUrlController extends Controller
         return view('bidurl.index', [
             'bidUrls' => $bidUrls,
             'failedBidUrls' => $failedBidUrls,
+            'unassignedBidUrls' => $unassignedBidUrls,
             'search' => $search,
-            'failedCount' => $failedBidUrls->total(),
+            'failedCount' => $failedCount,
+            'unassignedCount' => $unassignedCount,
+            'odsBidUrlAvailable' => $odsBidUrls->isAvailable(),
             'activeTab' => $activeTab,
             'manilaDirectoryUsers' => $manilaDirectoryUsers,
         ]);
