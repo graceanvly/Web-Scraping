@@ -12,6 +12,11 @@ class BidUrlScrapeGroupTest extends TestCase
 		$this->assertSame('Test', BidUrlScrapeGroup::default());
 	}
 
+	public function test_scrape_all_default_is_ve(): void
+	{
+		$this->assertSame('VE', BidUrlScrapeGroup::scrapeAllDefault());
+	}
+
 	public function test_apply_filter_is_noop_when_group_empty(): void
 	{
 		$query = \App\Models\BidUrl::query();

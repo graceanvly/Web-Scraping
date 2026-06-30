@@ -28,6 +28,13 @@ final class BidUrlScrapeGroup
 		return (string) config('scraper.bid_url_scrape_group_default', self::DEFAULT);
 	}
 
+	public static function scrapeAllDefault(): string
+	{
+		$configured = trim((string) config('scraper.scrape_all_group_default', 'VE'));
+
+		return $configured !== '' ? $configured : self::default();
+	}
+
 	public static function column(): string
 	{
 		$physical = self::resolvePhysicalColumn();

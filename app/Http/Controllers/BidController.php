@@ -200,8 +200,11 @@ class BidController extends Controller
 			'reportTo',
 			'activeTab',
 		) + [
-			'scrapeGroups' => BidUrlScrapeGroup::distinctGroups(),
-			'defaultScrapeGroup' => BidUrlScrapeGroup::default(),
+			'scrapeGroups' => BidUrlScrapeGroup::mergeGroupNames(array_merge(
+				BidUrlScrapeGroup::distinctGroups(),
+				[BidUrlScrapeGroup::scrapeAllDefault()],
+			)),
+			'defaultScrapeGroup' => BidUrlScrapeGroup::scrapeAllDefault(),
 		]);
 	}
 
