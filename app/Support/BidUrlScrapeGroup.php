@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\BidUrl;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
@@ -15,6 +16,12 @@ final class BidUrlScrapeGroup
 	private static ?string $physicalColumn = null;
 
 	private static bool $physicalColumnResolved = false;
+
+	public static function resetCache(): void
+	{
+		self::$physicalColumn = null;
+		self::$physicalColumnResolved = false;
+	}
 
 	public static function default(): string
 	{
@@ -61,24 +68,22 @@ final class BidUrlScrapeGroup
 		}
 
 		$col = self::column();
+		$table = (new BidUrl())->getTable();
 		$groups = [];
 
-		try {
-			$groups = BidUrl::query()
-				->select($col)
-				->whereNotNull($col)
-				->where($col, '<>', '')
-				->distinct()
-				->orderBy($col)
-				->pluck($col)
-				->map(fn ($value) => trim((string) $value))
-				->filter(fn (string $value) => $value !== '')
-				->values()
-				->all();
-		} catch (\Throwable $e) {
-			Log::warning('Could not load scrape groups from bid_url', ['error' => $e->getMessage()]);
-
-			return [self::default()];
+		foreach (self::distinctGroupFetchStrategies($table, $col) as $fetch) {
+			try {
+				$groups = $fetch();
+				if ($groups !== []) {
+					break;
+				}
+			} catch (\Throwable $e) {
+				Log::warning('Scrape group distinct query failed', [
+					'table' => $table,
+					'column' => $col,
+					'error' => $e->getMessage(),
+				]);
+			}
 		}
 
 		return self::mergeGroupNames($groups);
@@ -104,6 +109,84 @@ final class BidUrlScrapeGroup
 		return $merged;
 	}
 
+	public static function readFromAttributes(array $attributes): ?string
+	{
+		if (!self::hasColumn()) {
+			foreach ($attributes as $key => $value) {
+				if (strcasecmp((string) $key, 'scrape_group') === 0) {
+					$trimmed = trim((string) ($value ?? ''));
+					return $trimmed !== '' ? $trimmed : null;
+				}
+			}
+
+			return null;
+		}
+
+		$col = self::column();
+		foreach ($attributes as $key => $value) {
+			if (strcasecmp((string) $key, $col) === 0 || strcasecmp((string) $key, 'scrape_group') === 0) {
+				$trimmed = trim((string) ($value ?? ''));
+				return $trimmed !== '' ? $trimmed : null;
+			}
+		}
+
+		return null;
+	}
+
+	public static function readFromModel(BidUrl $bidUrl): ?string
+	{
+		return self::readFromAttributes($bidUrl->getAttributes());
+	}
+
+	/** @return list<callable(): list<string>> */
+	private static function distinctGroupFetchStrategies(string $table, string $col): array
+	{
+		return [
+			fn () => self::fetchDistinctGroupValuesFromQueryBuilder($table, $col),
+			fn () => self::fetchDistinctGroupValuesFromModels(),
+		];
+	}
+
+	/** @return list<string> */
+	private static function fetchDistinctGroupValuesFromQueryBuilder(string $table, string $col): array
+	{
+		return DB::table($table)
+			->select($col)
+			->whereNotNull($col)
+			->distinct()
+			->orderBy($col)
+			->pluck($col)
+			->map(fn ($value) => trim((string) $value))
+			->filter(fn (string $value) => $value !== '')
+			->values()
+			->all();
+	}
+
+	/** @return list<string> */
+	private static function fetchDistinctGroupValuesFromModels(): array
+	{
+		$col = self::column();
+		$key = (new BidUrl())->getKeyName();
+		$seen = [];
+
+		BidUrl::query()
+			->select([$key, $col])
+			->orderBy($key)
+			->chunkById(500, function ($rows) use ($col, &$seen) {
+				foreach ($rows as $row) {
+					$value = trim((string) (self::readFromModel($row) ?? ''));
+					if ($value !== '') {
+						$seen[$value] = true;
+					}
+				}
+			}, $key);
+
+		$groups = array_keys($seen);
+		sort($groups, SORT_STRING | SORT_FLAG_CASE);
+
+		return $groups;
+	}
+
 	private static function resolvePhysicalColumn(): ?string
 	{
 		if (self::$physicalColumnResolved) {
@@ -122,8 +205,9 @@ final class BidUrlScrapeGroup
 			'SCRAPE_GROUP',
 		]));
 
+		$table = (new BidUrl())->getTable();
+
 		try {
-			$table = (new BidUrl())->getTable();
 			foreach ($candidates as $candidate) {
 				if ($candidate !== '' && Schema::hasColumn($table, $candidate)) {
 					self::$physicalColumn = $candidate;
@@ -132,9 +216,44 @@ final class BidUrlScrapeGroup
 				}
 			}
 		} catch (\Throwable) {
-			self::$physicalColumn = null;
 		}
 
+		self::$physicalColumn = self::probePhysicalColumn($table, $candidates);
+
 		return self::$physicalColumn;
+	}
+
+	/** @param  list<string>  $candidates */
+	private static function probePhysicalColumn(string $table, array $candidates): ?string
+	{
+		try {
+			$row = DB::table($table)->limit(1)->first();
+			if ($row !== null) {
+				foreach ($candidates as $candidate) {
+					foreach (array_keys((array) $row) as $key) {
+						if (strcasecmp((string) $key, (string) $candidate) === 0) {
+							return (string) $key;
+						}
+					}
+				}
+			}
+		} catch (\Throwable) {
+		}
+
+		foreach ($candidates as $candidate) {
+			if ($candidate === '') {
+				continue;
+			}
+
+			try {
+				DB::table($table)->select($candidate)->limit(1)->get();
+
+				return $candidate;
+			} catch (\Throwable) {
+				continue;
+			}
+		}
+
+		return null;
 	}
 }

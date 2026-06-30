@@ -131,4 +131,9 @@ class BidUrl extends Model
 		});
 	}
 
+	protected function scrapeGroup(): Attribute
+	{
+		return Attribute::get(fn () => BidUrlScrapeGroup::readFromModel($this));
+	}
+
 }
