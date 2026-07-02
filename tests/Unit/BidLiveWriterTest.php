@@ -23,4 +23,19 @@ class BidLiveWriterTest extends TestCase
 		$this->assertSame(44, (int) $bid->getAttribute('STATEID'));
 		$this->assertSame(1171, (int) $bid->getAttribute('BID_URL_ID'));
 	}
+
+	public function test_apply_attributes_skips_null_on_update(): void
+	{
+		$bid = new Bid();
+		$bid->setAttribute('INLINEURL', 1);
+		$bid->exists = true;
+
+		BidLiveWriter::applyAttributes($bid, [
+			'TITLE' => 'Updated title',
+			'INLINEURL' => null,
+		]);
+
+		$this->assertSame('Updated title', $bid->getAttribute('TITLE'));
+		$this->assertSame(1, (int) $bid->getAttribute('INLINEURL'));
+	}
 }

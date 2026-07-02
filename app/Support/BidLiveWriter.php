@@ -23,8 +23,14 @@ final class BidLiveWriter
 	 */
 	public static function applyAttributes(Bid $bid, array $attrs): void
 	{
+		$isUpdate = $bid->exists;
+
 		foreach (BidLiveColumnFilter::normalizeAttributeKeys($attrs) as $key => $value) {
 			if (strcasecmp((string) $key, 'ID') === 0) {
+				continue;
+			}
+			// Oracle NOT NULL columns (e.g. INLINEURL) must not be cleared on duplicate promote.
+			if ($isUpdate && $value === null) {
 				continue;
 			}
 			$bid->setAttribute((string) $key, $value);
