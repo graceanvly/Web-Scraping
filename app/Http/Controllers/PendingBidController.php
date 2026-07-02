@@ -339,7 +339,7 @@ class PendingBidController extends Controller
 			$existing = $matcher->findMatchingLiveBid($pendingBid);
 			if ($existing !== null) {
 				$liveId = $existing->getKey();
-				if ($fromEditModal || $matcher->shouldPatchLiveOnDuplicate($pendingBid, $existing)) {
+				if ($fromEditModal || $matcher->shouldPatchLiveOnDuplicate($pendingBid, $existing) || $this->hasReferenceIdOverrides($referenceIds)) {
 					PendingBidApproveLogger::duplicateMatched((int) $pendingBid->id, $liveId ?? 0, true);
 					$this->applyPendingAttrsToLiveBid($pendingBid, $existing, $referenceIds);
 				} else {

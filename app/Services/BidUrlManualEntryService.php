@@ -12,6 +12,7 @@ use App\Support\BidIdentity;
 use App\Support\BidLiveWriter;
 use App\Support\BidUrlScrapeMarker;
 use App\Support\BidUrlTableConfig;
+use App\Support\LiveBidBidUrlIdResolver;
 use App\Support\PendingBidLiveMapper;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -44,6 +45,7 @@ class BidUrlManualEntryService
 	/** @return array{table: string, id_col: string, url_col: string, name_col: string, user_col: string} */
 	private function bidUrlTableSpec(): array
 	{
+		// Scraper-managed table (BID_URL) — not ODS BIDURL.
 		return [
 			'table' => BidUrlTableConfig::table(),
 			'id_col' => (string) $this->cfg('bid_url_id_column', 'id'),
@@ -108,6 +110,19 @@ class BidUrlManualEntryService
 			return null;
 		}
 
+		$ods = app(OdsBidUrlSelectService::class);
+		if ($ods->isAvailable()) {
+			$opt = $ods->getOptionById($id);
+			if ($opt !== null) {
+				return $opt;
+			}
+		}
+
+		$legacy = LiveBidBidUrlIdResolver::lookupOptionById($id);
+		if ($legacy !== null) {
+			return $legacy;
+		}
+
 		$spec = $this->bidUrlTableSpec();
 
 		try {
@@ -126,7 +141,20 @@ class BidUrlManualEntryService
 			return null;
 		}
 
-		return $row ? $this->bidUrlRowToSelectOption($row) : null;
+		if ($row) {
+			$opt = $this->bidUrlRowToSelectOption($row);
+			if ($opt === null) {
+				return null;
+			}
+			$mappedId = LiveBidBidUrlIdResolver::resolveOdsIdFromUrl($opt['url']);
+			if ($mappedId !== null && $mappedId > 0) {
+				$opt['id'] = $mappedId;
+			}
+
+			return $opt;
+		}
+
+		return null;
 	}
 
 	/**
@@ -153,10 +181,17 @@ class BidUrlManualEntryService
 	}
 
 	/**
+	 * Search ODS BIDURL for pending approve / live edit (BIDURL.ID). Falls back to scraper BID_URL when ODS is unavailable or user_id is set.
+	 *
 	 * @return array<int, array{id: int, label: string, url: string}>
 	 */
 	public function searchBidUrlsForSelect(string $query, int $limit = 40, ?int $userId = null): array
 	{
+		$ods = app(OdsBidUrlSelectService::class);
+		if ($userId === null && $ods->isAvailable()) {
+			return $ods->searchForSelect($query, $limit);
+		}
+
 		$limit = max(5, min(100, $limit));
 		$spec = $this->bidUrlTableSpec();
 
@@ -192,9 +227,14 @@ class BidUrlManualEntryService
 		$out = [];
 		foreach ($rows as $row) {
 			$opt = $this->bidUrlRowToSelectOption($row);
-			if ($opt !== null) {
-				$out[] = $opt;
+			if ($opt === null) {
+				continue;
 			}
+			$odsId = LiveBidBidUrlIdResolver::resolveOdsIdFromUrl($opt['url']);
+			if ($odsId !== null && $odsId > 0) {
+				$opt['id'] = $odsId;
+			}
+			$out[] = $opt;
 		}
 
 		return $out;
@@ -316,7 +356,10 @@ class BidUrlManualEntryService
 			$temp = new TempBid();
 			$temp->fill($fields);
 			if ($bidUrl) {
-				$temp->BID_URL_ID = $bidUrl->id;
+				$temp->BID_URL_ID = LiveBidBidUrlIdResolver::resolveFromScraperBidUrl(
+					$bidUrl,
+					$listingUrl ?? ($bidUrl->url ?? null)
+				);
 				$temp->source_listing_url = $bidUrl->url;
 				$temp->bid_url_name = $bidUrl->name;
 			} else {
@@ -355,11 +398,13 @@ class BidUrlManualEntryService
 	): string {
 		return DB::transaction(function () use ($fields, $failedBidUrl, $startTime, $approve, $actorUserId) {
 			$active = $this->findActiveBidUrlByUrl($failedBidUrl->url);
-			$bidUrlId = $active?->id ?? $failedBidUrl->original_bid_url_id;
 
 			$temp = new TempBid();
 			$temp->fill($fields);
-			$temp->BID_URL_ID = $bidUrlId;
+			$temp->BID_URL_ID = LiveBidBidUrlIdResolver::resolveFromScraperBidUrl(
+				$active,
+				$failedBidUrl->url
+			);
 			$temp->source_listing_url = $failedBidUrl->url;
 			$temp->bid_url_name = $failedBidUrl->name;
 			$temp->CREATED = now();

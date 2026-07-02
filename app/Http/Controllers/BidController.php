@@ -23,6 +23,7 @@ use App\Support\BidLiveColumnFilter;
 use App\Support\BidRecordPayload;
 use App\Support\BidUrlScrapeGroup;
 use App\Support\BidUrlScrapeMarker;
+use App\Support\LiveBidBidUrlIdResolver;
 use App\Support\ThirdPartyProcurementPortalUrl;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
@@ -2253,6 +2254,10 @@ class BidController extends Controller
 		$title = $titleMap[$rawTitle] ?? $rawTitle;
 		$title = $this->applyCorporateTitlePrefix($title, $bidData['POSTING_ENTITY'] ?? 'uncertain');
 
+		$resolvedBidUrlId = $bidUrl !== null
+			? LiveBidBidUrlIdResolver::resolveFromScraperBidUrl($bidUrl, $listingUrl)
+			: LiveBidBidUrlIdResolver::resolveOdsIdFromUrl($listingUrl);
+
 		$description = $bidData['DESCRIPTION'] ?? '';
 		if (is_array($description)) {
 			$description = $this->formatDescriptionArray($description);
@@ -2275,7 +2280,7 @@ class BidController extends Controller
 		$dup = $this->evaluateScrapedBidDuplicate(
 			$bidData,
 			$savedUrl,
-			$bidUrlId,
+			$resolvedBidUrlId,
 			$duplicateMatcher,
 			$runTracker,
 			$title,
@@ -2285,7 +2290,7 @@ class BidController extends Controller
 			return 'duplicate';
 		}
 
-		$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, $bidUrlId, $title, $naics);
+		$identity = BidIdentity::fromScrapeExtract($bidData, $savedUrl, $resolvedBidUrlId, $title, $naics);
 		if (!$this->looksLikeBid($title, $description, $listingUrl, $endDate, $identity)) {
 			Log::info('Scraped bid rejected (looksLikeBid)', [
 				'url' => $listingUrl,
@@ -2320,7 +2325,7 @@ class BidController extends Controller
 		$bid->CREATED = now();
 		$bid->LAST_MODIFIED = now();
 		if ($bidUrl !== null) {
-			$bid->BID_URL_ID = $bidUrl->id;
+			$bid->BID_URL_ID = $resolvedBidUrlId;
 			$bid->source_listing_url = $listingUrl;
 			$bid->bid_url_name = $bidUrl->name ?? null;
 		} else {

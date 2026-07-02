@@ -64,8 +64,10 @@
 	|--------------------------------------------------------------------------
 	| Use the scraper-managed BID_URL table (MySQL: bid_url). Do NOT point this at
 	| legacy Oracle ODS BIDURL — that table is read-only for production bid linkage.
-	| BID_URL_ID on bid / bids_temp references BID_URL.ID.
+	| BID_URL_ID on live bid references ODS BIDURL.ID (not scraper BID_URL.ID).
+	| Scraper operations still use bid_url_table (BID_URL); map by URL on promote.
 	*/
+	'live_bid_url_id_references_ods' => filter_var(env('SCRAPER_LIVE_BID_URL_ID_REFERENCES_ODS', true), FILTER_VALIDATE_BOOL),
 	'bid_url_table' => env('SCRAPER_BID_URL_TABLE', 'bid_url'),
 	'bid_url_id_column' => env('SCRAPER_BID_URL_ID_COLUMN', 'id'),
 	'bid_url_url_column' => env('SCRAPER_BID_URL_URL_COLUMN', 'url'),
@@ -81,9 +83,10 @@
 
 	/*
 	|--------------------------------------------------------------------------
-	| Legacy ODS BIDURL (read-only — unassigned URL tab)
+	| Legacy ODS BIDURL (read-only — live BID.BID_URL_ID, unassigned URL tab)
 	|--------------------------------------------------------------------------
-	| Production Oracle master list. Not used for scraper writes (see bid_url_table).
+	| Production master URL list. Live bids store BIDURL.ID in BID_URL_ID.
+	| Scraper configured URLs live in bid_url_table (BID_URL) — see LiveBidBidUrlIdResolver.
 	*/
 	'ods_bidurl_table' => env('SCRAPER_ODS_BIDURL_TABLE', 'BIDURL'),
 	'ods_bidurl_id_column' => env('SCRAPER_ODS_BIDURL_ID_COLUMN', 'ID'),

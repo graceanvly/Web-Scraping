@@ -62,6 +62,7 @@ final class PendingBidLiveMapper
 		}
 
 		$attrs = self::applyReferenceOverrides($attrs, $referenceOverrides);
+		$attrs = self::normalizeBidUrlIdForLive($attrs, $pendingBid);
 
 		$title = trim((string) ($pendingBid->getAttribute('TITLE') ?? ''));
 		if ($title === '') {
@@ -94,6 +95,26 @@ final class PendingBidLiveMapper
 				continue;
 			}
 			$attrs[$logical] = self::castValue($logical, $value);
+		}
+
+		return $attrs;
+	}
+
+	/**
+	 * @param  array<string, mixed>  $attrs
+	 * @return array<string, mixed>
+	 */
+	private static function normalizeBidUrlIdForLive(array $attrs, TempBid $pendingBid): array
+	{
+		$rawId = $attrs['BID_URL_ID'] ?? $pendingBid->getAttribute('BID_URL_ID');
+		if ($rawId === null || $rawId === '') {
+			return $attrs;
+		}
+
+		$urlHint = trim((string) ($pendingBid->getAttribute('source_listing_url') ?? $pendingBid->getAttribute('URL') ?? ''));
+		$resolved = LiveBidBidUrlIdResolver::resolveForLiveWrite((int) $rawId, $urlHint !== '' ? $urlHint : null);
+		if ($resolved !== null && $resolved > 0) {
+			$attrs['BID_URL_ID'] = $resolved;
 		}
 
 		return $attrs;

@@ -368,7 +368,7 @@
 						<input type="text" id="edit_title" name="TITLE" required maxlength="255">
 					</div>
 					<div class="full ref-picker" id="bidUrlPicker">
-						<label for="edit_bid_url_search">Bid URL <span class="muted" style="font-weight:400;">(BID_URL_ID)</span> <span id="editBidUrlHint" class="muted" style="font-weight:400;"></span></label>
+						<label for="edit_bid_url_search">Bid URL <span class="muted" style="font-weight:400;">(BIDURL.ID)</span> <span id="editBidUrlHint" class="muted" style="font-weight:400;"></span></label>
 						<input type="hidden" id="edit_bid_url_id" name="BID_URL_ID">
 						<div class="ref-picker-inner">
 							<input type="search" id="edit_bid_url_search" autocomplete="off" autocorrect="off" spellcheck="false"
@@ -378,7 +378,7 @@
 						</div>
 						<div class="ref-picker-meta">
 							<button type="button" class="ref-picker-clear" id="edit_bid_url_clear">Clear bid URL</button>
-							<span>Search by site name; sets <code>BID_URL_ID</code> on save.</span>
+							<span>Search ODS BIDURL by name, URL, or ID; sets <code>BID_URL_ID</code> on save.</span>
 						</div>
 					</div>
 					<div class="full ref-picker" id="entityPicker">
